@@ -1,0 +1,94 @@
+# 人情礼金记账系统 (Gift Bookkeeping App)
+
+一个基于 **Python Flask + SQLite + Bootstrap 5** 开发的简洁、高效的人情往来与礼金记账管理系统。支持多用户管理、礼金收支记录、多维度统计图表、Excel/CSV 批量导入导出、高级多字段模糊搜索，并配置了 **Android APK 自动化构建流水线**。
+
+---
+
+## 🌟 核心功能特色
+
+- 📊 **数据统计与可视化**：
+  - 汇总统计收礼/送礼总金额、总笔数及净收支。
+  - 提供月度趋势图表与办事缘由比例分布图（基于 Chart.js）。
+- 🔍 **多字段模糊搜索与智能转换**：
+  - 支持按姓名、电话、地址、办事缘由、备注、年龄等字段进行模糊匹配。
+  - 内置中文大写数字转换（`cn2num`），例如搜索“贰佰”或“200”均可自动精准匹配金额。
+- 📁 **CSV/Excel 批量导入与导出**：
+  - 支持从 CSV 文件批量导入礼金记录，智能兼容列名，自动保留自定义办事缘由（如“儿子结婚”、“开业大吉”等）。
+  - 支持一键导出筛选后的记录为标准 CSV 文件。
+- 🗑️ **数据管理与批量操作**：
+  - 支持多选记录一键批量删除。
+  - 提供红色的“清空所有数据”安全操作（带有二次二次二次确认弹窗）。
+- 🔒 **完善的用户与安全体系**：
+  - 支持注册、登录、记住账密（Browser Autocomplete + Persistent Session）。
+  - 支持忘记密码与安全问题找回、修改密码。
+  - 支持管理员（Admin）角色，可管理所有用户及全局数据。
+- 📱 **跨平台与 Android 打包**：
+  - 响应式 UI 布局，完美适配 PC、平板与手机浏览器。
+  - 内置 Buildozer 与 GitHub Actions 配置文件，一键云端打包为 Android 原生 `.apk` 安装包（内置 SQLite 初始数据）。
+
+---
+
+## 📂 项目结构
+
+```text
+gift_bookkeeping_app/
+├── app.py                      # Flask 核心路由与主程序
+├── models.py                   # SQLAlchemy 数据库模型 (User, GiftRecord)
+├── gift_bookkeeping.db         # SQLite 数据库文件 (包含初始样例数据)
+├── main.py                     # Android 平台嵌入式启动入口
+├── buildozer.spec              # Buildozer Android 打包配置文件
+├── .gitignore                  # Git 忽略文件配置
+├── .github/
+│   └── workflows/
+│       └── build_apk.yml       # GitHub Actions 自动化打包 APK 流水线
+└── templates/                  # HTML 模板目录
+    ├── base.html               # 基础模板 (Bootstrap 5 + FontAwesome)
+    ├── index.html              # 首页 (数据列表、搜索、筛选、统计图表)
+    ├── login.html              # 登录页面
+    ├── register.html           # 注册页面
+    ├── forgot_password.html    # 忘记密码 / 重置密码页面
+    ├── change_password.html    # 修改密码页面
+    └── admin_users.html        # 管理员用户管理页面
+```
+
+---
+
+## 🚀 本地运行指南
+
+### 1. 环境准备
+确保您的电脑已安装 Python 3.8+。
+
+### 2. 安装依赖包
+在终端/命令行中运行：
+```bash
+pip install flask flask-sqlalchemy flask-login cn2num
+```
+
+### 3. 启动应用
+进入 `gift_bookkeeping_app` 目录并运行 `app.py`：
+```bash
+cd gift_bookkeeping_app
+python app.py
+```
+
+### 4. 访问系统
+打开浏览器访问：`http://127.0.0.1:5000`
+- **默认管理员账号**：`admin`
+- **默认管理员密码**：`admin123`
+
+---
+
+## 📱 打包为 Android APK (通过 GitHub Actions)
+
+本仓库已配置好 GitHub Actions 自动化打包流程：
+
+1. 提交并推送代码到您的 GitHub 仓库。
+2. 在 GitHub 仓库页面进入 **Actions** 标签页。
+3. 选择 **Build and Release Android APK** 工作流，点击 **Run workflow** 运行。
+4. 编译完成后，在 **Artifacts** 或 **Releases** 区域即可下载 `.apk` 文件安装到手机使用。
+
+---
+
+## 📄 开源许可
+
+本项目基于 MIT 许可证开源。
