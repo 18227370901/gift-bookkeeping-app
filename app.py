@@ -766,4 +766,13 @@ def import_csv():
 
 if __name__ == '__main__':
     init_database()
-    app.run(host='127.0.0.1', port=5000, debug=True)
+    import webbrowser
+    import threading
+    import sys
+
+    # If running as PyInstaller standalone exe, open browser automatically
+    if getattr(sys, 'frozen', False):
+        threading.Timer(1.5, lambda: webbrowser.open('http://127.0.0.1:5000')).start()
+        app.run(host='127.0.0.1', port=5000, debug=False)
+    else:
+        app.run(host='127.0.0.1', port=5000, debug=True)
