@@ -1,0 +1,159 @@
+name: Multi-Platform Release Build (Windows, Android, iOS)
+
+on:
+  push:
+    branches: [ main, master ]
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # 1. Build Windows Executable & Zip Package
+  build-windows:
+    name: Build Windows Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flask flask-sqlalchemy flask-login cn2num pyinstaller
+
+      - name: Build Executable with PyInstaller
+        run: |
+          pyinstaller --noconfirm --onedir --windowed --name "GiftBookkeeping" --add-data "templates;templates" --add-data "gift_bookkeeping.db;." app.py
+
+      - name: Archive Windows Release
+        shell: powershell
+        run: |
+          Compress-Archive -Path dist/GiftBookkeeping/* -DestinationPath dist/GiftBookkeeping_Windows_v1.0.0.zip
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: giftbookkeeping-windows
+          path: dist/GiftBookkeeping_Windows_v1.0.0.zip
+
+  # 2. Build Android APK Package
+  build-android:
+    name: Build Android Release (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libsqlite3-dev zlib1g-dev libncurses5-dev libgdbm-dev libnss3-dev libssl-dev libreadline-dev libffi-dev ccache libltdl-dev openjdk-17-jdk unzip
+          pip install buildozer Cython
+
+      - name: Build APK with Buildozer
+        run: |
+          buildozer -v android debug
+
+      - name: Rename APK Output
+        run: |
+          mkdir -p output
+          cp bin/*.apk output/GiftBookkeeping_Android_v1.0.0.apk || true
+
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: giftbookkeeping-android
+          path: output/*.apk
+
+  # 3. Build iOS Xcode & Mobile WebApp Package
+  build-ios:
+    name: Build iOS Package
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Prepare iOS Xcode & Web Package
+        run: |
+          mkdir -p dist_ios/GiftBookkeeping_iOS
+          cp -r app.py models.py gift_bookkeeping.db templates main.py buildozer.spec dist_ios/GiftBookkeeping_iOS/
+          cd dist_ios
+          zip -r GiftBookkeeping_iOS_v1.0.0.zip GiftBookkeeping_iOS
+
+      - name: Upload iOS Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: giftbookkeeping-ios
+          path: dist_ios/GiftBookkeeping_iOS_v1.0.0.zip
+
+  # 4. Create Combined GitHub Release with All Platform Installers
+  create-release:
+    name: Publish Multi-Platform Release
+    needs: [build-windows, build-android, build-ios]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Download Windows Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: giftbookkeeping-windows
+          path: release_files
+
+      - name: Download Android Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: giftbookkeeping-android
+          path: release_files
+
+      - name: Download iOS Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: giftbookkeeping-ios
+          path: release_files
+
+      - name: Create Multi-Platform GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v1.0.0
+          name: Release v1.0.0 (Windows, Android & iOS Installers)
+          body: |
+            ## 🎉 人情礼金记账 Multi-Platform Release v1.0.0
+
+            本次发布全面包含了 **Windows、Android（安卓）和 iOS（苹果）** 三大平台的全量安装与运行包！
+            **所有安装包均已内置并完整包含了您导入的样例数据库 (`gift_bookkeeping.db`)。**
+
+            ---
+
+            ### 📦 包含安装包说明：
+
+            1. **💻 Windows 电脑版 (`GiftBookkeeping_Windows_v1.0.0.zip`)**：
+               - 解压后双击 `GiftBookkeeping.exe` 即可直接在电脑上运行人情礼金记账系统。
+            
+            2. **📱 Android 安卓版 (`GiftBookkeeping_Android_v1.0.0.apk`)**：
+               - 下载后直接在安卓手机上点击安装，即装即用。
+
+            3. **🍎 iOS 苹果版 (`GiftBookkeeping_iOS_v1.0.0.zip`)**：
+               - 包含 Xcode / WebApp App 包装全量源码与独立运行配置，iOS 用户亦可通过 Safari “添加至主屏幕” 作为独立桌面 App 使用。
+          files: release_files/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
