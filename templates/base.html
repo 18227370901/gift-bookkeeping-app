@@ -33,7 +33,10 @@
                     </li>
                     {% if current_user.is_admin %}
                     <li class="nav-item">
-                        <a class="nav-link text-warning" href="{{ url_for('admin_users') }}"><i class="fa-solid fa-user-shield me-1"></i>用户管理看板</a>
+                        <a class="nav-link text-warning" href="{{ url_for('admin_users') }}"><i class="fa-solid fa-users-gear me-1"></i>用户管理</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link text-warning" href="{{ url_for('admin_logs') }}"><i class="fa-solid fa-clipboard-list me-1"></i>操作审计日志</a>
                     </li>
                     {% endif %}
                     {% endif %}
