@@ -1,0 +1,79 @@
+{% extends 'base.html' %}
+
+{% block title %}登录 - 人情礼金记账系统{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-5 col-lg-4">
+        <div class="card shadow">
+            <div class="card-header bg-danger text-white text-center py-3">
+                <h4 class="mb-0"><i class="fa-solid fa-right-to-bracket me-2"></i>账号登录</h4>
+            </div>
+            <div class="card-body p-4">
+                <form method="POST" action="{{ url_for('login') }}" id="loginForm">
+                    <div class="mb-3">
+                        <label for="username" class="form-label">用户名</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fa-solid fa-user"></i></span>
+                            <input type="text" class="form-control" id="username" name="username" placeholder="请输入用户名" required>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="password" class="form-label">密码</label>
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="fa-solid fa-lock"></i></span>
+                            <input type="password" class="form-control" id="password" name="password" placeholder="请输入密码" required>
+                        </div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="remember" name="remember">
+                            <label class="form-check-label text-muted" for="remember">记住登录</label>
+                        </div>
+                        <a href="{{ url_for('forgot_password') }}" class="text-decoration-none small text-danger">忘记密码？</a>
+                    </div>
+                    <button type="submit" class="btn btn-danger w-100 py-2 fw-bold"><i class="fa-solid fa-paper-plane me-1"></i>登录系统</button>
+                </form>
+                
+                <div class="alert alert-info mt-4 mb-0 small">
+                    <i class="fa-solid fa-circle-info me-1"></i> 预置管理员账号：<br>
+                    <strong>用户名：</strong> <code>admin</code> &nbsp;&nbsp; <strong>密码：</strong> <code>admin123</code>
+                </div>
+            </div>
+            <div class="card-footer text-center bg-light py-3">
+                <span class="text-muted">还没有账号？</span>
+                <a href="{{ url_for('register') }}" class="fw-bold text-danger text-decoration-none">立即注册</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    var usernameInput = document.getElementById("username");
+    var passwordInput = document.getElementById("password");
+    var rememberCheckbox = document.getElementById("remember");
+    var loginForm = document.getElementById("loginForm");
+
+    var savedUsername = localStorage.getItem("remember_username");
+    var savedPassword = localStorage.getItem("remember_password");
+    if (savedUsername) {
+        usernameInput.value = savedUsername;
+        if (savedPassword) {
+            passwordInput.value = savedPassword;
+        }
+        rememberCheckbox.checked = true;
+    }
+
+    loginForm.addEventListener("submit", function() {
+        if (rememberCheckbox.checked) {
+            localStorage.setItem("remember_username", usernameInput.value);
+            localStorage.setItem("remember_password", passwordInput.value);
+        } else {
+            localStorage.removeItem("remember_username");
+            localStorage.removeItem("remember_password");
+        }
+    });
+});
+</script>
+{% endblock %}
