@@ -10,7 +10,7 @@ import secrets
 from datetime import datetime, timedelta
 import webbrowser
 from threading import Timer
-from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session, current_app
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -82,6 +82,8 @@ class RegistrationToken(db.Model):
     token = db.Column(db.String(64), unique=True, nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
     expires_at = db.Column(db.DateTime, nullable=False)
+    max_uses = db.Column(db.Integer, default=1)
+    use_count = db.Column(db.Integer, default=0)
     used = db.Column(db.Boolean, default=False)
     used_at = db.Column(db.DateTime, nullable=True)
     created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
@@ -99,7 +101,25 @@ class OperationLog(db.Model):
     user = db.relationship('User', backref=db.backref('operation_logs', lazy=True))
 
 
+def purge_expired_logs(days=90):
+    """自动批量清理超过保存时效（默认3个月/90天）的操作日志"""
+    try:
+        if not current_app:
+            return
+        cutoff = datetime.now() - timedelta(days=days)
+        deleted_count = OperationLog.query.filter(OperationLog.created_at < cutoff).delete(synchronize_session=False)
+        if deleted_count > 0:
+            db.session.commit()
+    except Exception as e:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        print(f"[Purge Logs Error] 自动清理失效日志异常: {e}")
+
 def log_action(action, detail="", user=None):
+    # 每次写入日志时顺便触发清理超过3个月的超期日志
+    purge_expired_logs(days=90)
     try:
         if user:
             u_id = user.id
@@ -243,6 +263,14 @@ def num2cn_filter(num):
 def init_database():
     with app.app_context():
         db.create_all()
+        # 兼容性迁移：确保 registration_tokens 数据表添加 max_uses 和 use_count 字段
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE registration_tokens ADD COLUMN max_uses INTEGER DEFAULT 1"))
+                conn.execute(db.text("ALTER TABLE registration_tokens ADD COLUMN use_count INTEGER DEFAULT 0"))
+                conn.commit()
+        except Exception:
+            pass
         admin = User.query.filter_by(is_admin=True).first()
         if not admin:
             initial_user = os.environ.get('ADMIN_USER', 'admin')
@@ -336,6 +364,17 @@ def index():
         if dr not in reasons_list:
             reasons_list.append(dr)
 
+    # 审计日志：记录查询与浏览操作
+    if query_str or reason_filter:
+        details = []
+        if query_str:
+            details.append(f"检索词: [{query_str}]")
+        if reason_filter:
+            details.append(f"筛选事由: [{reason_filter}]")
+        log_action('查询记录', "，".join(details))
+    else:
+        log_action('查询记录', f'浏览明细列表（第 {page} 页）')
+
     return render_template(
         'index.html',
         records=records,
@@ -390,8 +429,8 @@ def register():
         flash('无效的注册邀请链接，请联系管理员获取正确的注册链接！', 'danger')
         return render_template('register.html', invalid_token=True)
 
-    if reg_token.used:
-        flash('该注册邀请链接已被使用过，无法再次注册，请联系管理员重新生成！', 'danger')
+    if reg_token.used or (reg_token.max_uses and reg_token.use_count >= reg_token.max_uses):
+        flash('该注册邀请链接使用次数已达上限或已被使用过，无法再次注册，请联系管理员重新生成！', 'danger')
         return render_template('register.html', invalid_token=True)
 
     if reg_token.expires_at < datetime.now():
@@ -432,9 +471,11 @@ def register():
         user.set_password(password)
         user.set_security_answer(security_answer)
 
-        # 标记 token 为已使用
-        reg_token.used = True
-        reg_token.used_at = datetime.now()
+        # 增加 token 使用次数，达到上限标记为已使用
+        reg_token.use_count = (reg_token.use_count or 0) + 1
+        if reg_token.max_uses and reg_token.use_count >= reg_token.max_uses:
+            reg_token.used = True
+            reg_token.used_at = datetime.now()
 
         db.session.add(user)
         db.session.commit()
@@ -688,8 +729,71 @@ def admin_logs():
         return redirect(url_for('index'))
 
     page = request.args.get('page', 1, type=int)
-    logs = OperationLog.query.order_by(OperationLog.created_at.desc()).paginate(page=page, per_page=20)
-    return render_template('admin_logs.html', logs=logs)
+    per_page = request.args.get('per_page', 30, type=int)
+    if per_page not in [10, 20, 30, 50, 100]:
+        per_page = 30
+
+    search_q = request.args.get('q', '').strip()
+    sort_by = request.args.get('sort_by', 'created_at').strip()
+    sort_order = request.args.get('sort_order', 'desc').strip()
+
+    query = OperationLog.query
+
+    if search_q:
+        search_filter = (
+            OperationLog.username.ilike(f'%{search_q}%') |
+            OperationLog.action.ilike(f'%{search_q}%') |
+            OperationLog.detail.ilike(f'%{search_q}%') |
+            OperationLog.ip_address.ilike(f'%{search_q}%')
+        )
+        query = query.filter(search_filter)
+
+    sort_column_map = {
+        'id': OperationLog.id,
+        'username': OperationLog.username,
+        'action': OperationLog.action,
+        'created_at': OperationLog.created_at
+    }
+    col = sort_column_map.get(sort_by, OperationLog.created_at)
+
+    if sort_order == 'asc':
+        query = query.order_by(col.asc())
+    else:
+        query = query.order_by(col.desc())
+
+    logs = query.paginate(page=page, per_page=per_page)
+    return render_template(
+        'admin_logs.html',
+        logs=logs,
+        q=search_q,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        per_page=per_page
+    )
+
+@app.route('/admin/logs/batch_delete', methods=['POST'])
+@login_required
+def admin_batch_delete_logs():
+    if not current_user.is_admin:
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
+
+    log_ids = request.form.getlist('log_ids')
+    if not log_ids:
+        flash('请先勾选需要删除的日志记录！', 'warning')
+        return redirect(url_for('admin_logs'))
+
+    try:
+        log_ids_int = [int(i) for i in log_ids]
+        deleted_count = OperationLog.query.filter(OperationLog.id.in_(log_ids_int)).delete(synchronize_session=False)
+        db.session.commit()
+        log_action('批量删除日志', f'管理员勾选删除了 {deleted_count} 条操作日志')
+        flash(f'成功批量删除 {deleted_count} 条审计日志！', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'批量删除操作失败: {str(e)}', 'danger')
+
+    return redirect(url_for('admin_logs'))
 
 @app.route('/admin/generate_invite_link', methods=['POST'])
 @login_required
@@ -703,19 +807,94 @@ def generate_invite_link():
     except (ValueError, TypeError):
         expire_hours = 24
 
+    try:
+        max_uses = int(request.form.get('max_uses', 1))
+    except (ValueError, TypeError):
+        max_uses = 1
+
     token_str = secrets.token_urlsafe(32)
     expires_at = datetime.now() + timedelta(hours=expire_hours)
 
     reg_token = RegistrationToken(
         token=token_str,
         expires_at=expires_at,
+        max_uses=max_uses,
+        use_count=0,
         created_by_user_id=current_user.id
     )
     db.session.add(reg_token)
     db.session.commit()
 
-    log_action('生成注册邀请', f'生成有效时间为 {expire_hours} 小时的注册链接')
-    flash('注册邀请链接已成功生成！', 'success')
+    log_action('生成注册邀请', f'生成有效时间为 {expire_hours} 小时、可用次数为 {max_uses} 次的注册链接')
+    flash(f'注册邀请链接已成功生成（可使用 {max_uses} 次）！', 'success')
+    return redirect(url_for('admin_users'))
+
+@app.route('/admin/invite_link/delete/<int:token_id>', methods=['POST'])
+@login_required
+def admin_delete_invite_link(token_id):
+    if not current_user.is_admin:
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
+
+    reg_token = RegistrationToken.query.get_or_404(token_id)
+    token_val = reg_token.token[:8] + '...'
+    db.session.delete(reg_token)
+    db.session.commit()
+
+    log_action('删除注册邀请链接', f'管理员删除了邀请链接前缀为 [{token_val}] 的链接')
+    flash('邀请链接已成功删除！', 'success')
+    return redirect(url_for('admin_users'))
+
+@app.route('/admin/log/delete/<int:log_id>', methods=['POST'])
+@login_required
+def admin_delete_log(log_id):
+    if not current_user.is_admin:
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
+
+    log_entry = OperationLog.query.get_or_404(log_id)
+    action_info = f"{log_entry.username} - {log_entry.action}"
+    db.session.delete(log_entry)
+    db.session.commit()
+
+    log_action('删除日志', f'管理员删除了操作日志ID #{log_id} ({action_info})')
+    flash('日志记录已成功删除！', 'success')
+    return redirect(url_for('admin_logs'))
+
+@app.route('/admin/logs/clear', methods=['POST'])
+@login_required
+def admin_clear_logs():
+    if not current_user.is_admin:
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
+
+    deleted_count = OperationLog.query.delete()
+    db.session.commit()
+
+    log_action('清空日志', f'管理员清空了所有操作日志（共删除 {deleted_count} 条）')
+    flash(f'已成功清空所有审计日志（共 {deleted_count} 条）！', 'success')
+    return redirect(url_for('admin_logs'))
+
+@app.route('/admin/user/reset_security/<int:user_id>', methods=['POST'])
+@login_required
+def admin_reset_user_security(user_id):
+    if not current_user.is_admin:
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
+
+    user = User.query.get_or_404(user_id)
+    security_question = request.form.get('security_question', '').strip()
+    security_answer = request.form.get('security_answer', '').strip()
+
+    if security_question and security_answer:
+        user.security_question = security_question
+        user.set_security_answer(security_answer)
+        db.session.commit()
+        log_action('重置密保问题', f'管理员重置了用户 [{user.username}] 的密保问题与答案')
+        flash(f'用户 [{user.username}] 的密保问题与答案已重置成功！', 'success')
+    else:
+        flash('密保问题和密保答案均不能为空！', 'warning')
+
     return redirect(url_for('admin_users'))
 
 @app.route('/admin/user/reset_pass/<int:user_id>', methods=['POST'])
