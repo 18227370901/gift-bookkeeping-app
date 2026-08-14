@@ -42,6 +42,8 @@ gift_bookkeeping_app/
 ├── gift_bookkeeping.db         # SQLite 数据库文件 (包含初始样例数据)
 ├── main.py                     # Android 平台嵌入式启动入口
 ├── buildozer.spec              # Buildozer Android 打包配置文件
+├── nginx_ssl.conf              # Nginx 自定义 HTTPS 端口反向代理配置文件
+├── generate_ssl_certs.py       # 自签名 SSL 证书快速生成脚本
 ├── .gitignore                  # Git 忽略文件配置
 ├── .github/
 │   └── workflows/
