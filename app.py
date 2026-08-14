@@ -1,9 +1,12 @@
 import os
 import sys
 import shutil
+import random
+import string
+import time
 import webbrowser
 from threading import Timer
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, session
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -357,30 +360,79 @@ def login():
 
     return render_template('login.html')
 
+# Rate limiting storage (in-memory)
+register_attempts = {}
+
+def get_captcha():
+    num1 = random.randint(1, 10)
+    num2 = random.randint(1, 10)
+    op = random.choice(['+', '*'])
+    if op == '+':
+        ans = num1 + num2
+        text = f"{num1} + {num2} = ?"
+    else:
+        ans = num1 * num2
+        text = f"{num1} × {num2} = ?"
+    session['captcha_ans'] = str(ans)
+    return text
+
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated:
         return redirect(url_for('index'))
 
+    ip_addr = request.remote_addr or request.headers.get('X-Forwarded-For', '')
+
     if request.method == 'POST':
+        # 1. IP / Rate limiting check (e.g. max 5 registrations per hour per IP)
+        now = time.time()
+        ip_records = register_attempts.get(ip_addr, [])
+        # keep records from last 1 hour
+        ip_records = [t for t in ip_records if now - t < 3600]
+        register_attempts[ip_addr] = ip_records
+        if len(ip_records) >= 5:
+            log_action('注册被拦截', f'IP [{ip_addr}] 尝试频次超限（1小时内已尝试5次以上）')
+            flash('您注册尝试过于频繁，请1小时后再试。', 'danger')
+            return render_template('register.html', captcha_text=get_captcha())
+
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '').strip()
         confirm_password = request.form.get('confirm_password', '').strip()
         security_question = request.form.get('security_question', '').strip()
         security_answer = request.form.get('security_answer', '').strip()
+        user_captcha = request.form.get('captcha', '').strip()
+        session_captcha = session.pop('captcha_ans', None)
+
+        # Record this attempt timestamp
+        register_attempts[ip_addr].append(now)
+
+        # 2. Captcha Validation
+        if not session_captcha or user_captcha != session_captcha:
+            flash('验证码错误或已过期，请重新计算！', 'danger')
+            return render_template('register.html', captcha_text=get_captcha())
 
         if not username or not password or not security_question or not security_answer:
             flash('所有必填字段均不能为空！', 'danger')
-            return render_template('register.html')
+            return render_template('register.html', captcha_text=get_captcha())
+
+        # 3. Username Format Validation (3-20 chars, letters, numbers, underscores)
+        if not re.match(r'^[a-zA-Z0-9_\u4e00-\u9fa5]{3,20}$', username):
+            flash('用户名格式不符合要求！长度须为 3-20 位，仅允许汉字、字母、数字及下划线。', 'danger')
+            return render_template('register.html', captcha_text=get_captcha())
+
+        # 4. Password Strength Validation (min 6 chars, containing both letters and numbers)
+        if len(password) < 6 or not re.search(r'[a-zA-Z]', password) or not re.search(r'\d', password):
+            flash('密码强度不足！密码长度至少为 6 位，且必须包含字母和数字的组合。', 'danger')
+            return render_template('register.html', captcha_text=get_captcha())
 
         if password != confirm_password:
             flash('两次输入的密码不一致！', 'danger')
-            return render_template('register.html')
+            return render_template('register.html', captcha_text=get_captcha())
 
         existing_user = User.query.filter_by(username=username).first()
         if existing_user:
             flash('该用户名已被注册，请尝试其他名称。', 'warning')
-            return render_template('register.html')
+            return render_template('register.html', captcha_text=get_captcha())
 
         user = User(username=username, security_question=security_question)
         user.set_password(password)
@@ -392,7 +444,8 @@ def register():
         flash('注册成功，请登录！', 'success')
         return redirect(url_for('login'))
 
-    return render_template('register.html')
+    captcha_text = get_captcha()
+    return render_template('register.html', captcha_text=captcha_text)
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
