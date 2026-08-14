@@ -1,9 +1,13 @@
 import os
+import re
 import sys
 import shutil
 import random
 import string
 import time
+import uuid
+import secrets
+from datetime import datetime, timedelta
 import webbrowser
 from threading import Timer
 from flask import Flask, render_template, request, redirect, url_for, flash, session
@@ -71,6 +75,16 @@ class User(UserMixin, db.Model):
     def check_security_answer(self, answer):
         clean_answer = answer.strip().lower()
         return check_password_hash(self.security_answer_hash, clean_answer)
+
+class RegistrationToken(db.Model):
+    __tablename__ = 'registration_tokens'
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    used = db.Column(db.Boolean, default=False)
+    used_at = db.Column(db.DateTime, nullable=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
 
 class OperationLog(db.Model):
     __tablename__ = 'operation_logs'
@@ -360,92 +374,76 @@ def login():
 
     return render_template('login.html')
 
-# Rate limiting storage (in-memory)
-register_attempts = {}
-
-def get_captcha():
-    num1 = random.randint(1, 10)
-    num2 = random.randint(1, 10)
-    op = random.choice(['+', '*'])
-    if op == '+':
-        ans = num1 + num2
-        text = f"{num1} + {num2} = ?"
-    else:
-        ans = num1 * num2
-        text = f"{num1} × {num2} = ?"
-    session['captcha_ans'] = str(ans)
-    return text
-
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if current_user.is_authenticated:
         return redirect(url_for('index'))
 
-    ip_addr = request.remote_addr or request.headers.get('X-Forwarded-For', '')
+    token_str = request.args.get('token') or request.form.get('token', '').strip()
+    if not token_str:
+        flash('系统已开启注册邀请制，必须通过管理员生成的有效邀请链接才能进行注册！', 'warning')
+        return render_template('register.html', invalid_token=True)
+
+    reg_token = RegistrationToken.query.filter_by(token=token_str).first()
+
+    if not reg_token:
+        flash('无效的注册邀请链接，请联系管理员获取正确的注册链接！', 'danger')
+        return render_template('register.html', invalid_token=True)
+
+    if reg_token.used:
+        flash('该注册邀请链接已被使用过，无法再次注册，请联系管理员重新生成！', 'danger')
+        return render_template('register.html', invalid_token=True)
+
+    if reg_token.expires_at < datetime.now():
+        flash('该注册邀请链接已超时失效，请联系管理员生成新的注册链接！', 'danger')
+        return render_template('register.html', invalid_token=True)
 
     if request.method == 'POST':
-        # 1. IP / Rate limiting check (e.g. max 5 registrations per hour per IP)
-        now = time.time()
-        ip_records = register_attempts.get(ip_addr, [])
-        # keep records from last 1 hour
-        ip_records = [t for t in ip_records if now - t < 3600]
-        register_attempts[ip_addr] = ip_records
-        if len(ip_records) >= 5:
-            log_action('注册被拦截', f'IP [{ip_addr}] 尝试频次超限（1小时内已尝试5次以上）')
-            flash('您注册尝试过于频繁，请1小时后再试。', 'danger')
-            return render_template('register.html', captcha_text=get_captcha())
-
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '').strip()
         confirm_password = request.form.get('confirm_password', '').strip()
         security_question = request.form.get('security_question', '').strip()
         security_answer = request.form.get('security_answer', '').strip()
-        user_captcha = request.form.get('captcha', '').strip()
-        session_captcha = session.pop('captcha_ans', None)
-
-        # Record this attempt timestamp
-        register_attempts[ip_addr].append(now)
-
-        # 2. Captcha Validation
-        if not session_captcha or user_captcha != session_captcha:
-            flash('验证码错误或已过期，请重新计算！', 'danger')
-            return render_template('register.html', captcha_text=get_captcha())
 
         if not username or not password or not security_question or not security_answer:
             flash('所有必填字段均不能为空！', 'danger')
-            return render_template('register.html', captcha_text=get_captcha())
+            return render_template('register.html', token=token_str, invalid_token=False)
 
-        # 3. Username Format Validation (3-20 chars, letters, numbers, underscores)
+        # 1. Username Format Validation (3-20 chars)
         if not re.match(r'^[a-zA-Z0-9_\u4e00-\u9fa5]{3,20}$', username):
             flash('用户名格式不符合要求！长度须为 3-20 位，仅允许汉字、字母、数字及下划线。', 'danger')
-            return render_template('register.html', captcha_text=get_captcha())
+            return render_template('register.html', token=token_str, invalid_token=False)
 
-        # 4. Password Strength Validation (min 6 chars, containing both letters and numbers)
+        # 2. Password Strength Validation (min 6 chars, containing both letters and numbers)
         if len(password) < 6 or not re.search(r'[a-zA-Z]', password) or not re.search(r'\d', password):
             flash('密码强度不足！密码长度至少为 6 位，且必须包含字母和数字的组合。', 'danger')
-            return render_template('register.html', captcha_text=get_captcha())
+            return render_template('register.html', token=token_str, invalid_token=False)
 
         if password != confirm_password:
             flash('两次输入的密码不一致！', 'danger')
-            return render_template('register.html', captcha_text=get_captcha())
+            return render_template('register.html', token=token_str, invalid_token=False)
 
         existing_user = User.query.filter_by(username=username).first()
         if existing_user:
             flash('该用户名已被注册，请尝试其他名称。', 'warning')
-            return render_template('register.html', captcha_text=get_captcha())
+            return render_template('register.html', token=token_str, invalid_token=False)
 
         user = User(username=username, security_question=security_question)
         user.set_password(password)
         user.set_security_answer(security_answer)
+
+        # 标记 token 为已使用
+        reg_token.used = True
+        reg_token.used_at = datetime.now()
+
         db.session.add(user)
         db.session.commit()
 
-        log_action('用户注册', f'新用户 [{username}] 成功注册账号', user=user)
-        flash('注册成功，请登录！', 'success')
+        log_action('用户注册', f'新用户 [{username}] 识别邀请码成功注册账号', user=user)
+        flash('注册成功，请使用新账号登录！', 'success')
         return redirect(url_for('login'))
 
-    captcha_text = get_captcha()
-    return render_template('register.html', captcha_text=captcha_text)
+    return render_template('register.html', token=token_str, invalid_token=False)
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
@@ -675,12 +673,13 @@ def change_password():
 @login_required
 def admin_users():
     if not current_user.is_admin:
-        flash('权限不足！', 'danger')
+        flash('只有超级管理员才能访问用户管理页面！', 'danger')
         return redirect(url_for('index'))
 
     users = User.query.order_by(User.id.asc()).all()
-    return render_template('admin_users.html', users=users)
-
+    # 获取所有注册邀请链接（最近创建的排前面）
+    tokens = RegistrationToken.query.order_by(RegistrationToken.created_at.desc()).all()
+    return render_template('admin_users.html', users=users, tokens=tokens, now=datetime.now())
 @app.route('/admin/logs')
 @login_required
 def admin_logs():
@@ -691,14 +690,33 @@ def admin_logs():
     page = request.args.get('page', 1, type=int)
     logs = OperationLog.query.order_by(OperationLog.created_at.desc()).paginate(page=page, per_page=20)
     return render_template('admin_logs.html', logs=logs)
+
+@app.route('/admin/generate_invite_link', methods=['POST'])
 @login_required
-def admin_users():
+def generate_invite_link():
     if not current_user.is_admin:
-        flash('只有超级管理员才能访问用户管理页面！', 'danger')
+        flash('权限不足！', 'danger')
         return redirect(url_for('index'))
 
-    users = User.query.all()
-    return render_template('admin_users.html', users=users)
+    try:
+        expire_hours = int(request.form.get('expire_hours', 24))
+    except (ValueError, TypeError):
+        expire_hours = 24
+
+    token_str = secrets.token_urlsafe(32)
+    expires_at = datetime.now() + timedelta(hours=expire_hours)
+
+    reg_token = RegistrationToken(
+        token=token_str,
+        expires_at=expires_at,
+        created_by_user_id=current_user.id
+    )
+    db.session.add(reg_token)
+    db.session.commit()
+
+    log_action('生成注册邀请', f'生成有效时间为 {expire_hours} 小时的注册链接')
+    flash('注册邀请链接已成功生成！', 'success')
+    return redirect(url_for('admin_users'))
 
 @app.route('/admin/user/reset_pass/<int:user_id>', methods=['POST'])
 @login_required

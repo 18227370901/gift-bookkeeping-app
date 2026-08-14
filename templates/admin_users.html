@@ -14,6 +14,75 @@
     <i class="bi bi-arrow-left me-1"></i>返回主页
   </a>
 </div>
+<!-- 生成注册邀请链接卡片 -->
+<div class="card card-custom border-0 mb-4 shadow-sm">
+  <div class="card-header bg-white py-3 border-0 d-flex justify-content-between align-items-center">
+    <h5 class="mb-0 fw-bold text-dark"><i class="bi bi-link-45deg me-2 text-danger"></i>生成注册邀请链接</h5>
+  </div>
+  <div class="card-body">
+    <form action="{{ url_for('generate_invite_link') }}" method="POST" class="row g-3 align-items-center">
+      <div class="col-auto">
+        <label for="expire_hours" class="col-form-label fw-bold text-muted">链接有效时长：</label>
+      </div>
+      <div class="col-auto">
+        <select name="expire_hours" id="expire_hours" class="form-select">
+          <option value="1">1 小时</option>
+          <option value="6">6 小时</option>
+          <option value="24" selected>24 小时 (1天)</option>
+          <option value="72">72 小时 (3天)</option>
+          <option value="168">168 小时 (7天)</option>
+        </select>
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-danger"><i class="bi bi-plus-circle me-1"></i>生成新链接</button>
+      </div>
+    </form>
+
+    {% if tokens %}
+    <div class="table-responsive mt-3">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>邀请注册链接</th>
+            <th>创建时间</th>
+            <th>到期时间</th>
+            <th>状态</th>
+            <th class="text-end">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for t in tokens %}
+          <tr>
+            <td>
+              <div class="input-group input-group-sm" style="max-width: 450px;">
+                <input type="text" class="form-control" id="inviteLink{{ t.id }}" value="{{ request.host_url.rstrip('/') }}{{ url_for('register') }}?token={{ t.token }}" readonly>
+                <button class="btn btn-outline-secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('inviteLink{{ t.id }}').value); alert('链接已复制到剪贴板！');">
+                  <i class="bi bi-clipboard me-1"></i>复制
+                </button>
+              </div>
+            </td>
+            <td><small class="text-muted">{{ t.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+            <td><small class="text-muted">{{ t.expires_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+            <td>
+              {% if t.used %}
+                <span class="badge bg-secondary">已使用</span>
+              {% elif t.expires_at < now %}
+                <span class="badge bg-danger">已失效</span>
+              {% else %}
+                <span class="badge bg-success">有效</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              <small class="text-muted">{{ '使用时间: ' ~ t.used_at.strftime('%m-%d %H:%M') if t.used else '' }}</small>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
 
 <div class="card card-custom border-0 mb-4">
   <div class="card-body p-0">
