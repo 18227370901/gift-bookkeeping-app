@@ -14,6 +14,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Determine bundle directory for PyInstaller / PyBuild
 if getattr(sys, 'frozen', False):
@@ -26,6 +27,12 @@ app = Flask(__name__, template_folder=template_folder)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'gift-bookkeeping-secret-key-2026-prod-secure'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# 如果通过 HTTPS 部署或设置环境变量 SESSION_COOKIE_SECURE=true，启用 Cookie 仅在 HTTPS 下传输
+if os.environ.get('SESSION_COOKIE_SECURE', 'false').lower() in ('true', '1'):
+    app.config['SESSION_COOKIE_SECURE'] = True
+
+# 支持 Nginx 自定义 HTTPS 端口反向代理 (感知 X-Forwarded-Proto / Port / Host)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 
 # Handle Database Location (If frozen, write to user-writable directory or local directory)
 if getattr(sys, 'frozen', False):
