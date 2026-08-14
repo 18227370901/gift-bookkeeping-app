@@ -13,15 +13,23 @@
                 <form method="POST" action="{{ url_for('register') }}">
                     <div class="mb-3">
                         <label for="username" class="form-label">用户名 <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" id="username" name="username" placeholder="请设置用户名" required>
+                        <input type="text" class="form-control" id="username" name="username" placeholder="3-20位字符（汉字/字母/数字/下划线）" required>
                     </div>
                     <div class="mb-3">
                         <label for="password" class="form-label">密码 <span class="text-danger">*</span></label>
-                        <input type="password" class="form-control" id="password" name="password" placeholder="请设置密码" required>
+                        <input type="password" class="form-control" id="password" name="password" placeholder="至少6位，须包含字母和数字" required>
                     </div>
                     <div class="mb-3">
                         <label for="confirm_password" class="form-label">确认密码 <span class="text-danger">*</span></label>
                         <input type="password" class="form-control" id="confirm_password" name="confirm_password" placeholder="请再次输入密码" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="captcha" class="form-label">人机验证码 <span class="text-danger">*</span></label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light fw-bold text-danger">{{ captcha_text }}</span>
+                            <input type="text" class="form-control" id="captcha" name="captcha" placeholder="计算结果" required>
+                        </div>
                     </div>
                     
                     <hr class="my-4">
