@@ -766,13 +766,37 @@ def import_csv():
 
 if __name__ == '__main__':
     init_database()
+    import argparse
+    import os
+
+    parser = argparse.ArgumentParser(description='礼金记账系统 Linux/云服务器启动脚本')
+    parser.add_argument('--host', type=str, default=os.environ.get('HOST', '0.0.0.0'), help='监听 IP 地址 (默认: 0.0.0.0)')
+    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 5000)), help='服务端口 (默认: 5000)')
+    parser.add_argument('--admin-user', type=str, default=os.environ.get('ADMIN_USER', None), help='自定义初始管理员账号')
+    parser.add_argument('--admin-pass', type=str, default=os.environ.get('ADMIN_PASS', None), help='自定义初始管理员密码')
+    args = parser.parse_args()
+
+    # 如果命令行或环境变量指定了初始管理员账号密码，重新/初始化管理员账户
+    if args.admin_user and args.admin_pass:
+        with app.app_context():
+            admin = User.query.filter_by(username=args.admin_user).first()
+            if not admin:
+                admin = User(username=args.admin_user, is_admin=True)
+                admin.set_password(args.admin_pass)
+                db.session.add(admin)
+            else:
+                admin.set_password(args.admin_pass)
+                admin.is_admin = True
+            db.session.commit()
+            print(f"[Init] 管理员账号 [{args.admin_user}] 配置/更新成功！")
+
     import webbrowser
     import threading
     import sys
 
     # If running as PyInstaller standalone exe, open browser automatically
     if getattr(sys, 'frozen', False):
-        threading.Timer(1.5, lambda: webbrowser.open('http://127.0.0.1:5000')).start()
-        app.run(host='127.0.0.1', port=5000, debug=False)
+        threading.Timer(1.5, lambda: webbrowser.open(f'http://127.0.0.1:{args.port}')).start()
+        app.run(host=args.host, port=args.port, debug=False)
     else:
-        app.run(host='127.0.0.1', port=5000, debug=True)
+        app.run(host=args.host, port=args.port, debug=False)
