@@ -16,7 +16,9 @@ else:
 
 template_folder = os.path.join(BUNDLE_DIR, 'templates')
 app = Flask(__name__, template_folder=template_folder)
-app.config['SECRET_KEY'] = 'gift-bookkeeping-secret-key-2026'
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'gift-bookkeeping-secret-key-2026-prod-secure'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 # Handle Database Location (If frozen, write to user-writable directory or local directory)
 if getattr(sys, 'frozen', False):
@@ -182,18 +184,20 @@ def num2cn_filter(num):
 def init_database():
     with app.app_context():
         db.create_all()
-        admin = User.query.filter_by(username='admin').first()
+        admin = User.query.filter_by(is_admin=True).first()
         if not admin:
+            initial_user = os.environ.get('ADMIN_USER', 'admin')
+            initial_pass = os.environ.get('ADMIN_PASS', 'admin123')
             admin = User(
-                username='admin',
-                security_question='我的第一只宠物叫什么名字？',
+                username=initial_user,
+                security_question='管理员安全密保问题',
                 is_admin=True
             )
-            admin.set_password('admin123')
-            admin.set_security_answer('小白')
+            admin.set_password(initial_pass)
+            admin.set_security_answer('admin')
             db.session.add(admin)
             db.session.commit()
-            print("预置管理员账号创建成功：账号 admin，密码已经预置")
+            print(f"[Init] 已创建初始管理员账号: {initial_user}")
 
 
 @app.route('/')
