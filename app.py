@@ -69,6 +69,48 @@ class User(UserMixin, db.Model):
         clean_answer = answer.strip().lower()
         return check_password_hash(self.security_answer_hash, clean_answer)
 
+class OperationLog(db.Model):
+    __tablename__ = 'operation_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    username = db.Column(db.String(50), nullable=False)
+    action = db.Column(db.String(50), nullable=False)
+    detail = db.Column(db.String(500), nullable=True)
+    ip_address = db.Column(db.String(50), nullable=True)
+    created_at = db.Column(db.DateTime, server_default=db.func.now())
+
+    user = db.relationship('User', backref=db.backref('operation_logs', lazy=True))
+
+
+def log_action(action, detail="", user=None):
+    try:
+        if user:
+            u_id = user.id
+            u_name = user.username
+        elif current_user and current_user.is_authenticated:
+            u_id = current_user.id
+            u_name = current_user.username
+        else:
+            u_id = None
+            u_name = "未登录/系统"
+        
+        ip_addr = request.remote_addr if request else ""
+        if request and request.headers.get('X-Forwarded-For'):
+            ip_addr = request.headers.get('X-Forwarded-For').split(',')[0].strip()
+
+        log_entry = OperationLog(
+            user_id=u_id,
+            username=u_name,
+            action=action,
+            detail=detail,
+            ip_address=ip_addr
+        )
+        db.session.add(log_entry)
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        print(f"[Log Error] 写入日志失败: {e}")
+
 class GiftRecord(db.Model):
     __tablename__ = 'gift_records'
     id = db.Column(db.Integer, primary_key=True)
@@ -306,9 +348,11 @@ def login():
         user = User.query.filter_by(username=username).first()
         if user and user.check_password(password):
             login_user(user, remember=remember)
+            log_action('用户登录', f'用户成功登录系统', user=user)
             flash(f'欢迎回来，{user.username}！', 'success')
             return redirect(url_for('index'))
         else:
+            log_action('登录失败', f'尝试登录用户名 [{username}] 失败（密码错误或账号不存在）')
             flash('用户名或密码错误，请重试。', 'danger')
 
     return render_template('login.html')
@@ -344,6 +388,7 @@ def register():
         db.session.add(user)
         db.session.commit()
 
+        log_action('用户注册', f'新用户 [{username}] 成功注册账号', user=user)
         flash('注册成功，请登录！', 'success')
         return redirect(url_for('login'))
 
@@ -385,6 +430,7 @@ def forgot_password():
             user.set_password(new_password)
             db.session.commit()
 
+            log_action('重置密码', f'用户成功重置个人密码', user=user)
             flash('密码重置成功！请使用新密码重新登录。', 'success')
             return redirect(url_for('login'))
 
@@ -393,6 +439,7 @@ def forgot_password():
 @app.route('/logout')
 @login_required
 def logout():
+    log_action('退出登录', f'用户退出系统登录')
     logout_user()
     flash('您已成功退出登录。', 'info')
     return redirect(url_for('login'))
@@ -439,6 +486,7 @@ def add_record():
     db.session.add(record)
     db.session.commit()
 
+    log_action('新增记录', f'新增记录: [{name}]，金额: {amount}元，事由: {event_reason}')
     flash(f'成功保存 [{name}] 的礼金记录！', 'success')
     return redirect(url_for('index'))
 
@@ -484,6 +532,7 @@ def edit_record(record_id):
     record.notes = notes
 
     db.session.commit()
+    log_action('修改记录', f'修改记录 ID #{record_id}: 姓名 [{name}]，金额: {amount}元，事由: {event_reason}')
     flash(f'记录 [{name}] 修改成功！', 'success')
     return redirect(url_for('index'))
 
@@ -499,8 +548,10 @@ def delete_record(record_id):
         flash('您没有权限删除此记录！', 'danger')
         return redirect(url_for('index'))
 
+    record_name = record.name
     db.session.delete(record)
     db.session.commit()
+    log_action('删除记录', f'删除记录 ID #{record_id}: 姓名 [{record_name}]')
     flash('记录删除成功！', 'success')
     return redirect(url_for('index'))
 
@@ -525,6 +576,7 @@ def batch_delete_records():
                 deleted_count += 1
 
     db.session.commit()
+    log_action('批量删除记录', f'成功批量删除了 {deleted_count} 条礼金记录')
     flash(f'成功批量删除 {deleted_count} 条记录！', 'success')
     return redirect(url_for('index'))
 
@@ -537,6 +589,7 @@ def delete_all_records():
         deleted_count = db.session.query(GiftRecord).filter_by(user_id=current_user.id).delete()
     
     db.session.commit()
+    log_action('清空记录', f'成功清空了 {deleted_count} 条礼金记录')
     flash(f'一次性成功清空 {deleted_count} 条所有礼金记录！', 'success')
     return redirect(url_for('index'))
 
@@ -559,12 +612,32 @@ def change_password():
         current_user.set_password(new_password)
         db.session.commit()
 
+        log_action('修改密码', f'用户成功修改个人密码')
         flash('密码修改成功，请使用新密码重新登录！', 'success')
         return redirect(url_for('login'))
 
     return render_template('change_password.html')
 
 @app.route('/admin/users')
+@login_required
+def admin_users():
+    if not current_user.is_admin:
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
+
+    users = User.query.order_by(User.id.asc()).all()
+    return render_template('admin_users.html', users=users)
+
+@app.route('/admin/logs')
+@login_required
+def admin_logs():
+    if not current_user.is_admin:
+        flash('只有超级管理员才能查看审计日志！', 'danger')
+        return redirect(url_for('index'))
+
+    page = request.args.get('page', 1, type=int)
+    logs = OperationLog.query.order_by(OperationLog.created_at.desc()).paginate(page=page, per_page=20)
+    return render_template('admin_logs.html', logs=logs)
 @login_required
 def admin_users():
     if not current_user.is_admin:
@@ -586,6 +659,7 @@ def admin_reset_user_pass(user_id):
     if new_password:
         user.set_password(new_password)
         db.session.commit()
+        log_action('重置用户密码', f'管理员重置了用户 [{user.username}] 的密码')
         flash(f'用户 [{user.username}] 的密码已重置成功！', 'success')
     else:
         flash('新密码不能为空！', 'warning')
@@ -604,9 +678,11 @@ def admin_delete_user(user_id):
         flash('无法删除当前的管理员账号！', 'danger')
         return redirect(url_for('admin_users'))
 
+    deleted_username = user.username
     db.session.delete(user)
     db.session.commit()
-    flash(f'用户 [{user.username}] 及其关联数据已成功删除！', 'success')
+    log_action('删除用户', f'管理员删除了用户账号 [{deleted_username}]')
+    flash(f'用户 [{deleted_username}] 及其关联数据已成功删除！', 'success')
     return redirect(url_for('admin_users'))
 import csv
 import io
@@ -641,6 +717,7 @@ def export_csv():
 
     response = Response(output.getvalue(), mimetype='text/csv')
     response.headers['Content-Disposition'] = 'attachment; filename=gift_records.csv'
+    log_action('导出数据', f'用户导出了 {len(records)} 条礼金记录 CSV 文件')
     return response
 
 
@@ -759,6 +836,7 @@ def import_csv():
             success_count += 1
 
         db.session.commit()
+        log_action('导入数据', f'成功导入 {success_count} 条礼金记录（忽略 {skip_count} 条）')
         flash(f'批量导入完成！成功导入 {success_count} 条记录' + (f'，忽略 {skip_count} 条无效数据。' if skip_count > 0 else '。'), 'success')
     except Exception as e:
         db.session.rollback()
