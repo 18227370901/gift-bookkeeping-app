@@ -1,17 +1,39 @@
 import os
+import sys
+import shutil
+import webbrowser
+from threading import Timer
 from flask import Flask, render_template, request, redirect, url_for, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 
-app = Flask(__name__)
+# Determine bundle directory for PyInstaller / PyBuild
+if getattr(sys, 'frozen', False):
+    BUNDLE_DIR = getattr(sys, '_MEIPASS', os.path.abspath(os.path.dirname(__file__)))
+else:
+    BUNDLE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+template_folder = os.path.join(BUNDLE_DIR, 'templates')
+app = Flask(__name__, template_folder=template_folder)
 app.config['SECRET_KEY'] = 'gift-bookkeeping-secret-key-2026'
 
-BASE_DIR = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{os.path.join(BASE_DIR, "gift_bookkeeping.db")}'
+# Handle Database Location (If frozen, write to user-writable directory or local directory)
+if getattr(sys, 'frozen', False):
+    USER_DATA_DIR = os.path.join(os.path.expanduser('~'), '.gift_bookkeeping')
+    os.makedirs(USER_DATA_DIR, exist_ok=True)
+    db_path = os.path.join(USER_DATA_DIR, 'gift_bookkeeping.db')
+    bundled_db = os.path.join(BUNDLE_DIR, 'gift_bookkeeping.db')
+    if not os.path.exists(db_path) and os.path.exists(bundled_db):
+        shutil.copy2(bundled_db, db_path)
+else:
+    db_path = os.path.join(BUNDLE_DIR, 'gift_bookkeeping.db')
+
+app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+
 
 login_manager = LoginManager()
 login_manager.init_app(app)
