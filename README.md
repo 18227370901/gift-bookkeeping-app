@@ -85,6 +85,29 @@ python app.py
 - **默认管理员密码**：`admin123`
 
 ---
+## 🔒 SSL / HTTPS 部署说明
+
+项目已提供全套 SSL/TLS 安全部署方案：
+
+### 1. 生成测试 / 内网自签名证书（可选）
+若在本地或内网环境没有域名证书，直接运行：
+```bash
+python generate_ssl_certs.py
+```
+将在当前目录生成 `server.crt` 与 `server.key` 文件。
+
+### 2. Nginx 反向代理配置（支持自定义端口如 1443）
+1. 参考项目根目录下的 `nginx_ssl.conf` 配置文件。
+2. 将 `listen 1443 ssl http2;` 中的 `1443` 修改为您所需的任意 HTTPS 端口。
+3. 修改 `ssl_certificate` 和 `ssl_certificate_key` 的具体文件路径。
+4. 加载 Nginx 配置后重载 Nginx 服务：`nginx -s reload`。
+
+### 3. 应用安全配置与环境变量
+如果通过 HTTPS 域名或 Nginx SSL 端口部署，建议设置环境变量：
+- `SESSION_COOKIE_SECURE=true` ：开启后将强制 Cookie 仅在 HTTPS 安全连接下传输。
+
+---
+
 
 ## 📱 打包为 Android APK (通过 GitHub Actions)
 
