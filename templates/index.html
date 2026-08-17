@@ -119,6 +119,7 @@
 <div class="card border-0 shadow-sm">
     <div class="card-body p-0">
         <form id="batchDeleteForm" action="{{ url_for('batch_delete_records') }}" method="POST">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0 text-nowrap">
                 <thead class="table-light">
@@ -247,6 +248,7 @@
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form action="{{ url_for('add_record') }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="modal-body">
                     <div class="row g-3">
                         <div class="col-md-6">
@@ -313,6 +315,7 @@
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form id="editRecordForm" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="modal-body">
                     <div class="row g-3">
                         <div class="col-md-6">
@@ -378,6 +381,7 @@
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form action="{{ url_for('delete_all_records') }}" method="POST">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="modal-body text-center py-4">
                     <i class="fa-solid fa-trash-can-arrow-up text-danger fa-4x mb-3"></i>
                     <h5 class="fw-bold text-danger">确定要彻底清空所有礼金数据吗？</h5>
@@ -399,6 +403,7 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <form action="{{ url_for('import_csv') }}" method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="modal-body">
                     <div class="mb-3">
                         <label for="csv_file" class="form-label fw-bold">选择 CSV 文件</label>
@@ -478,6 +483,11 @@ function deleteSingleRecord(recordId, recordName) {
         var form = document.createElement('form');
         form.method = 'POST';
         form.action = '/record/delete/' + recordId;
+        var csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden';
+        csrfInput.name = 'csrf_token';
+        csrfInput.value = '{{ csrf_token }}';
+        form.appendChild(csrfInput);
         document.body.appendChild(form);
         form.submit();
     }
@@ -509,7 +519,7 @@ if (editModal) {
         var reason = button.getAttribute('data-reason');
         var notes = button.getAttribute('data-notes');
 
-        document.getElementById('editRecordForm').action = '/records/' + id + '/edit';
+        document.getElementById('editRecordForm').action = '/record/edit/' + id;
         document.getElementById('edit_name').value = name;
         document.getElementById('edit_age').value = age;
         document.getElementById('edit_address').value = address;
