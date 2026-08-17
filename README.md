@@ -1,5 +1,10 @@
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
+> **最新更新说明**：已完成 Nginx SSL/HTTPS 自定义端口（如 1443）反向代理配置、Flask ProxyFix 请求头感知与全站日志安全审计增强。
+
+
+# 人情礼金记账系统 (Gift Bookkeeping App)
+
 一个基于 **Python Flask + SQLite + Bootstrap 5** 开发的简洁、高效的人情往来与礼金记账管理系统。支持多用户管理、礼金收支记录、多维度统计图表、Excel/CSV 批量导入导出、高级多字段模糊搜索，并配置了 **Android APK 自动化构建流水线**。
 
 ---
