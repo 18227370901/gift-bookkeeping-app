@@ -10,6 +10,7 @@
     </div>
     <div class="col-auto">
         <form action="{{ url_for('admin_clear_logs') }}" method="POST" class="d-inline" onsubmit="return confirm('警告：确定要清空所有审计日志记录吗？此操作不可撤销！');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit" class="btn btn-outline-danger btn-sm me-2">
                 <i class="fa-solid fa-trash-can me-1"></i> 清空所有日志
             </button>
@@ -72,6 +73,7 @@
 
 <!-- 批量操作与数据表格卡片 -->
 <form id="batchDeleteForm" action="{{ url_for('admin_batch_delete_logs') }}" method="POST" onsubmit="return confirm('确定要批量删除已勾选的 ' + getCheckedCount() + ' 条日志记录吗？');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="card shadow-sm border-0">
         <div class="card-header bg-white py-2 d-flex align-items-center justify-content-between">
             <div class="d-flex align-items-center gap-2">
@@ -171,6 +173,7 @@
 
 <!-- 单条删除用的隐藏 Form -->
 <form id="singleDeleteForm" method="POST" style="display:none;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 </form>
 
 {% block extra_js %}

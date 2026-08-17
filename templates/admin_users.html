@@ -21,6 +21,7 @@
   </div>
   <div class="card-body">
     <form action="{{ url_for('update_session_timeout') }}" method="POST" class="row g-3 align-items-center">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="col-auto">
         <label for="session_timeout_minutes" class="col-form-label fw-bold text-muted">登录无操作超时时间：</label>
       </div>
@@ -49,6 +50,7 @@
   </div>
   <div class="card-body">
     <form action="{{ url_for('generate_invite_link') }}" method="POST" class="row g-3 align-items-center">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="col-auto">
         <label for="expire_hours" class="col-form-label fw-bold text-muted">链接有效时长：</label>
       </div>
@@ -117,6 +119,7 @@
             </td>
             <td class="text-end">
               <form action="{{ url_for('admin_delete_invite_link', token_id=t.id) }}" method="POST" class="d-inline" onsubmit="return confirm('确定要删除此注册邀请链接吗？');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="btn btn-sm btn-outline-danger" title="删除链接">
                   <i class="fa-solid fa-trash me-1"></i>删除
                 </button>
@@ -184,6 +187,7 @@
                 <div class="modal-dialog modal-dialog-centered modal-sm">
                   <div class="modal-content">
                     <form action="{{ url_for('admin_reset_user_pass', user_id=u.id) }}" method="POST">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <div class="modal-header border-0 pb-0">
                         <h6 class="modal-title fw-bold text-danger">重置 [{{ u.username }}] 的密码</h6>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -208,6 +212,7 @@
                 <div class="modal-dialog modal-dialog-centered">
                   <div class="modal-content">
                     <form action="{{ url_for('admin_reset_user_security', user_id=u.id) }}" method="POST">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <div class="modal-header border-0 pb-0">
                         <h6 class="modal-title fw-bold text-warning">重置 [{{ u.username }}] 的密保问题</h6>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -237,6 +242,7 @@
                 <div class="modal-dialog modal-dialog-centered modal-sm">
                   <div class="modal-content">
                     <form action="{{ url_for('admin_delete_user', user_id=u.id) }}" method="POST">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <div class="modal-header border-0 pb-0">
                         <h6 class="modal-title fw-bold text-danger">确认删除用户？</h6>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>

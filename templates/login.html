@@ -11,6 +11,7 @@
             </div>
             <div class="card-body p-4">
                 <form method="POST" action="{{ url_for('login') }}" id="loginForm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <div class="mb-3">
                         <label for="username" class="form-label">用户名</label>
                         <div class="input-group">
