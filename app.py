@@ -10,7 +10,8 @@ import secrets
 from datetime import datetime, timedelta
 import webbrowser
 from threading import Timer
-from flask import Flask, render_template, request, redirect, url_for, flash, session, current_app
+from flask import Flask, render_template, request, redirect, url_for, flash, session, current_app, abort
+from flask_wtf.csrf import CSRFProtect
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -24,6 +25,7 @@ else:
 
 template_folder = os.path.join(BUNDLE_DIR, 'templates')
 app = Flask(__name__, template_folder=template_folder)
+csrf = CSRFProtect(app)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'gift-bookkeeping-secret-key-2026-prod-secure'
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
@@ -83,6 +85,27 @@ class User(UserMixin, db.Model):
         clean_answer = answer.strip().lower()
         return check_password_hash(self.security_answer_hash, clean_answer)
 
+class SystemSetting(db.Model):
+    __tablename__ = 'system_settings'
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(50), unique=True, nullable=False)
+    value = db.Column(db.String(255), nullable=True)
+
+    @classmethod
+    def get_val(cls, key, default=None):
+        setting = cls.query.filter_by(key=key).first()
+        return setting.value if setting and setting.value is not None else default
+
+    @classmethod
+    def set_val(cls, key, value):
+        setting = cls.query.filter_by(key=key).first()
+        if not setting:
+            setting = cls(key=key, value=str(value))
+            db.session.add(setting)
+        else:
+            setting.value = str(value)
+        db.session.commit()
+
 class RegistrationToken(db.Model):
     __tablename__ = 'registration_tokens'
     id = db.Column(db.Integer, primary_key=True)
@@ -107,6 +130,45 @@ class OperationLog(db.Model):
 
     user = db.relationship('User', backref=db.backref('operation_logs', lazy=True))
 
+
+def get_session_timeout_minutes():
+    """获取当前设置的用户超时时间（分钟），默认60分钟"""
+    try:
+        val = SystemSetting.get_val('session_timeout_minutes', '60')
+        return max(1, int(val))
+    except (ValueError, TypeError):
+        return 60
+
+@app.before_request
+def check_session_timeout():
+    if current_user.is_authenticated:
+        now = datetime.now().timestamp()
+        last_activity = session.get('last_activity')
+        timeout_minutes = get_session_timeout_minutes()
+
+        if last_activity:
+            elapsed = now - last_activity
+            if elapsed > timeout_minutes * 60:
+                logout_user()
+                session.clear()
+                flash(f'由于您超过 {timeout_minutes} 分钟未操作，登录已超时，请重新登录！', 'warning')
+                return redirect(url_for('login'))
+
+        session['last_activity'] = now
+
+@app.before_request
+def csrf_protect():
+    if request.method in ['POST', 'PUT', 'PATCH', 'DELETE']:
+        token = session.get('csrf_token')
+        request_token = request.form.get('csrf_token') or request.headers.get('X-CSRF-Token')
+        if not token or not request_token or token != request_token:
+            abort(403, description="CSRF Token 验证失败，请求非法！")
+
+@app.context_processor
+def inject_csrf_token():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_hex(32)
+    return dict(csrf_token=session['csrf_token'])
 
 def purge_expired_logs(days=90):
     """自动批量清理超过保存时效（默认3个月/90天）的操作日志"""
@@ -170,7 +232,12 @@ class GiftRecord(db.Model):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    user = User.query.get(int(user_id))
+    if user:
+        current_token = session.get('session_token')
+        if current_token and user.session_token and current_token != user.session_token:
+            return None
+    return user
 
 def cn2num(s):
     if not s:
@@ -270,11 +337,17 @@ def num2cn_filter(num):
 def init_database():
     with app.app_context():
         db.create_all()
-        # 兼容性迁移：确保 registration_tokens 数据表添加 max_uses 和 use_count 字段
+        # 兼容性迁移：确保 registration_tokens 数据表添加 max_uses 和 use_count 字段；users 表添加 session_token 字段
         try:
             with db.engine.connect() as conn:
                 conn.execute(db.text("ALTER TABLE registration_tokens ADD COLUMN max_uses INTEGER DEFAULT 1"))
                 conn.execute(db.text("ALTER TABLE registration_tokens ADD COLUMN use_count INTEGER DEFAULT 0"))
+                conn.commit()
+        except Exception:
+            pass
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE users ADD COLUMN session_token VARCHAR(64)"))
                 conn.commit()
         except Exception:
             pass
@@ -410,7 +483,12 @@ def login():
 
         user = User.query.filter_by(username=username).first()
         if user and user.check_password(password):
+            token = secrets.token_hex(16)
+            user.session_token = token
+            db.session.commit()
             login_user(user, remember=remember)
+            session['session_token'] = token
+            session['last_activity'] = datetime.now().timestamp()
             log_action('用户登录', f'用户成功登录系统', user=user)
             flash(f'欢迎回来，{user.username}！', 'success')
             return redirect(url_for('index'))
@@ -539,7 +617,11 @@ def forgot_password():
 @login_required
 def logout():
     log_action('退出登录', f'用户退出系统登录')
+    if current_user.is_authenticated:
+        current_user.session_token = None
+        db.session.commit()
     logout_user()
+    session.clear()
     flash('您已成功退出登录。', 'info')
     return redirect(url_for('login'))
 
@@ -727,7 +809,28 @@ def admin_users():
     users = User.query.order_by(User.id.asc()).all()
     # 获取所有注册邀请链接（最近创建的排前面）
     tokens = RegistrationToken.query.order_by(RegistrationToken.created_at.desc()).all()
-    return render_template('admin_users.html', users=users, tokens=tokens, now=datetime.now())
+    session_timeout_minutes = get_session_timeout_minutes()
+    return render_template('admin_users.html', users=users, tokens=tokens, session_timeout_minutes=session_timeout_minutes, now=datetime.now())
+
+@app.route('/admin/settings/timeout', methods=['POST'])
+@login_required
+def update_session_timeout():
+    if not current_user.is_admin:
+        flash('只有超级管理员才能更改系统设置！', 'danger')
+        return redirect(url_for('index'))
+
+    try:
+        minutes = int(request.form.get('session_timeout_minutes', '60'))
+        if minutes < 1 or minutes > 10080: # 最多7天
+            flash('超时时间必须在 1 到 10080 分钟之间！', 'danger')
+        else:
+            SystemSetting.set_val('session_timeout_minutes', minutes)
+            log_action('更新系统配置', f'设置登录无操作超时时间为 {minutes} 分钟')
+            flash(f'登录无操作超时时间已成功更新为 {minutes} 分钟！', 'success')
+    except (ValueError, TypeError):
+        flash('无效的时间参数！', 'danger')
+
+    return redirect(url_for('admin_users'))
 @app.route('/admin/logs')
 @login_required
 def admin_logs():

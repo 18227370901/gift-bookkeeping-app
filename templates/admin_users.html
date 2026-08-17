@@ -14,6 +14,34 @@
     <i class="fa-solid fa-arrow-left me-1"></i>返回主页
   </a>
 </div>
+<!-- 系统配置与生成注册邀请链接卡片 -->
+<div class="card card-custom border-0 mb-4 shadow-sm">
+  <div class="card-header bg-white py-3 border-0 d-flex justify-content-between align-items-center">
+    <h5 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-gear me-2 text-primary"></i>系统安全与登录设置</h5>
+  </div>
+  <div class="card-body">
+    <form action="{{ url_for('update_session_timeout') }}" method="POST" class="row g-3 align-items-center">
+      <div class="col-auto">
+        <label for="session_timeout_minutes" class="col-form-label fw-bold text-muted">登录无操作超时时间：</label>
+      </div>
+      <div class="col-auto">
+        <div class="input-group" style="max-width: 200px;">
+          <input type="number" name="session_timeout_minutes" id="session_timeout_minutes" class="form-control" value="{{ session_timeout_minutes }}" min="1" max="10080" required>
+          <span class="input-group-text">分钟</span>
+        </div>
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-primary px-3">
+          <i class="fa-solid fa-floppy-disk me-1"></i>保存设置
+        </button>
+      </div>
+      <div class="col-12 mt-1">
+        <small class="text-muted"><i class="fa-solid fa-circle-info me-1"></i>默认超时时间为 60 分钟（1小时）。超出设定无操作时间后，系统将自动将用户退出并跳转至登录页。</small>
+      </div>
+    </form>
+  </div>
+</div>
+
 <!-- 生成注册邀请链接卡片 -->
 <div class="card card-custom border-0 mb-4 shadow-sm">
   <div class="card-header bg-white py-3 border-0 d-flex justify-content-between align-items-center">
