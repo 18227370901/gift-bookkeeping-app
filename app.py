@@ -393,9 +393,12 @@ def init_database():
         except Exception:
             pass
         admin = User.query.filter_by(is_admin=True).first()
+        initial_user = os.environ.get('ADMIN_USER', 'admin').strip()
+        initial_pass = os.environ.get('ADMIN_PASS', 'admin123').strip()
         if not admin:
-            initial_user = os.environ.get('ADMIN_USER', 'admin')
-            initial_pass = os.environ.get('ADMIN_PASS', 'admin123')
+            admin = User.query.filter_by(username=initial_user).first()
+
+        if not admin:
             admin = User(
                 username=initial_user,
                 security_question='管理员安全密保问题',
@@ -406,6 +409,13 @@ def init_database():
             db.session.add(admin)
             db.session.commit()
             print(f"[Init] 已创建初始管理员账号: {initial_user}")
+        else:
+            # 每次重启应用时，同步确保管理员用户名与密码更新为最新配置
+            admin.username = initial_user
+            admin.set_password(initial_pass)
+            admin.is_admin = True
+            db.session.commit()
+            print(f"[Init] 已同步更新管理员账号 [{initial_user}] 密码为最新配置")
 
 # 应用加载时自动执行数据库初始化与版本迁移（支持 Gunicorn / WSGI / App 启动）
 try:
