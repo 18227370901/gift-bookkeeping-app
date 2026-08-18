@@ -47,9 +47,19 @@ if getattr(sys, 'frozen', False):
     if not os.path.exists(db_path) and os.path.exists(bundled_db):
         shutil.copy2(bundled_db, db_path)
 else:
-    db_path = os.path.join(BUNDLE_DIR, 'gift_bookkeeping.db')
+    # 优先使用持久化挂载目录 data 下的 SQLite 数据库
+    data_dir = os.path.join(BUNDLE_DIR, 'data')
+    if os.path.isdir(data_dir):
+        db_path = os.path.join(data_dir, 'gift_bookkeeping.db')
+    else:
+        db_path = os.path.join(BUNDLE_DIR, 'gift_bookkeeping.db')
 
-app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
+# 过滤 DATABASE_URL，当未设置/已注释/为空时无缝降级默认使用 SQLite 数据库
+db_url = os.environ.get('DATABASE_URL', '').strip()
+if not db_url:
+    db_url = f'sqlite:///{db_path}'
+
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -396,6 +406,12 @@ def init_database():
             db.session.add(admin)
             db.session.commit()
             print(f"[Init] 已创建初始管理员账号: {initial_user}")
+
+# 应用加载时自动执行数据库初始化与版本迁移（支持 Gunicorn / WSGI / App 启动）
+try:
+    init_database()
+except Exception as _e:
+    print(f"[Warning] 应用启动自动初始化数据库提示: {_e}")
 
 
 @app.route('/')
