@@ -97,10 +97,35 @@ python generate_ssl_certs.py
 将在当前目录生成 `server.crt` 与 `server.key` 文件。
 
 ### 2. Nginx 反向代理配置（15001 端口映射至 11443 端口）
-1. 参考项目根目录下的 `nginx_ssl.conf` 配置文件。
-2. 将 `listen 15001 ssl http2;` 监听前端端口设为 `15001`，后端后端服务代理目标设为 `127.0.0.1:11443`。
-3. 修改 `ssl_certificate` 和 `ssl_certificate_key` 的具体文件路径。
-4. 加载 Nginx 配置后重载 Nginx 服务：`nginx -s reload`。
+1. 参考项目根目录下的 `nginx_ssl.conf` 配置文件（用于监听 HTTPS 15001 端口并将流量转发至 127.0.0.1:11443）。
+2. 将 `nginx_ssl.conf` 拷贝至服务器 Nginx 配置目录（例如 `/etc/nginx/conf.d/gift_app.conf`）。
+3. 确保 SSL 证书存放于 `/opt/service/gift-bookkeeping-app/ssl/server.crt` 和 `server.key`（或修改为您的实际证书路径）。
+4. 检查 Nginx 配置语法并重载生效：
+   ```bash
+   nginx -t
+   nginx -s reload
+   ```
+
+---
+
+## 🔄 Linux 服务器更新最新代码指南
+
+若您已在 Linux 服务器上执行过 `git clone`，需要拉取 GitHub 云端最新更新并应用，请按以下步骤操作：
+
+```bash
+# 1. 进入服务器上的项目根目录
+cd /opt/service/gift-bookkeeping-app  # 请替换为您在服务器上的实际项目路径
+
+# 2. 拉取 GitHub 云端最新代码
+git pull origin main
+
+# 3. 重启服务应用最新代码（run.sh 会自动加载新依赖与数据库结构变更）
+./run.sh restart
+
+# 4. （可选）如果修改了 Nginx 代理配置，重载 Nginx
+nginx -t && nginx -s reload
+```
+
 
 ### 3. 应用安全配置与环境变量
 如果通过 HTTPS 域名或 Nginx SSL 端口部署，建议设置环境变量：
