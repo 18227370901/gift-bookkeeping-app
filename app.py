@@ -25,8 +25,10 @@ else:
 
 template_folder = os.path.join(BUNDLE_DIR, 'templates')
 app = Flask(__name__, template_folder=template_folder)
-csrf = CSRFProtect(app)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'gift-bookkeeping-secret-key-2026-prod-secure'
+
+
+
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 # 如果通过 HTTPS 部署或设置环境变量 SESSION_COOKIE_SECURE=true，启用 Cookie 仅在 HTTPS 下传输
@@ -67,7 +69,9 @@ class User(UserMixin, db.Model):
     security_question = db.Column(db.String(100), nullable=False)
     security_answer_hash = db.Column(db.String(256), nullable=False)
     is_admin = db.Column(db.Boolean, default=False)
+    session_token = db.Column(db.String(64), nullable=True)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
+
 
     records = db.relationship('GiftRecord', backref='owner', lazy=True, cascade='all, delete-orphan')
 
