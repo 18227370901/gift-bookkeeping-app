@@ -1277,7 +1277,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='礼金记账系统 Linux/云服务器启动脚本')
     parser.add_argument('--host', type=str, default=os.environ.get('HOST', '0.0.0.0'), help='监听 IP 地址 (默认: 0.0.0.0)')
-    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 5000)), help='服务端口 (默认: 5000)')
+    parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 11443)), help='服务端口 (默认: 11443)')
     parser.add_argument('--admin-user', type=str, default=os.environ.get('ADMIN_USER', None), help='自定义初始管理员账号')
     parser.add_argument('--admin-pass', type=str, default=os.environ.get('ADMIN_PASS', None), help='自定义初始管理员密码')
     args = parser.parse_args()

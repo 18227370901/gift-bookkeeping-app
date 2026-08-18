@@ -11,7 +11,7 @@ PID_FILE="$APP_DIR/app.pid"
 LOG_FILE="$APP_DIR/app.log"
 
 # ===== 环境变量定义（全局有效） =====
-export PORT=15001
+export PORT=11443
 export ADMIN_USER=admin
 export ADMIN_PASS='xK9pQ#vL2mNw2'  # 密码含特殊字符，用单引号括起
 

@@ -81,7 +81,7 @@ chmod +x run.sh
 ```
 
 > 💡 **自定义管理员账号密码与端口**：
-> 可在 `run.sh` 脚本头的环境变量配置区域修改 `ADMIN_USER` 和 `ADMIN_PASS`（支持特殊字符），启动时系统将自动初始化或更新该管理员账号。
+> 可在 `run.sh` 脚本头的环境变量配置区域修改 `ADMIN_USER` 和 `ADMIN_PASS`（支持特殊字符），程序默认监听端口为 `11443`（例如配合 Nginx 宿主机 `15001` 端口代理映射至后端 `11443` 端口）。启动时系统将自动初始化或更新该管理员账号。
 
 ---
 
@@ -96,9 +96,9 @@ python generate_ssl_certs.py
 ```
 将在当前目录生成 `server.crt` 与 `server.key` 文件。
 
-### 2. Nginx 反向代理配置（支持自定义端口如 1443）
+### 2. Nginx 反向代理配置（15001 端口映射至 11443 端口）
 1. 参考项目根目录下的 `nginx_ssl.conf` 配置文件。
-2. 将 `listen 1443 ssl http2;` 中的 `1443` 修改为您所需的任意 HTTPS 端口。
+2. 将 `listen 15001 ssl http2;` 监听前端端口设为 `15001`，后端后端服务代理目标设为 `127.0.0.1:11443`。
 3. 修改 `ssl_certificate` 和 `ssl_certificate_key` 的具体文件路径。
 4. 加载 Nginx 配置后重载 Nginx 服务：`nginx -s reload`。
 
