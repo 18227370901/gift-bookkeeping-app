@@ -98,7 +98,10 @@ python generate_ssl_certs.py
 
 ### 2. Nginx 反向代理配置（15001 端口映射至 11443 端口）
 1. 参考项目根目录下的 `nginx_ssl.conf` 配置文件（用于监听 HTTPS 15001 端口并将流量转发至 127.0.0.1:11443）。
-2. 将 `nginx_ssl.conf` 拷贝至服务器 Nginx 配置目录（例如 `/etc/nginx/conf.d/gift_app.conf`）。
+2. 将 `nginx_ssl.conf` 拷贝至服务器 Nginx 配置目录（例如 `/etc/nginx/conf.d/gift_app_native.conf`）。
+> 💡 **单端口多配置冲突说明**：如果服务器上同时存在 Docker 版本，由于两个配置文件的 Nginx `server` 块均写了 `listen 15001 ssl;`，在 `/etc/nginx/conf.d/` 下同时存在两个 `.conf` 文件时，Nginx 默认会优先命中字母排序在前的 Upstream 配置。
+> 当您切换使用**非 Docker 版本**时，请将 Docker 版本的配置文件重命名禁用：
+> `mv /etc/nginx/conf.d/gift_app_docker.conf /etc/nginx/conf.d/gift_app_docker.conf.disabled 2>/dev/null || true`
 3. 确保 SSL 证书存放于 `/opt/service/gift-bookkeeping-app/ssl/server.crt` 和 `server.key`（或修改为您的实际证书路径）。
 4. 检查 Nginx 配置语法并重载生效：
    ```bash
