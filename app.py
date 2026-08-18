@@ -252,9 +252,13 @@ class GiftRecord(db.Model):
 def load_user(user_id):
     user = User.query.get(int(user_id))
     if user:
-        current_token = session.get('session_token')
-        if current_token and user.session_token and current_token != user.session_token:
+        if not user.session_token:
             return None
+        current_token = session.get('session_token')
+        if current_token and current_token != user.session_token:
+            return None
+        if not current_token:
+            session['session_token'] = user.session_token
     return user
 
 def cn2num(s):
@@ -641,6 +645,10 @@ def logout():
     session.clear()
     flash('您已成功退出登录。', 'info')
     resp = make_response(redirect(url_for('login')))
+    remember_cookie = app.config.get('REMEMBER_COOKIE_NAME', 'remember_token')
+    session_cookie = app.config.get('SESSION_COOKIE_NAME', 'session')
+    resp.delete_cookie(remember_cookie)
+    resp.delete_cookie(session_cookie)
     resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'
