@@ -10,7 +10,7 @@ import secrets
 from datetime import datetime, timedelta
 import webbrowser
 from threading import Timer
-from flask import Flask, render_template, request, redirect, url_for, flash, session, current_app, abort
+from flask import Flask, render_template, request, redirect, url_for, flash, session, current_app, abort, make_response
 from flask_wtf.csrf import CSRFProtect
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -145,6 +145,9 @@ def get_session_timeout_minutes():
 
 @app.before_request
 def check_session_timeout():
+    if request.endpoint in ('static', 'logout', 'login'):
+        return
+
     if current_user.is_authenticated:
         now = datetime.now().timestamp()
         last_activity = session.get('last_activity')
@@ -153,12 +156,23 @@ def check_session_timeout():
         if last_activity:
             elapsed = now - last_activity
             if elapsed > timeout_minutes * 60:
+                user_to_logout = current_user
+                if hasattr(user_to_logout, 'session_token'):
+                    user_to_logout.session_token = None
+                    db.session.commit()
                 logout_user()
                 session.clear()
                 flash(f'由于您超过 {timeout_minutes} 分钟未操作，登录已超时，请重新登录！', 'warning')
                 return redirect(url_for('login'))
 
         session['last_activity'] = now
+
+@app.after_request
+def add_header(response):
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 @app.before_request
 def csrf_protect():
@@ -618,16 +632,19 @@ def forgot_password():
     return render_template('forgot_password.html', step='find_user')
 
 @app.route('/logout')
-@login_required
 def logout():
-    log_action('退出登录', f'用户退出系统登录')
     if current_user.is_authenticated:
+        log_action('退出登录', f'用户退出系统登录')
         current_user.session_token = None
         db.session.commit()
     logout_user()
     session.clear()
     flash('您已成功退出登录。', 'info')
-    return redirect(url_for('login'))
+    resp = make_response(redirect(url_for('login')))
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    resp.headers['Expires'] = '0'
+    return resp
 
 @app.route('/record/add', methods=['POST'])
 @login_required
