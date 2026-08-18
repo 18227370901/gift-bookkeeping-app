@@ -143,6 +143,7 @@
             <th class="ps-4">ID</th>
             <th>用户名</th>
             <th>角色身份</th>
+            <th>账号状态</th>
             <th>密保问题</th>
             <th>注册时间</th>
             <th class="text-end pe-4">操作选项</th>
@@ -165,14 +166,35 @@
               <span class="badge bg-secondary-subtle text-secondary rounded-pill">普通用户</span>
               {% endif %}
             </td>
+            <td>
+              {% if u.is_active %}
+              <span class="badge bg-success rounded-pill"><i class="fa-solid fa-check me-1"></i>正常</span>
+              {% else %}
+              <span class="badge bg-danger rounded-pill"><i class="fa-solid fa-ban me-1"></i>已禁用</span>
+              {% endif %}
+            </td>
             <td class="text-muted"><small>{{ u.security_question }}</small></td>
             <td class="text-muted"><small>{{ u.created_at.strftime('%Y-%m-%d %H:%M') if u.created_at else '-' }}</small></td>
             <td class="text-end pe-4">
               <div class="btn-group btn-group-sm">
+                {% if u.id != current_user.id %}
+                <form action="{{ url_for('admin_toggle_user_status', user_id=u.id) }}" method="POST" class="d-inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  {% if u.is_active %}
+                  <button type="submit" class="btn btn-outline-warning" onclick="return confirm('确定要禁用该用户吗？禁用后该用户将无法登录并强制下线。');">
+                    <i class="fa-solid fa-ban me-1"></i>禁用
+                  </button>
+                  {% else %}
+                  <button type="submit" class="btn btn-outline-success" onclick="return confirm('确定要启用该用户吗？');">
+                    <i class="fa-solid fa-check me-1"></i>启用
+                  </button>
+                  {% endif %}
+                </form>
+                {% endif %}
                 <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#resetPassModal{{ u.id }}">
                   <i class="fa-solid fa-key me-1"></i>重置密码
                 </button>
-                <button type="button" class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#resetSecModal{{ u.id }}">
+                <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#resetSecModal{{ u.id }}">
                   <i class="fa-solid fa-shield-halved me-1"></i>重置密保
                 </button>
                 {% if u.id != current_user.id %}
