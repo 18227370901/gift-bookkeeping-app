@@ -3,3 +3,10 @@ __pycache__/
 *.pyo
 bin/
 .buildozer/
+venv/
+.venv/
+build/
+dist/
+*.spec
+*.log
+*.pid

@@ -70,6 +70,7 @@ class User(UserMixin, db.Model):
     security_answer_hash = db.Column(db.String(256), nullable=False)
     is_admin = db.Column(db.Boolean, default=False)
     session_token = db.Column(db.String(64), nullable=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
 
@@ -252,6 +253,8 @@ class GiftRecord(db.Model):
 def load_user(user_id):
     user = User.query.get(int(user_id))
     if user:
+        if not user.is_active:
+            return None
         if not user.session_token:
             return None
         current_token = session.get('session_token')
@@ -370,6 +373,12 @@ def init_database():
         try:
             with db.engine.connect() as conn:
                 conn.execute(db.text("ALTER TABLE users ADD COLUMN session_token VARCHAR(64)"))
+                conn.commit()
+        except Exception:
+            pass
+        try:
+            with db.engine.connect() as conn:
+                conn.execute(db.text("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT TRUE"))
                 conn.commit()
         except Exception:
             pass
@@ -505,6 +514,10 @@ def login():
 
         user = User.query.filter_by(username=username).first()
         if user and user.check_password(password):
+            if not user.is_active:
+                log_action('登录失败', f'已被禁用的账号 [{username}] 尝试登录', user=user)
+                flash('该账号已被禁用/冻结，无法登录使用，请联系管理员处理！', 'danger')
+                return render_template('login.html')
             token = secrets.token_hex(16)
             user.session_token = token
             db.session.commit()
@@ -1036,6 +1049,28 @@ def admin_reset_user_security(user_id):
 
     return redirect(url_for('admin_users'))
 
+@app.route('/admin/user/toggle_status/<int:user_id>', methods=['POST'])
+@login_required
+def admin_toggle_user_status(user_id):
+    if not current_user.is_admin:
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
+
+    user = User.query.get_or_404(user_id)
+    if user.id == current_user.id:
+        flash('无法更改当前登录的管理员账号状态！', 'danger')
+        return redirect(url_for('admin_users'))
+
+    user.is_active = not user.is_active
+    if not user.is_active:
+        user.session_token = None  # 禁用时清空 session_token 强行踢下线
+    db.session.commit()
+
+    status_str = "启用" if user.is_active else "禁用"
+    log_action('修改账号状态', f'管理员{status_str}了用户账号 [{user.username}]')
+    flash(f'用户 [{user.username}] 已成功{status_str}！', 'success')
+    return redirect(url_for('admin_users'))
+
 @app.route('/admin/user/reset_pass/<int:user_id>', methods=['POST'])
 @login_required
 def admin_reset_user_pass(user_id):
@@ -1261,13 +1296,4 @@ if __name__ == '__main__':
             db.session.commit()
             print(f"[Init] 管理员账号 [{args.admin_user}] 配置/更新成功！")
 
-    import webbrowser
-    import threading
-    import sys
-
-    # If running as PyInstaller standalone exe, open browser automatically
-    if getattr(sys, 'frozen', False):
-        threading.Timer(1.5, lambda: webbrowser.open(f'http://127.0.0.1:{args.port}')).start()
-        app.run(host=args.host, port=args.port, debug=False)
-    else:
-        app.run(host=args.host, port=args.port, debug=False)
+    app.run(host=args.host, port=args.port, debug=False)
