@@ -72,13 +72,48 @@ gift_bookkeeping_app/
 确保您的电脑已安装 Python 3.8+。
 
 ### 2. 安装依赖包
-在终端/命令行中运行：
+
+#### 使用虚拟环境（推荐用于项目隔离）
+解决 Linux 运行 `python3` 报错：`ModuleNotFoundError: No module named 'flask'`：
+
+```bash
+# 1. 创建虚拟环境（在你的项目目录下）
+python3 -m venv venv
+
+# 2. 激活虚拟环境
+source venv/bin/activate
+
+# 3. 在虚拟环境中安装 Flask
+pip install flask
+pip install flask_wtf
+pip install flask_sqlalchemy
+pip install flask_login
+
+# 4. 运行你的脚本（此时环境已包含 flask）
+python your_script.py
+```
+
+终端/命令行直接安装：
 ```bash
 pip install flask flask-sqlalchemy flask-login cn2num
 ```
 
-### 3. 启动应用
-进入 `gift_bookkeeping_app` 目录并运行 `app.py`：
+### 3. 启动应用与服务管理
+
+#### 使用自定义运行脚本 `run.sh`（推荐 Linux 环境）
+根目录下提供了服务管理脚本 `run.sh`，可用于后台启动、停止、查看状态和重启服务：
+```bash
+# 赋予可执行权限
+chmod +x run.sh
+
+# 服务管理指令
+./run.sh start    # 启动服务
+./run.sh stop     # 停止服务
+./run.sh status   # 查看状态
+./run.sh restart  # 重启服务
+```
+
+直接运行 `app.py`：
 ```bash
 cd gift_bookkeeping_app
 python app.py
