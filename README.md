@@ -139,6 +139,7 @@ nginx -t && nginx -s reload
 
 针对已经在 Linux 服务器上执行过 `git clone` 的项目，拉取并应用 GitHub 云端最新代码的完整步骤如下：
 
+### 标准更新步骤（本地无未提交修改）
 ```bash
 # 1. 进入服务器上的项目根目录
 cd /opt/service/gift-bookkeeping-app  # 请替换为您在服务器上的实际项目路径
@@ -150,6 +151,83 @@ git pull origin main
 ./run.sh restart
 ```
 > 💡 **自动更新防护**：`./run.sh restart` 执行时会自动对比并补全新增的核心依赖包以及自动执行数据库结构无损迁移。
+
+---
+
+### ⚠️ 当本地有修改，拉取最新代码的冲突处理方案
+
+如果在服务器或本地修改了配置文件（如 `nginx_ssl.conf`、`run.sh` 或数据库文件），直接执行 `git pull origin main` 可能会提示冲突。请根据业务需求选择以下处理方案之一：
+
+#### 方案一：保留本地修改并合并（推荐）✅
+暂存本地修改，拉取远程更新后再恢复合并：
+```bash
+# 1. 暂存本地修改
+git stash push -m "保存本地配置变更"
+
+# 2. 拉取最新代码
+git pull origin main
+
+# 3. 恢复本地修改（如遇到冲突需手动修改）
+git stash pop
+
+# 4. 手动解决冲突后提交（如需要）
+git add .
+git commit -m "fix: 合并远程更新并保留本地配置"
+
+# 5. 重启服务应用最新代码
+./run.sh restart
+```
+
+#### 方案二：放弃本地修改，使用远程版本
+丢弃特定的本地文件改动，直接同步远程代码：
+```bash
+# 1. 查看具体改动（确认是否要放弃）
+git diff gift_bookkeeping.db nginx_ssl.conf run.sh
+
+# 2. 恢复这些文件到远程版本
+git checkout -- gift_bookkeeping.db nginx_ssl.conf run.sh
+
+# 3. 拉取最新代码
+git pull origin main
+
+# 4. 重启服务
+./run.sh restart
+```
+
+#### 方案三：仅保留重要文件的本地修改
+备份重要配置文件后重置，拉取最新代码再手动比对合并：
+```bash
+# 1. 备份重要配置文件
+cp nginx_ssl.conf nginx_ssl.conf.backup
+cp run.sh run.sh.backup
+
+# 2. 放弃这些文件的修改
+git checkout -- gift_bookkeeping.db nginx_ssl.conf run.sh
+
+# 3. 拉取最新代码
+git pull origin main
+
+# 4. 对比备份文件和最新代码，手动合并配置
+diff nginx_ssl.conf.backup nginx_ssl.conf
+diff run.sh.backup run.sh
+
+# 5. 合并完成后清理备份文件
+rm nginx_ssl.conf.backup run.sh.backup
+
+# 6. 重启服务
+./run.sh restart
+```
+
+#### 方案四：强制覆盖（谨慎使用）⚠️
+直接用远程最新代码强制覆盖本地所有改动（**未提交的本地修改将不可逆丢失**）：
+```bash
+# 1. 重置到远程最新状态
+git fetch origin main
+git reset --hard origin/main
+
+# 2. 重启服务
+./run.sh restart
+```
 
 
 
