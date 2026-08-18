@@ -1,9 +1,14 @@
 #!/bin/bash
 
+# ===== 确保使用 Bash 解释器运行（防止 sh run.sh 导致的 Bashisms 语法报错） =====
+if [ -z "$BASH_VERSION" ]; then
+    exec bash "$0" "$@"
+fi
+
 # ===== 配置区域 =====
 APP_DIR="/opt/service/gift-bookkeeping-app"
 if [ ! -d "$APP_DIR" ]; then
-    APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 fi
 VENV_DIR="$APP_DIR/venv"
 APP_SCRIPT="app.py"
