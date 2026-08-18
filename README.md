@@ -108,23 +108,49 @@ python generate_ssl_certs.py
 
 ---
 
+## 🚀 首次部署指导操作说明
+
+### 1. 克隆代码库到 Linux 服务器
+```bash
+git clone https://github.com/18227370901/gift-bookkeeping-app.git /opt/service/gift-bookkeeping-app
+cd /opt/service/gift-bookkeeping-app
+```
+
+### 2. 启动服务应用（推荐通过脚本管理）
+```bash
+chmod +x run.sh
+./run.sh start
+```
+> 💡 **自动依赖管理机制**：`run.sh` 在启动时会自动校验虚拟环境及依赖。若虚拟环境或核心依赖库（`flask`, `flask-sqlalchemy` 等）缺失，将自动使用清华镜像源全自动安装/补全依赖。
+
+### 3. 配置 Nginx SSL 反向代理（支持 HTTPS 15001 端口暴露）
+```bash
+# 生成自签名 SSL 证书（用于内网测试环境，若有正式证书直接放入 ssl/ 目录）
+python3 generate_ssl_certs.py
+
+# 引入项目自带的 Nginx 配置文件
+cp nginx_ssl.conf /etc/nginx/conf.d/gift_app.conf
+nginx -t && nginx -s reload
+```
+
+---
+
 ## 🔄 Linux 服务器更新最新代码指南
 
-若您已在 Linux 服务器上执行过 `git clone`，需要拉取 GitHub 云端最新更新并应用，请按以下步骤操作：
+针对已经在 Linux 服务器上执行过 `git clone` 的项目，拉取并应用 GitHub 云端最新代码的完整步骤如下：
 
 ```bash
 # 1. 进入服务器上的项目根目录
 cd /opt/service/gift-bookkeeping-app  # 请替换为您在服务器上的实际项目路径
 
-# 2. 拉取 GitHub 云端最新代码
+# 2. 从 GitHub 云端拉取最新代码
 git pull origin main
 
-# 3. 重启服务应用最新代码（run.sh 会自动加载新依赖与数据库结构变更）
+# 3. 执行重启服务命令
 ./run.sh restart
-
-# 4. （可选）如果修改了 Nginx 代理配置，重载 Nginx
-nginx -t && nginx -s reload
 ```
+> 💡 **自动更新防护**：`./run.sh restart` 执行时会自动对比并补全新增的核心依赖包以及自动执行数据库结构无损迁移。
+
 
 
 ### 3. 应用安全配置与环境变量

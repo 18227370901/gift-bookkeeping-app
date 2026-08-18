@@ -53,22 +53,31 @@ start_service() {
         return 1
     }
 
-    # 自动创建虚拟环境及安装依赖库（若不存在）
+    # 自动创建虚拟环境及安装依赖库
     if [ ! -d "$VENV_DIR" ]; then
         echo -e "${YELLOW}检测到虚拟环境不存在，正在自动创建虚拟环境 $VENV_DIR ...${NC}"
         python3 -m venv "$VENV_DIR" || {
             echo -e "${RED}错误: 创建虚拟环境失败，请确认系统已安装 python3-venv${NC}"
             return 1
         }
-        echo -e "${GREEN}虚拟环境创建成功，正在安装项目依赖库...${NC}"
+    fi
+
+    # 检查核心依赖库是否存在，若缺失则强制安装
+    if ! "$VENV_DIR/bin/python3" -c "import flask, flask_sqlalchemy, flask_wtf, flask_login" >/dev/null 2>&1; then
+        echo -e "${GREEN}正在检查/补全项目依赖库...${NC}"
         "$VENV_DIR/bin/pip" install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple || true
         if [ -f "$APP_DIR/requirements.txt" ]; then
             "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt" -i https://pypi.tuna.tsinghua.edu.cn/simple || {
                 echo -e "${RED}错误: 依赖库安装失败，请检查网络或 requirements.txt${NC}"
                 return 1
             }
+        else
+            "$VENV_DIR/bin/pip" install flask flask-sqlalchemy flask-wtf flask-login -i https://pypi.tuna.tsinghua.edu.cn/simple || {
+                echo -e "${RED}错误: 依赖库安装失败${NC}"
+                return 1
+            }
         fi
-        echo -e "${GREEN}✅ 依赖库安装完成!${NC}"
+        echo -e "${GREEN}✅ 依赖库检查/安装完成!${NC}"
     fi
 
     # 使用进程组方式启动，便于后续统一管理
