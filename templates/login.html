@@ -62,13 +62,27 @@
 function refreshCaptcha() {
     var exprSpan = document.getElementById("captchaExpr");
     if (exprSpan) {
-        fetch("{{ url_for('login_captcha') }}")
-            .then(response => response.json())
-            .then(data => {
-                exprSpan.textContent = data.expr;
+        fetch("{{ url_for('login_captcha') }}", {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error("HTTP error " + response.status);
+                }
+                return response.json();
             })
-            .catch(() => {
-                exprSpan.textContent = "刷新失败";
+            .then(data => {
+                if (data && data.expr) {
+                    exprSpan.textContent = data.expr;
+                } else {
+                    exprSpan.textContent = "点击刷新";
+                }
+            })
+            .catch(err => {
+                console.error("刷新验证码出错:", err);
+                exprSpan.textContent = "点击重试";
             });
     }
 }

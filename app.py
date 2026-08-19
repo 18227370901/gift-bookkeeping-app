@@ -10,7 +10,7 @@ import secrets
 from datetime import datetime, timedelta
 import webbrowser
 from threading import Timer
-from flask import Flask, render_template, request, redirect, url_for, flash, session, current_app, abort, make_response
+from flask import Flask, render_template, request, redirect, url_for, flash, session, current_app, abort, make_response, jsonify
 from flask_wtf.csrf import CSRFProtect
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
@@ -151,6 +151,22 @@ def get_session_timeout_minutes():
     try:
         val = SystemSetting.get_val('session_timeout_minutes', '60')
         return max(1, int(val))
+    except (ValueError, TypeError):
+        return 60
+
+def get_max_login_attempts():
+    """获取当前设置的允许最大密码错误次数（触发验证码与锁定），默认5次"""
+    try:
+        val = SystemSetting.get_val('max_login_attempts', '5')
+        return max(1, int(val))
+    except (ValueError, TypeError):
+        return 5
+
+def get_login_lockout_seconds():
+    """获取当前设置的连续密码错误锁定等待时长（秒），默认60秒"""
+    try:
+        val = SystemSetting.get_val('login_lockout_seconds', '60')
+        return max(0, int(val))
     except (ValueError, TypeError):
         return 60
 
@@ -553,6 +569,9 @@ def login():
     if request and request.headers.get('X-Forwarded-For'):
         ip_addr = request.headers.get('X-Forwarded-For').split(',')[0].strip()
 
+    max_attempts = get_max_login_attempts()
+    lockout_seconds = get_login_lockout_seconds()
+
     ip_lock_until = session.get('ip_lock_until', 0)
     if now < ip_lock_until:
         wait_sec = int(ip_lock_until - now)
@@ -560,7 +579,7 @@ def login():
         return render_template('login.html', require_captcha=True, lock_wait=wait_sec)
 
     ip_fail_count = session.get('ip_fail_count', 0)
-    require_captcha = ip_fail_count >= 5
+    require_captcha = ip_fail_count >= max_attempts
 
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
@@ -599,14 +618,19 @@ def login():
             session['ip_fail_count'] = new_fail_count
             log_action('登录失败', f'尝试登录用户名 [{username}] 失败（连续失败{new_fail_count}次）')
 
-            if new_fail_count >= 5:
-                lock_duration = 60
-                session['ip_lock_until'] = now + lock_duration
-                flash(f'密码错误次数达到 {new_fail_count} 次，需要验证码且必须等待 1 分钟后才能再次尝试！', 'danger')
-                return render_template('login.html', require_captcha=True, lock_wait=lock_duration, username=username)
+            if new_fail_count >= max_attempts:
+                lock_duration = lockout_seconds
+                if lock_duration > 0:
+                    session['ip_lock_until'] = now + lock_duration
+                    lock_desc = f"{lock_duration // 60} 分钟" if lock_duration >= 60 and lock_duration % 60 == 0 else f"{lock_duration} 秒"
+                    flash(f'密码错误次数达到 {new_fail_count} 次，需要验证码且必须等待 {lock_desc} 后才能再次尝试！', 'danger')
+                    return render_template('login.html', require_captcha=True, lock_wait=lock_duration, username=username)
+                else:
+                    flash(f'密码错误次数达到 {new_fail_count} 次，请输入下方安全验证码！', 'danger')
+                    return render_template('login.html', require_captcha=True, username=username)
             else:
-                remaining = 5 - new_fail_count
-                flash(f'用户名或密码错误，请重试。（连续错误 {new_fail_count} 次，再错 {remaining} 次将触发验证码与锁定时长）', 'danger')
+                remaining = max_attempts - new_fail_count
+                flash(f'用户名或密码错误，请重试。（连续错误 {new_fail_count} 次，再错 {remaining} 次将触发验证码）', 'danger')
                 return render_template('login.html', require_captcha=False, username=username)
 
     return render_template('login.html', require_captcha=require_captcha)
@@ -930,7 +954,17 @@ def admin_users():
     # 获取所有注册邀请链接（最近创建的排前面）
     tokens = RegistrationToken.query.order_by(RegistrationToken.created_at.desc()).all()
     session_timeout_minutes = get_session_timeout_minutes()
-    return render_template('admin_users.html', users=users, tokens=tokens, session_timeout_minutes=session_timeout_minutes, now=datetime.now())
+    max_login_attempts = get_max_login_attempts()
+    login_lockout_seconds = get_login_lockout_seconds()
+    return render_template(
+        'admin_users.html',
+        users=users,
+        tokens=tokens,
+        session_timeout_minutes=session_timeout_minutes,
+        max_login_attempts=max_login_attempts,
+        login_lockout_seconds=login_lockout_seconds,
+        now=datetime.now()
+    )
 
 @app.route('/admin/settings/timeout', methods=['POST'])
 @login_required
@@ -941,14 +975,23 @@ def update_session_timeout():
 
     try:
         minutes = int(request.form.get('session_timeout_minutes', '60'))
-        if minutes < 1 or minutes > 10080: # 最多7天
+        attempts = int(request.form.get('max_login_attempts', '5'))
+        lockout_sec = int(request.form.get('login_lockout_seconds', '60'))
+
+        if minutes < 1 or minutes > 10080:
             flash('超时时间必须在 1 到 10080 分钟之间！', 'danger')
+        elif attempts < 1 or attempts > 20:
+            flash('允许最大尝试次数必须在 1 到 20 次之间！', 'danger')
+        elif lockout_sec < 0 or lockout_sec > 86400:
+            flash('锁定时长必须在 0 到 86400 秒之间！', 'danger')
         else:
             SystemSetting.set_val('session_timeout_minutes', minutes)
-            log_action('更新系统配置', f'设置登录无操作超时时间为 {minutes} 分钟')
-            flash(f'登录无操作超时时间已成功更新为 {minutes} 分钟！', 'success')
+            SystemSetting.set_val('max_login_attempts', attempts)
+            SystemSetting.set_val('login_lockout_seconds', lockout_sec)
+            log_action('更新系统配置', f'设置超时时间为 {minutes} 分钟，最大尝试次数为 {attempts} 次，锁定时长为 {lockout_sec} 秒')
+            flash('系统安全与登录设置修改成功！', 'success')
     except (ValueError, TypeError):
-        flash('无效的时间参数！', 'danger')
+        flash('无效的配置参数！', 'danger')
 
     return redirect(url_for('admin_users'))
 @app.route('/admin/logs')
