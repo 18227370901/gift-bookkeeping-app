@@ -46,7 +46,18 @@ check_status() {
     fi
 }
 
-# 自动配置与重载 Nginx 反向代理文件
+# 自动生成/刷新 SSL 证书
+ensure_ssl_certs() {
+    echo -e "${GREEN}正在生成/更新 SSL 自签名证书...${NC}"
+    mkdir -p "$APP_DIR/ssl"
+    if [ -d "$VENV_DIR" ] && [ -f "$VENV_DIR/bin/python3" ]; then
+        "$VENV_DIR/bin/python3" "$APP_DIR/generate_ssl_certs.py"
+    elif command -v python3 > /dev/null 2>&1; then
+        python3 "$APP_DIR/generate_ssl_certs.py"
+    else
+        echo -e "${RED}警告: 未找到 python3，无法自动生成证书，请手动生成或准备 ssl/server.crt 和 ssl/server.key${NC}"
+    fi
+}
 setup_nginx_config() {
     if [ -d "$NGINX_CONF_DIR" ]; then
         echo -e "${GREEN}正在处理 Nginx 配置文件 ($NGINX_CONF_DIR)...${NC}"
@@ -92,7 +103,8 @@ start_service() {
         return 1
     fi
 
-    # 启动前自动配置 Nginx 与清理缓存垃圾
+    # 启动前自动生成最新 SSL 证书、配置 Nginx 与清理缓存垃圾
+    ensure_ssl_certs
     setup_nginx_config
     cleanup_cache
 
