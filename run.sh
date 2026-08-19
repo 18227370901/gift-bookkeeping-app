@@ -15,6 +15,9 @@ APP_SCRIPT="app.py"
 PID_FILE="$APP_DIR/app.pid"
 LOG_FILE="$APP_DIR/app.log"
 
+# Nginx 配置文件目录变量（用户可自定义覆盖，如 export NGINX_CONF_DIR=/etc/nginx/conf.d）
+NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx/conf.d}"
+
 # ===== 环境变量定义（全局有效） =====
 export PORT=11443
 export ADMIN_USER=admin
@@ -43,6 +46,44 @@ check_status() {
     fi
 }
 
+# 自动配置与重载 Nginx 反向代理文件
+setup_nginx_config() {
+    if [ -d "$NGINX_CONF_DIR" ]; then
+        echo -e "${GREEN}正在处理 Nginx 配置文件 ($NGINX_CONF_DIR)...${NC}"
+        if [ -f "$NGINX_CONF_DIR/gift_app_docker.conf" ]; then
+            mv "$NGINX_CONF_DIR/gift_app_docker.conf" "$NGINX_CONF_DIR/gift_app_docker.conf.disabled" 2>/dev/null || true
+            echo -e "${YELLOW}已禁用冲突的 Docker 版本 Nginx 配置: gift_app_docker.conf${NC}"
+        fi
+        if [ -f "$APP_DIR/nginx_ssl.conf" ]; then
+            cp "$APP_DIR/nginx_ssl.conf" "$NGINX_CONF_DIR/gift_app_native.conf" 2>/dev/null && \
+            echo -e "${GREEN}✅ 已同步 Nginx 配置到 $NGINX_CONF_DIR/gift_app_native.conf${NC}" || true
+        fi
+        if command -v nginx > /dev/null 2>&1; then
+            if nginx -t >/dev/null 2>&1; then
+                (nginx -s reload >/dev/null 2>&1 || systemctl reload nginx >/dev/null 2>&1) && \
+                echo -e "${GREEN}✅ Nginx 配置热重载成功!${NC}" || echo -e "${YELLOW}⚠️ Nginx 热重载跳过 (需 root 权限)${NC}"
+            else
+                echo -e "${YELLOW}⚠️ Nginx 配置语法校验未通过，跳过 reload${NC}"
+            fi
+        fi
+    fi
+}
+
+# 清理缓存及 .git 垃圾数据，释放服务器磁盘空间
+cleanup_cache() {
+    echo -e "${GREEN}正在清理缓存与 .git 冗余垃圾...${NC}"
+    cd "$APP_DIR" || return
+    if [ -d ".git" ] && command -v git > /dev/null 2>&1; then
+        git fetch --depth 1 origin main 2>/dev/null || true
+        git reflog expire --expire=now --all 2>/dev/null || true
+        git gc --prune=now 2>/dev/null || true
+        echo -e "${GREEN}✅ .git 垃圾数据清理完成! 当前 .git 体积: $(du -sh .git 2>/dev/null | cut -f1)${NC}"
+    fi
+    find "$APP_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+    find "$APP_DIR" -type f -name "*.pyc" -delete 2>/dev/null || true
+    rm -rf /tmp/gift-backup 2>/dev/null || true
+}
+
 # 启动服务
 start_service() {
     if check_status; then
@@ -50,6 +91,10 @@ start_service() {
         echo -e "${YELLOW}服务已在运行中 (PID: $PID)${NC}"
         return 1
     fi
+
+    # 启动前自动配置 Nginx 与清理缓存垃圾
+    setup_nginx_config
+    cleanup_cache
 
     echo -e "${GREEN}正在启动服务...${NC}"
     
@@ -224,13 +269,17 @@ case "$1" in
     restart)
         restart_service
         ;;
+    clean)
+        cleanup_cache
+        ;;
     *)
-        echo "用法: $0 {start|stop|status|restart}"
+        echo "用法: $0 {start|stop|status|restart|clean}"
         echo ""
-        echo "  start   - 启动服务"
+        echo "  start   - 启动服务 (自动配置 Nginx 与清理缓存)"
         echo "  stop    - 停止服务"
         echo "  status  - 查看服务状态"
-        echo "  restart - 重启服务"
+        echo "  restart - 重启服务 (自动清理垃圾数据并生效新代码)"
+        echo "  clean   - 仅手动清理垃圾缓存与压缩 .git"
         exit 1
         ;;
 esac

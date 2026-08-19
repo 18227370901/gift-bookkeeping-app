@@ -26,6 +26,16 @@
                             <input type="password" class="form-control" id="password" name="password" placeholder="请输入密码" required>
                         </div>
                     </div>
+                    {% if require_captcha %}
+                    <div class="mb-3">
+                        <label for="captcha" class="form-label text-danger fw-bold"><i class="fa-solid fa-shield-halved me-1"></i>安全验证码</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="captcha" name="captcha" placeholder="计算右侧算式结果" required autocomplete="off">
+                            <span class="input-group-text bg-light fw-bold text-primary" id="captchaExpr" style="cursor: pointer; min-width: 100px; justify-content: center;" title="点击刷新验证码">加载中...</span>
+                            <button class="btn btn-outline-secondary" type="button" onclick="refreshCaptcha()" title="刷新验证码"><i class="fa-solid fa-rotate-right"></i></button>
+                        </div>
+                    </div>
+                    {% endif %}
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <div class="form-check">
                             <input type="checkbox" class="form-check-input" id="remember" name="remember">
@@ -49,12 +59,58 @@
 </div>
 
 <script>
+function refreshCaptcha() {
+    var exprSpan = document.getElementById("captchaExpr");
+    if (exprSpan) {
+        fetch("{{ url_for('login_captcha') }}")
+            .then(response => response.json())
+            .then(data => {
+                exprSpan.textContent = data.expr;
+            })
+            .catch(() => {
+                exprSpan.textContent = "刷新失败";
+            });
+    }
+}
+
 document.addEventListener("DOMContentLoaded", function() {
     var usernameInput = document.getElementById("username");
     var passwordInput = document.getElementById("password");
     var rememberCheckbox = document.getElementById("remember");
     var loginForm = document.getElementById("loginForm");
 
+    {% if lock_wait and lock_wait > 0 %}
+    var lockWait = {{ lock_wait }};
+    var submitBtn = loginForm.querySelector("button[type='submit']");
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        var originalBtnText = submitBtn.innerHTML;
+        var timer = setInterval(function() {
+            if (lockWait <= 0) {
+                clearInterval(timer);
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalBtnText;
+            } else {
+                submitBtn.innerHTML = '<i class="fa-solid fa-lock me-1"></i>请等待 (' + lockWait + 's)';
+                lockWait--;
+            }
+        }, 1000);
+    }
+    {% endif %}
+
+    {% if require_captcha %}
+    refreshCaptcha();
+    var exprSpan = document.getElementById("captchaExpr");
+    if (exprSpan) {
+        exprSpan.addEventListener("click", refreshCaptcha);
+    }
+    {% endif %}
+
+    {% if username %}
+    if (usernameInput) {
+        usernameInput.value = {{ username|tojson }};
+    }
+    {% else %}
     var savedUsername = localStorage.getItem("remember_username");
     var savedPassword = localStorage.getItem("remember_password");
     if (savedUsername) {
@@ -64,6 +120,7 @@ document.addEventListener("DOMContentLoaded", function() {
         }
         rememberCheckbox.checked = true;
     }
+    {% endif %}
 
     loginForm.addEventListener("submit", function() {
         if (rememberCheckbox.checked) {
