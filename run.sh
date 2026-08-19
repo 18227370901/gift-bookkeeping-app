@@ -84,15 +84,14 @@ setup_nginx_config() {
     fi
 }
 
-# 清理缓存及 .git 垃圾数据，释放服务器磁盘空间
+# 清理缓存及 .git 本地冗余垃圾数据，释放服务器磁盘空间
 cleanup_cache() {
-    echo -e "${GREEN}正在清理缓存与 .git 冗余垃圾...${NC}"
+    echo -e "${GREEN}正在清理本地缓存与 .git 冗余垃圾...${NC}"
     cd "$APP_DIR" || return
     if [ -d ".git" ] && command -v git > /dev/null 2>&1; then
-        git fetch --depth 1 origin main 2>/dev/null || true
         git reflog expire --expire=now --all 2>/dev/null || true
         git gc --prune=now 2>/dev/null || true
-        echo -e "${GREEN}✅ .git 垃圾数据清理完成! 当前 .git 体积: $(du -sh .git 2>/dev/null | cut -f1)${NC}"
+        echo -e "${GREEN}✅ .git 冗余垃圾清理完成! 当前 .git 体积: $(du -sh .git 2>/dev/null | cut -f1)${NC}"
     fi
     find "$APP_DIR" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
     find "$APP_DIR" -type f -name "*.pyc" -delete 2>/dev/null || true
