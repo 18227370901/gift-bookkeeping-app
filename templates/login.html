@@ -26,16 +26,14 @@
                             <input type="password" class="form-control" id="password" name="password" placeholder="请输入密码" required>
                         </div>
                     </div>
-                    {% if require_captcha %}
-                    <div class="mb-3">
+                    <div class="mb-3" id="captchaContainer" style="{% if not require_captcha %}display: none;{% endif %}">
                         <label for="captcha" class="form-label text-danger fw-bold"><i class="fa-solid fa-shield-halved me-1"></i>安全验证码</label>
                         <div class="input-group">
-                            <input type="text" class="form-control" id="captcha" name="captcha" placeholder="计算右侧算式结果" required autocomplete="off">
+                            <input type="text" class="form-control" id="captcha" name="captcha" placeholder="计算右侧算式结果" {% if require_captcha %}required{% endif %} autocomplete="off">
                             <span class="input-group-text bg-light fw-bold text-primary" id="captchaExpr" style="cursor: pointer; min-width: 100px; justify-content: center;" title="点击刷新验证码">加载中...</span>
                             <button class="btn btn-outline-secondary" type="button" onclick="refreshCaptcha()" title="刷新验证码"><i class="fa-solid fa-rotate-right"></i></button>
                         </div>
                     </div>
-                    {% endif %}
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <div class="form-check">
                             <input type="checkbox" class="form-check-input" id="remember" name="remember">
@@ -92,37 +90,80 @@ document.addEventListener("DOMContentLoaded", function() {
     var passwordInput = document.getElementById("password");
     var rememberCheckbox = document.getElementById("remember");
     var loginForm = document.getElementById("loginForm");
-
-    {% if lock_wait and lock_wait > 0 %}
-    var lockWait = {{ lock_wait }};
-    var submitBtn = loginForm.querySelector("button[type='submit']");
-    if (submitBtn) {
-        submitBtn.disabled = true;
-        var originalBtnText = submitBtn.innerHTML;
-        var timer = setInterval(function() {
-            if (lockWait <= 0) {
-                clearInterval(timer);
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = originalBtnText;
-            } else {
-                submitBtn.innerHTML = '<i class="fa-solid fa-lock me-1"></i>请等待 (' + lockWait + 's)';
-                lockWait--;
-            }
-        }, 1000);
-    }
-    {% endif %}
-
-    {% if require_captcha %}
-    refreshCaptcha();
+    var captchaContainer = document.getElementById("captchaContainer");
+    var captchaInput = document.getElementById("captcha");
     var exprSpan = document.getElementById("captchaExpr");
+    var submitBtn = loginForm.querySelector("button[type='submit']");
+    var lockTimer = null;
+
     if (exprSpan) {
         exprSpan.addEventListener("click", refreshCaptcha);
     }
-    {% endif %}
+
+    function checkUserRisk(uname) {
+        if (!uname) {
+            if (captchaContainer) captchaContainer.style.display = "none";
+            if (captchaInput) captchaInput.removeAttribute("required");
+            return;
+        }
+        fetch("{{ url_for('login_check_risk') }}?username=" + encodeURIComponent(uname))
+            .then(res => res.json())
+            .then(data => {
+                if (data.require_captcha) {
+                    if (captchaContainer) captchaContainer.style.display = "block";
+                    if (captchaInput) captchaInput.setAttribute("required", "required");
+                    refreshCaptcha();
+                } else {
+                    if (captchaContainer) captchaContainer.style.display = "none";
+                    if (captchaInput) captchaInput.removeAttribute("required");
+                }
+
+                if (data.is_locked && data.lock_wait > 0) {
+                    if (submitBtn) {
+                        submitBtn.disabled = true;
+                        var lockWait = data.lock_wait;
+                        var originalBtnText = '<i class="fa-solid fa-paper-plane me-1"></i>登录系统';
+                        if (lockTimer) clearInterval(lockTimer);
+                        lockTimer = setInterval(function() {
+                            if (lockWait <= 0) {
+                                clearInterval(lockTimer);
+                                submitBtn.disabled = false;
+                                submitBtn.innerHTML = originalBtnText;
+                            } else {
+                                submitBtn.innerHTML = '<i class="fa-solid fa-lock me-1"></i>请等待 (' + lockWait + 's)';
+                                lockWait--;
+                            }
+                        }, 1000);
+                    }
+                } else {
+                    if (lockTimer) clearInterval(lockTimer);
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i>登录系统';
+                    }
+                }
+            })
+            .catch(err => console.error("检查风控状态出错:", err));
+    }
+
+    var checkTimeout = null;
+    if (usernameInput) {
+        usernameInput.addEventListener("blur", function() {
+            checkUserRisk(this.value.trim());
+        });
+        usernameInput.addEventListener("input", function() {
+            clearTimeout(checkTimeout);
+            var val = this.value.trim();
+            checkTimeout = setTimeout(function() {
+                checkUserRisk(val);
+            }, 500);
+        });
+    }
 
     {% if username %}
     if (usernameInput) {
         usernameInput.value = {{ username|tojson }};
+        checkUserRisk({{ username|tojson }});
     }
     {% else %}
     var savedUsername = localStorage.getItem("remember_username");
@@ -133,6 +174,7 @@ document.addEventListener("DOMContentLoaded", function() {
             passwordInput.value = savedPassword;
         }
         rememberCheckbox.checked = true;
+        checkUserRisk(savedUsername);
     }
     {% endif %}
 

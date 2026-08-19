@@ -544,6 +544,40 @@ def index():
         num2cn=num2cn
     )
 
+# 全局账号登录失败与风控锁定字典 (服务端内存维护)
+LOGIN_FAIL_COUNTS = {}   # {username: fail_count}
+LOGIN_LOCK_UNTILS = {}   # {username: lock_until_timestamp}
+
+def get_user_risk_status(username):
+    """获取指定用户名的风控状态：(cur_fail_count, is_locked, lock_wait_seconds, require_captcha)"""
+    if not username:
+        return 0, False, 0, False
+    now = datetime.now().timestamp()
+    max_attempts = get_max_login_attempts()
+    cur_fail_count = LOGIN_FAIL_COUNTS.get(username, 0)
+    target_lock_until = LOGIN_LOCK_UNTILS.get(username, 0)
+
+    is_locked = False
+    lock_wait = 0
+    if now < target_lock_until:
+        is_locked = True
+        lock_wait = int(target_lock_until - now)
+
+    require_captcha = (cur_fail_count >= max_attempts) or is_locked
+    return cur_fail_count, is_locked, lock_wait, require_captcha
+
+@app.route('/login/check_risk')
+def login_check_risk():
+    username = request.args.get('username', '').strip()
+    cur_fail_count, is_locked, lock_wait, require_captcha = get_user_risk_status(username)
+    return jsonify({
+        'username': username,
+        'fail_count': cur_fail_count,
+        'is_locked': is_locked,
+        'lock_wait': lock_wait,
+        'require_captcha': require_captcha
+    })
+
 @app.route('/login/captcha')
 def login_captcha():
     num1 = random.randint(1, 20)
@@ -565,21 +599,8 @@ def login():
         return redirect(url_for('index'))
 
     now = datetime.now().timestamp()
-    ip_addr = request.remote_addr if request else ""
-    if request and request.headers.get('X-Forwarded-For'):
-        ip_addr = request.headers.get('X-Forwarded-For').split(',')[0].strip()
-
     max_attempts = get_max_login_attempts()
     lockout_seconds = get_login_lockout_seconds()
-
-    ip_lock_until = session.get('ip_lock_until', 0)
-    if now < ip_lock_until:
-        wait_sec = int(ip_lock_until - now)
-        flash(f'连续密码错误过多，触发安全保护！请等待 {wait_sec} 秒后再试。', 'danger')
-        return render_template('login.html', require_captcha=True, lock_wait=wait_sec)
-
-    ip_fail_count = session.get('ip_fail_count', 0)
-    require_captcha = ip_fail_count >= max_attempts
 
     if request.method == 'POST':
         username = request.form.get('username', '').strip()
@@ -587,12 +608,21 @@ def login():
         remember = True if request.form.get('remember') else False
         user_captcha = request.form.get('captcha', '').strip()
 
+        cur_fail_count, is_locked, lock_wait, require_captcha = get_user_risk_status(username)
+
+        # 1. 检查锁定状态
+        if is_locked:
+            flash(f'账号 [{username}] 密码错误过多，触发安全保护！请等待 {lock_wait} 秒后再试。', 'danger')
+            return render_template('login.html', require_captcha=True, lock_wait=lock_wait, username=username)
+
+        # 2. 检查验证码（如果达到最大尝试次数，强制校验验证码）
         if require_captcha:
             real_captcha = session.get('login_captcha_ans')
             if not user_captcha or user_captcha != real_captcha:
-                flash('验证码错误，请重新计算并输入！', 'danger')
+                flash('验证码错误或未输入，请重新计算并输入！', 'danger')
                 return render_template('login.html', require_captcha=True, username=username)
 
+        # 3. 校验账号密码
         user = User.query.filter_by(username=username).first()
         if user and user.check_password(password):
             if not user.is_active:
@@ -600,8 +630,9 @@ def login():
                 flash('该账号已被禁用/冻结，无法登录使用，请联系管理员处理！', 'danger')
                 return render_template('login.html', require_captcha=require_captcha, username=username)
             
-            session.pop('ip_fail_count', None)
-            session.pop('ip_lock_until', None)
+            # 登录成功，清除该账号在服务端的失败计数与锁定状态
+            LOGIN_FAIL_COUNTS.pop(username, None)
+            LOGIN_LOCK_UNTILS.pop(username, None)
             session.pop('login_captcha_ans', None)
 
             token = secrets.token_hex(16)
@@ -614,26 +645,28 @@ def login():
             flash(f'欢迎回来，{user.username}！', 'success')
             return redirect(url_for('index'))
         else:
-            new_fail_count = ip_fail_count + 1
-            session['ip_fail_count'] = new_fail_count
+            # 登录失败：更新服务端全局字典
+            new_fail_count = cur_fail_count + 1
+            LOGIN_FAIL_COUNTS[username] = new_fail_count
             log_action('登录失败', f'尝试登录用户名 [{username}] 失败（连续失败{new_fail_count}次）')
 
             if new_fail_count >= max_attempts:
                 lock_duration = lockout_seconds
                 if lock_duration > 0:
-                    session['ip_lock_until'] = now + lock_duration
+                    LOGIN_LOCK_UNTILS[username] = now + lock_duration
                     lock_desc = f"{lock_duration // 60} 分钟" if lock_duration >= 60 and lock_duration % 60 == 0 else f"{lock_duration} 秒"
-                    flash(f'密码错误次数达到 {new_fail_count} 次，需要验证码且必须等待 {lock_desc} 后才能再次尝试！', 'danger')
+                    flash(f'账号 [{username}] 密码错误次数达到 {new_fail_count} 次，需要验证码且必须等待 {lock_desc} 后才能再次尝试！', 'danger')
                     return render_template('login.html', require_captcha=True, lock_wait=lock_duration, username=username)
                 else:
-                    flash(f'密码错误次数达到 {new_fail_count} 次，请输入下方安全验证码！', 'danger')
+                    flash(f'账号 [{username}] 密码错误次数达到 {new_fail_count} 次，请输入下方安全验证码！', 'danger')
                     return render_template('login.html', require_captcha=True, username=username)
             else:
                 remaining = max_attempts - new_fail_count
-                flash(f'用户名或密码错误，请重试。（连续错误 {new_fail_count} 次，再错 {remaining} 次将触发验证码）', 'danger')
+                flash(f'用户名或密码错误，请重试。（账号 [{username}] 连续错误 {new_fail_count} 次，再错 {remaining} 次将触发验证码）', 'danger')
                 return render_template('login.html', require_captcha=False, username=username)
 
-    return render_template('login.html', require_captcha=require_captcha)
+    # GET 请求处理
+    return render_template('login.html', require_captcha=False)
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
