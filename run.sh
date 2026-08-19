@@ -19,9 +19,10 @@ LOG_FILE="$APP_DIR/app.log"
 NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx/conf.d}"
 
 # ===== 环境变量定义（全局有效） =====
-export PORT=11443
-export ADMIN_USER=admin
-export ADMIN_PASS='xK9pQ#vL2mNw2'  # 密码含特殊字符，用单引号括起
+export PORT="${PORT:-11443}"
+export NGINX_PORT="${NGINX_PORT:-15001}"
+export ADMIN_USER="${ADMIN_USER:-admin}"
+export ADMIN_PASS="${ADMIN_PASS:-xK9pQ#vL2mNw2}"  # 密码含特殊字符，用单引号括起
 
 # ===== 颜色输出 =====
 RED='\033[0;31m'
@@ -66,8 +67,11 @@ setup_nginx_config() {
             echo -e "${YELLOW}已禁用冲突的 Docker 版本 Nginx 配置: gift_app_docker.conf${NC}"
         fi
         if [ -f "$APP_DIR/nginx_ssl.conf" ]; then
-            cp "$APP_DIR/nginx_ssl.conf" "$NGINX_CONF_DIR/gift_app_native.conf" 2>/dev/null && \
-            echo -e "${GREEN}✅ 已同步 Nginx 配置到 $NGINX_CONF_DIR/gift_app_native.conf${NC}" || true
+            # 动态替换后端 PORT 和 NGINX_PORT
+            sed -e "s/server 127.0.0.1:[0-9]*/server 127.0.0.1:$PORT/g" \
+                -e "s/listen [0-9]* ssl;/listen $NGINX_PORT ssl;/g" \
+                "$APP_DIR/nginx_ssl.conf" > "$NGINX_CONF_DIR/gift_app_native.conf" 2>/dev/null && \
+            echo -e "${GREEN}✅ 已动态更新并同步 Nginx 配置到 $NGINX_CONF_DIR/gift_app_native.conf (后端端口: $PORT, Nginx监听端口: $NGINX_PORT)${NC}" || true
         fi
         if command -v nginx > /dev/null 2>&1; then
             if nginx -t >/dev/null 2>&1; then
