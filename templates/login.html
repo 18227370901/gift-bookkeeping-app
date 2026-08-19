@@ -104,6 +104,11 @@ document.addEventListener("DOMContentLoaded", function() {
         if (!uname) {
             if (captchaContainer) captchaContainer.style.display = "none";
             if (captchaInput) captchaInput.removeAttribute("required");
+            if (lockTimer) clearInterval(lockTimer);
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="fa-solid fa-paper-plane me-1"></i>登录系统';
+            }
             return;
         }
         fetch("{{ url_for('login_check_risk') }}?username=" + encodeURIComponent(uname))
