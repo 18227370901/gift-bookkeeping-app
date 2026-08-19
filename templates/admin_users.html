@@ -22,22 +22,39 @@
   <div class="card-body">
     <form action="{{ url_for('update_session_timeout') }}" method="POST" class="row g-3 align-items-center">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <div class="col-auto">
-        <label for="session_timeout_minutes" class="col-form-label fw-bold text-muted">登录无操作超时时间：</label>
-      </div>
-      <div class="col-auto">
-        <div class="input-group" style="max-width: 200px;">
+      
+      <div class="col-md-4">
+        <label for="session_timeout_minutes" class="form-label fw-bold text-muted">登录无操作超时：</label>
+        <div class="input-group">
           <input type="number" name="session_timeout_minutes" id="session_timeout_minutes" class="form-control" value="{{ session_timeout_minutes }}" min="1" max="10080" required>
           <span class="input-group-text">分钟</span>
         </div>
       </div>
-      <div class="col-auto">
-        <button type="submit" class="btn btn-primary px-3">
-          <i class="fa-solid fa-floppy-disk me-1"></i>保存设置
+
+      <div class="col-md-4">
+        <label for="max_login_attempts" class="form-label fw-bold text-muted">密码允许连续错误：</label>
+        <div class="input-group">
+          <input type="number" name="max_login_attempts" id="max_login_attempts" class="form-control" value="{{ max_login_attempts }}" min="1" max="20" required>
+          <span class="input-group-text">次</span>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <label for="login_lockout_seconds" class="form-label fw-bold text-muted">触发风控锁定等待：</label>
+        <div class="input-group">
+          <input type="number" name="login_lockout_seconds" id="login_lockout_seconds" class="form-control" value="{{ login_lockout_seconds }}" min="0" max="86400" required>
+          <span class="input-group-text">秒</span>
+        </div>
+      </div>
+
+      <div class="col-12 text-end mt-3">
+        <button type="submit" class="btn btn-primary px-4">
+          <i class="fa-solid fa-floppy-disk me-1"></i>保存系统设置
         </button>
       </div>
+
       <div class="col-12 mt-1">
-        <small class="text-muted"><i class="fa-solid fa-circle-info me-1"></i>默认超时时间为 60 分钟（1小时）。超出设定无操作时间后，系统将自动将用户退出并跳转至登录页。</small>
+        <small class="text-muted"><i class="fa-solid fa-circle-info me-1"></i>说明：到达错误次数后将自动开启验证码；锁定等待时长为触发风险后的禁止再次尝试的冷却倒计时。</small>
       </div>
     </form>
   </div>
