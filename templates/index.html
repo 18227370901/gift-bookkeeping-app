@@ -405,14 +405,29 @@
             <form action="{{ url_for('import_csv') }}" method="POST" enctype="multipart/form-data">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="modal-body">
+                    <div class="mb-3 text-end">
+                        <a href="{{ url_for('download_import_template') }}" class="btn btn-outline-primary btn-sm">
+                            <i class="fa-solid fa-file-excel me-1"></i>下载导入样例模版 (.csv)
+                        </a>
+                    </div>
                     <div class="mb-3">
                         <label for="csv_file" class="form-label fw-bold">选择 CSV 文件</label>
                         <input class="form-control" type="file" id="csv_file" name="file" accept=".csv" required>
                     </div>
                     <div class="alert alert-info small mb-0">
-                        <h6 class="fw-bold mb-1"><i class="fa-solid fa-circle-info me-1"></i>说明：</h6>
-                        支持包含表头的 CSV 文件格式（也可以直接上传系统导出的 CSV）：<br>
-                        列顺序：<code>客人姓名, 年龄, 联系电话, 礼金金额, 办席原因, 联系地址, 备注说明</code>
+                        <h6 class="fw-bold mb-2"><i class="fa-solid fa-circle-info me-1"></i>填写规则与说明：</h6>
+                        <ul class="mb-1 ps-3">
+                            <li><strong class="text-danger">* 客人姓名</strong>（必填）：送礼人姓名</li>
+                            <li><strong class="text-danger">* 礼金金额</strong>（必填）：必须为正数值，如 <code>500</code></li>
+                            <li><strong class="text-danger">* 办席原因</strong>（必填）：如 <code>婚礼</code>、<code>满月酒</code>、<code>寿宴</code>、<code>乔迁</code>、<code>升学</code>、<code>其它</code></li>
+                            <li><strong>年龄</strong>（选填）：数值，如 <code>30</code></li>
+                            <li><strong>联系电话</strong>（选填）：手机或固话号码</li>
+                            <li><strong>联系地址</strong>（选填）：居住或联系地址</li>
+                            <li><strong>备注说明</strong>（选填）：额外记录信息</li>
+                        </ul>
+                        <div class="mt-2 text-muted" style="font-size: 0.83rem;">
+                            <i class="fa-solid fa-lightbulb me-1 text-warning"></i>提示：推荐点击右上角按钮下载样例模版，按格式填入数据后再选择文件导入。
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
