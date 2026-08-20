@@ -1310,6 +1310,22 @@ def export_csv():
     return response
 
 
+@app.route('/import/template')
+@login_required
+def download_import_template():
+    output = io.StringIO()
+    output.write('\ufeff')
+    writer = csv.writer(output)
+    writer.writerow(['客人姓名(必填)', '年龄(选填)', '联系电话(选填)', '礼金金额(元)(必填)', '办席原因(必填)', '联系地址(选填)', '备注说明(选填)'])
+    writer.writerow(['张三', '30', '13800138000', '500', '婚礼', '北京市朝阳区', '新婚大吉'])
+    writer.writerow(['李四', '', '13900139000', '1000', '满月酒', '上海市浦东新区', '贺百天之喜'])
+
+    response = Response(output.getvalue(), mimetype='text/csv')
+    response.headers['Content-Disposition'] = 'attachment; filename=gift_records_template.csv'
+    log_action('下载模板', '用户下载了批量导入样例模版 CSV 文件')
+    return response
+
+
 @app.route('/import/csv', methods=['POST'])
 @login_required
 def import_csv():
@@ -1347,10 +1363,10 @@ def import_csv():
                 continue
 
             headers = [c.strip() for c in row]
-            if any(h in headers for h in ['姓名', '客人姓名', '礼金金额', '礼金金额(元)', 'ID', '送礼人', '事由', '办席原因', '办事原因', '原因']):
+            if any(h in headers for h in ['姓名', '客人姓名', '礼金金额', '礼金金额(元)', 'ID', '送礼人', '事由', '办席原因', '办事原因', '原因']) or any(any(k in h for k in ['姓名', '金额', '事由', '原因', '礼金', '客人']) for h in headers):
                 col_map = {}
                 for idx, col in enumerate(headers):
-                    col_clean = col.replace('(元)', '').strip()
+                    col_clean = col.replace('(元)', '').replace('(必填)', '').replace('(选填)', '').replace('*', '').strip()
                     if any(k in col_clean for k in ['姓名', '客人', '送礼人']):
                         col_map['name'] = idx
                     elif '年龄' in col_clean:
