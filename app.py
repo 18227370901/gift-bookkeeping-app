@@ -203,11 +203,18 @@ def add_header(response):
 
 @app.before_request
 def csrf_protect():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_hex(32)
     if request.method in ['POST', 'PUT', 'PATCH', 'DELETE']:
         token = session.get('csrf_token')
         request_token = request.form.get('csrf_token') or request.headers.get('X-CSRF-Token')
         if not token or not request_token or token != request_token:
-            abort(403, description="CSRF Token 验证失败，请求非法！")
+            abort(403, description="CSRF Token 验证失败，页面凭证已失效或请求非法，请重试！")
+
+@app.errorhandler(403)
+def handle_403(e):
+    flash(str(e.description) if hasattr(e, 'description') and e.description else 'CSRF Token 验证失败或请求非法！', 'danger')
+    return redirect(url_for('login'))
 
 @app.context_processor
 def inject_csrf_token():
@@ -613,14 +620,14 @@ def login():
         # 1. 检查锁定状态
         if is_locked:
             flash(f'账号 [{username}] 密码错误过多，触发安全保护！请等待 {lock_wait} 秒后再试。', 'danger')
-            return render_template('login.html', require_captcha=True, lock_wait=lock_wait, username=username)
+            return redirect(url_for('login', username=username))
 
         # 2. 检查验证码（如果达到最大尝试次数，强制校验验证码）
         if require_captcha:
             real_captcha = session.get('login_captcha_ans')
             if not user_captcha or user_captcha != real_captcha:
                 flash('验证码错误或未输入，请重新计算并输入！', 'danger')
-                return render_template('login.html', require_captcha=True, username=username)
+                return redirect(url_for('login', username=username))
 
         # 3. 校验账号密码
         user = User.query.filter_by(username=username).first()
@@ -628,7 +635,7 @@ def login():
             if not user.is_active:
                 log_action('登录失败', f'已被禁用的账号 [{username}] 尝试登录', user=user)
                 flash('该账号已被禁用/冻结，无法登录使用，请联系管理员处理！', 'danger')
-                return render_template('login.html', require_captcha=require_captcha, username=username)
+                return redirect(url_for('login', username=username))
             
             # 登录成功，清除该账号在服务端的失败计数与锁定状态
             LOGIN_FAIL_COUNTS.pop(username, None)
@@ -656,16 +663,20 @@ def login():
                     LOGIN_LOCK_UNTILS[username] = now + lock_duration
                     lock_desc = f"{lock_duration // 60} 分钟" if lock_duration >= 60 and lock_duration % 60 == 0 else f"{lock_duration} 秒"
                     flash(f'账号 [{username}] 密码错误次数达到 {new_fail_count} 次，需要验证码且必须等待 {lock_desc} 后才能再次尝试！', 'danger')
-                    return render_template('login.html', require_captcha=True, lock_wait=lock_duration, username=username)
+                    return redirect(url_for('login', username=username))
                 else:
                     flash(f'账号 [{username}] 密码错误次数达到 {new_fail_count} 次，请输入下方安全验证码！', 'danger')
-                    return render_template('login.html', require_captcha=True, username=username)
+                    return redirect(url_for('login', username=username))
             else:
                 remaining = max_attempts - new_fail_count
                 flash(f'用户名或密码错误，请重试。（账号 [{username}] 连续错误 {new_fail_count} 次，再错 {remaining} 次将触发验证码）', 'danger')
-                return render_template('login.html', require_captcha=False, username=username)
+                return redirect(url_for('login', username=username))
 
     # GET 请求处理
+    username = request.args.get('username', '').strip()
+    if username:
+        cur_fail_count, is_locked, lock_wait, require_captcha = get_user_risk_status(username)
+        return render_template('login.html', require_captcha=require_captcha, lock_wait=lock_wait if is_locked else None, username=username)
     return render_template('login.html', require_captcha=False)
 
 @app.route('/register', methods=['GET', 'POST'])
