@@ -22,7 +22,7 @@ NGINX_CONF_DIR="${NGINX_CONF_DIR:-/etc/nginx/conf.d}"
 export PORT="${PORT:-11443}"
 export NGINX_PORT="${NGINX_PORT:-15001}"
 export ADMIN_USER="${ADMIN_USER:-admin}"
-export ADMIN_PASS="${ADMIN_PASS:-xK9pQ#vL2mNw2}"  # 密码含特殊字符，用单引号括起
+export ADMIN_PASS="${ADMIN_PASS:-admin123}"  # 密码含特殊字符，用单引号括起
 
 # ===== 颜色输出 =====
 RED='\033[0;31m'
