@@ -545,7 +545,7 @@ def init_database():
         if not admin:
             admin = User(
                 username=initial_user,
-                security_question='管理员安全密保问题',
+                security_question='系统默认安全问题：您的默认备用验证码是？',
                 is_admin=True,
                 is_active=True
             )
@@ -976,14 +976,16 @@ def forgot_password():
                                            require_captcha=True)
 
             if not user.check_security_answer(security_answer):
-                new_fail_count = SecurityRisk.record_fail(username)
+                new_fail_count = FORGOT_SECURITY_FAIL_COUNTS.get(username, 0) + 1
+                FORGOT_SECURITY_FAIL_COUNTS[username] = new_fail_count
                 log_action('找回密码失败', f'尝试找回用户名 [{username}] 密保答案验证错误（连续错误{new_fail_count}次）')
 
                 if not getattr(user, 'is_admin', False) and new_fail_count >= max_security_attempts:
                     user.is_active = False
                     user.session_token = None
                     db.session.commit()
-                    SecurityRisk.clear_risk(username)
+                    FORGOT_SECURITY_FAIL_COUNTS.pop(username, None)
+                    FORGOT_SECURITY_LOCK_UNTILS.pop(username, None)
                     log_action('账号自动锁定', f'用户 [{username}] 密保验证错误达到上限（{new_fail_count}次），账号已被系统自动锁定')
                     flash(f'密保答案连续错误达到 {max_security_attempts} 次上限，该账号已被系统锁定！请联系系统管理员解锁账号。', 'danger')
                     return render_template('forgot_password.html', step='find_user', account_locked=True, locked_username=username)
@@ -991,7 +993,7 @@ def forgot_password():
                     now = datetime.now().timestamp()
                     lock_duration = lockout_seconds
                     if lock_duration > 0:
-                        SecurityRisk.set_lock_until(username, now + lock_duration)
+                        FORGOT_SECURITY_LOCK_UNTILS[username] = now + lock_duration
                     lock_desc = f"{lock_duration // 60} 分钟" if lock_duration >= 60 and lock_duration % 60 == 0 else f"{lock_duration} 秒"
                     flash(f'密保答案验证错误！管理员账号错误已达 {new_fail_count} 次，需要验证码且必须等待 {lock_desc} 后方可重试。', 'danger')
                     return render_template('forgot_password.html', user=user, step='answer_question',
@@ -1030,7 +1032,8 @@ def forgot_password():
                                        require_captcha=require_captcha)
 
             # 密保校验成功，清除该账号在找回密码服务端的失败计数与锁定状态
-            SecurityRisk.clear_risk(username)
+            FORGOT_SECURITY_FAIL_COUNTS.pop(username, None)
+            FORGOT_SECURITY_LOCK_UNTILS.pop(username, None)
 
             user.set_password(new_password)
             db.session.commit()
