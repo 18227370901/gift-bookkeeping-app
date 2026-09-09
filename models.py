@@ -356,6 +356,7 @@ class AnniversaryReminder(db.Model):
     advance_days = db.Column(db.Integer, default=3)            # 提前提醒天数（默认 3 天）
     notes = db.Column(db.String(256), nullable=True)           # 备忘备注
     is_active = db.Column(db.Boolean, default=True)
+    last_notified_target = db.Column(db.String(32), nullable=True) # 已通知目标周期 YYYY-MM-DD，防周期内重复推送
     created_at = db.Column(db.DateTime, default=datetime.now)
     deleted_at = db.Column(db.DateTime, nullable=True)         # 软删除标记（回收站）
     

@@ -647,6 +647,7 @@ def init_database():
             "ALTER TABLE users ADD COLUMN allowed_menus VARCHAR(256) DEFAULT 'ledger'",
             "ALTER TABLE users ADD COLUMN menu_permissions TEXT DEFAULT '{}'",
             "ALTER TABLE anniversary_reminders ADD COLUMN deleted_at DATETIME",
+            "ALTER TABLE anniversary_reminders ADD COLUMN last_notified_target VARCHAR(32)",
             "ALTER TABLE banquets ADD COLUMN creator_type VARCHAR(32) DEFAULT 'manual'",
             "ALTER TABLE banquets ADD COLUMN creator_id INTEGER",
             "ALTER TABLE banquets ADD COLUMN source_username VARCHAR(64)",

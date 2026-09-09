@@ -495,3 +495,66 @@
 1. 礼金记账、专属宴席、人情对账、纪念日备忘及全系统回收站均已完成全链路联调与防御加固；
 2. 权限体系、注册准入、凭证隔离及异步容灾机制已在生产代码中完全落地；
 3. 本地服务已配置就绪，可随时对外提供高可用、安全的记账与人情对账服务。
+
+---
+
+## 9. 纪念日单次推送防重机制与 WebDAV 上传 404 缺陷修复复盘 (2026年9月更新)
+
+### 1. 缺陷背景与问题成因分析
+在 Docker 生产部署验证过程中，发现了两项直接影响用户体验与系统稳定性的关键缺陷：
+
+1. **【缺陷一】纪念日备忘高频重复推送风暴**：
+   - **现象**：当新增一条亲友纪念日备忘且临近天数到达设定预警阈值时（例如剩余 3 天），系统后台调度守护线程每隔 60 秒便触发一次推送，群聊与日志中出现大面积重复日志：[Anniversary Worker] 发现 1 条临近纪念日，已触发自动推送通知: ['何析俊']，造成严重的刷屏困扰。
+   - **根本原因**：原有逻辑仅依赖模糊查询 WebhookLog 当日成功记录，对于非当日首轮或日志匹配延迟时，缺乏针对纪念日实体的持久化周期防重标记；后台每 60 秒轮询一次，导致条件持续满足并持续重复触发推送。
+
+2. **【缺陷二】WebDAV 备份配置校验通过但立即上传报错 HTTP 404**：
+   - **现象**：在管理后台 WebDAV 页面输入坚果云等网盘地址（如 https://dav.jianguoyun.com/dav/），点击“测试连接”提示成功；但点击“立即上传备份至 WebDAV”时，页面抛出错误：备份失败: 上传失败 (HTTP 404)。
+   - **根本原因**：
+     1. 坚果云等主流 WebDAV 服务端对根目录 /dav/ 实行写保护，禁止直接在根目录下通过 PUT 创建文件，必须上传至具体子目录（如 /dav/gift_backups/）；
+     2. 之前的 webdav_utils.py 缺乏远程目录层级自动探测与递归创建能力（MKCOL），如果网盘中尚未手动创建 /gift_backups/ 文件夹，服务端直接返回 HTTP 404 Not Found；
+     3. 配置模型与页面未暴露 ackup_path 路径参数，前端无法灵活配置备份存储子路径。
+
+3. **【缺陷三】容器化依赖缺失与运行时报错**：
+   - **现象**：在 Docker 容器以 Gunicorn 多进程启动时，由于容器初始镜像环境缺少 
+equests 与 iohttp 依赖包，导致 Worker 进程抛出 ModuleNotFoundError: No module named 'requests' 并异常退出（exit code 10）。
+
+---
+
+### 2. 核心架构修复与安全加固实施方案
+
+#### 2.1 纪念日到期单次推送防重机制（周期锁架构）
+1. **模型层引入周期锁标记**：
+   在 AnniversaryReminder 模型中新增字段：
+   `python
+   last_notified_target = db.Column(db.String(32), nullable=True) # 已通知目标周期 YYYY-MM-DD，防周期内重复推送
+   `
+   并在 pp.py 的 init_database() 平滑迁移列表中补充：
+   `python
+   "ALTER TABLE anniversary_reminders ADD COLUMN last_notified_target VARCHAR(32)"
+   `
+2. **调度层周期判定与原子提交**：
+   在 
+outes_ext.py 的 check_and_trigger_due_reminders 巡检线程中：
+   - 计算纪念日当前周期的目标公历日期字符串 	arget_cycle_str = next_date.strftime('%Y-%m-%d')；
+   - 检查 if r.last_notified_target == target_cycle_str: continue，已成功推送过的周期直接跳过，杜绝 60 秒死循环；
+   - 推送触发时，立即记录 
+.last_notified_target = target_cycle_str 并持久化 db.session.commit()；
+   - 用户编辑并修改 	arget_date 时，在 
+eminder_edit 中自动重置 last_notified_target = None，保证下一次周期能够正常预警。
+
+#### 2.2 WebDAV 智能路径解析与递归自动建目录（MKCOL）
+1. **智能路径规约与坚果云根路径保护 (_resolve_target_dir_url)**：
+   - 规范化 URL 拼接，过滤首尾重复斜杠；
+   - 智能识别坚果云等 WebDAV 根路径（如以 /dav 结尾），当未指定子目录时，自动挂载默认安全备份目录 /gift_backups/，防止根路径直写触发 404。
+2. **多级目录逐层递归创建 (nsure_remote_dir)**：
+   - 从根路径逐级向下探测目录是否存在（PROPFIND），若返回 404 则自动发送 MKCOL 递归创建各层目录；
+   - 确保上传 .db 备份前，目标远程目录 100% 存在，彻底消灭 404 错误。
+3. **前端交互与后台配置全链路透传**：
+   - 在 	emplates/admin_backups.html 中新增「备份存储子目录」输入框（默认 /gift_backups/）；
+   - 测试连接与保存配置时，通过 JSON / Form 全链路透传 ackup_path 参数。
+
+#### 2.3 容器依赖与敏感数据零明文加固
+1. **运行依赖补齐**：在 
+equirements.txt 中严格声明 
+equests>=2.31.0 与 iohttp>=3.9.0，彻底根除 Gunicorn Worker 启动报错。
+2. **敏感凭据安全闭环**：WebDAV 账号密码、Webhook 密钥等高敏感数据全部强制以 AES-256-GCM 密文存储，日志自动脱敏掩码，保证生产环境数据安全。

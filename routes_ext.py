@@ -168,22 +168,28 @@ def check_and_trigger_due_reminders(app_obj=None, specific_reminder=None):
                 continue
             adv = r.advance_days or 3
             if 0 <= days_left <= adv:
+                target_cycle_str = next_date.strftime('%Y-%m-%d')
                 if not specific_reminder:
-                    # 避免后台定时巡检同一天内向群里重复发送同一纪念日刷屏
-                    already_sent = WebhookLog.query.filter(
-                        WebhookLog.event_type.in_(['auto_reminder', 'reminder_daily']),
-                        WebhookLog.is_success == True,
-                        WebhookLog.created_at >= datetime.combine(today, datetime.min.time()),
-                        WebhookLog.payload.like(f'%{r.name}%')
-                    ).first()
-                    if already_sent:
+                    # 到达设置阈值后默认仅推送一次（本周期内不再重复自动推送，彻底消除高频刷屏）
+                    if getattr(r, 'last_notified_target', None) == target_cycle_str:
                         continue
-                due_list.append((r, days_left, next_date))
+                due_list.append((r, days_left, next_date, target_cycle_str))
 
         if not due_list:
             return 0
 
-        title, md_detail, text_summary = format_reminder_notification_content(due_list)
+        # 即刻更新已通知目标周期，持久化到数据库
+        for item in due_list:
+            r_obj = item[0]
+            cycle_str = item[3]
+            r_obj.last_notified_target = cycle_str
+        try:
+            db.session.commit()
+        except Exception as _ce:
+            db.session.rollback()
+            print(f"[Anniversary Worker Commit Warning]: {_ce}")
+
+        title, md_detail, text_summary = format_reminder_notification_content([(x[0], x[1], x[2]) for x in due_list])
         trigger_webhook_event(active_hooks, 'auto_reminder', f"近期有 {len(due_list)} 位亲友重要纪念日临近", md_detail, force_channels=True)
         print(f"[Anniversary Worker] 发现 {len(due_list)} 条临近纪念日，已触发自动推送通知: {[x[0].name for x in due_list]}")
         return len(due_list)
@@ -1839,8 +1845,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         rem.relation = request.form.get('relation', rem.relation).strip()
         rem.phone = request.form.get('phone', rem.phone).strip()
         target_date_str = request.form.get('target_date', '').strip()
-        if target_date_str:
+        if target_date_str and target_date_str != rem.target_date:
             rem.target_date = target_date_str
+            rem.last_notified_target = None
         rem.anniversary_type = request.form.get('anniversary_type', rem.anniversary_type).strip()
         try:
             rem.advance_days = int(request.form.get('advance_days', rem.advance_days) or 3)
@@ -2872,7 +2879,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         server_url = (data.get('webdav_url') or data.get('server_url') or '').strip() or config.server_url
         username = (data.get('webdav_username') or data.get('username') or '').strip() or config.webdav_username
         password = (data.get('webdav_password') or data.get('password') or '').strip() or config.password
-        ok, msg = test_webdav_connection(server_url, username, password)
+        backup_path = (data.get('backup_path') or data.get('remote_dir') or '').strip() or getattr(config, 'backup_path', '')
+        ok, msg = test_webdav_connection(server_url, username, password, backup_path=backup_path)
         return jsonify({'success': ok, 'message': msg})
 
     @app.route('/manifest.json')

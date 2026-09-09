@@ -23,6 +23,11 @@
             <div class="form-text">支持坚果云、Nextcloud、群晖、Alist 等 WebDAV 完整路径</div>
           </div>
           <div class="mb-3">
+            <label class="form-label fw-bold">备份存储子目录</label>
+            <input type="text" name="backup_path" id="cfg_backup_path" class="form-control rounded-3" value="{{ config_data.backup_path or '/gift_backups/' }}" placeholder="/gift_backups/">
+            <div class="form-text small text-muted">网盘中存放备份文件的子目录，默认：/gift_backups/（坚果云根路径 /dav 必须指定子目录）</div>
+          </div>
+          <div class="mb-3">
             <label class="form-label fw-bold">账号 / 用户名</label>
             <input type="text" name="webdav_username" id="cfg_webdav_username" class="form-control rounded-3" value="{{ config_data.webdav_username or '' }}" placeholder="username@example.com" required>
           </div>
@@ -238,6 +243,7 @@ document.addEventListener('DOMContentLoaded', function() {
 document.getElementById('btnTestWebdav')?.addEventListener('click', function() {
   const form = document.getElementById('webdavConfigForm');
   const url = document.getElementById('cfg_webdav_url').value.trim();
+  const backupPath = document.getElementById('cfg_backup_path') ? document.getElementById('cfg_backup_path').value.trim() : '';
   const username = document.getElementById('cfg_webdav_username').value.trim();
   const password = document.getElementById('cfg_webdav_password').value.trim();
   
@@ -258,7 +264,7 @@ document.getElementById('btnTestWebdav')?.addEventListener('click', function() {
       'X-CSRFToken': '{{ csrf_token }}',
       'X-CSRF-Token': '{{ csrf_token }}'
     },
-    body: JSON.stringify({ webdav_url: url, webdav_username: username, webdav_password: password })
+    body: JSON.stringify({ webdav_url: url, backup_path: backupPath, webdav_username: username, webdav_password: password })
   })
   .then(res => res.json())
   .then(data => {
