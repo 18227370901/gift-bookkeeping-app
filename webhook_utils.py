@@ -80,10 +80,38 @@ def _send_payload(url, payload_dict, headers=None, timeout=12):
         return False, 0, str(e)
 
 
+def _sanitize_log_data(data):
+    """递归脱敏日志中的敏感字段（密码、Token、Secret等）"""
+    if isinstance(data, dict):
+        res = {}
+        for k, v in data.items():
+            kl = str(k).lower()
+            if any(s in kl for s in ['secret', 'token', 'pass', 'key', 'credential', 'auth', 'webhook_url']):
+                res[k] = '***MASKED***'
+            else:
+                res[k] = _sanitize_log_data(v)
+        return res
+    elif isinstance(data, list):
+        return [_sanitize_log_data(x) for x in data]
+    return data
+
+def _resolve_db_file():
+    """动态获取 SQLite 数据库文件路径（适配 Docker /app/data 挂载与原生环境）"""
+    base = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(base, 'data', 'gift_bookkeeping.db'),
+        os.path.join(base, 'gift_bookkeeping.db'),
+        'gift_bookkeeping.db'
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return candidates[0] if os.path.isdir(os.path.join(base, 'data')) else candidates[1]
+
 def record_webhook_log(user_id, webhook_id, event_type, payload, status_code, response_body, is_success):
     """线程安全写入 Webhook 推送日志表"""
     try:
-        conn = sqlite3.connect("gift_bookkeeping.db", timeout=10)
+        conn = sqlite3.connect(_resolve_db_file(), timeout=10)
         c = conn.cursor()
         c.execute(
             """INSERT INTO webhook_logs 
@@ -93,7 +121,7 @@ def record_webhook_log(user_id, webhook_id, event_type, payload, status_code, re
                 user_id or 1,
                 webhook_id,
                 event_type or "notify",
-                json.dumps(payload, ensure_ascii=False)[:2000] if isinstance(payload, (dict, list)) else str(payload)[:2000],
+                json.dumps(_sanitize_log_data(payload), ensure_ascii=False)[:2000] if isinstance(payload, (dict, list)) else str(_sanitize_log_data(payload))[:2000],
                 status_code or 0,
                 str(response_body)[:2000],
                 1 if is_success else 0,
@@ -535,7 +563,7 @@ def _wecom_listener_worker():
     global _listener_running
     while _listener_running:
         try:
-            conn = sqlite3.connect("gift_bookkeeping.db", timeout=10)
+            conn = sqlite3.connect(_resolve_db_file(), timeout=10)
             c = conn.cursor()
             rows = c.execute("SELECT id, bot_id, bot_secret, webhook_url, connection_type FROM webhook_configs WHERE bot_id IS NOT NULL AND bot_id != '' AND is_enabled = 1").fetchall()
             conn.close()

@@ -15,9 +15,13 @@ def get_aes_key(secret_key=None):
     if not secret_key:
         try:
             from flask import current_app
-            secret_key = current_app.config.get('AES_SECRET_KEY') or current_app.config.get('SECRET_KEY', DEFAULT_SECRET_KEY)
+            secret_key = current_app.config.get('AES_SECRET_KEY') or current_app.config.get('SECRET_KEY')
         except Exception:
-            secret_key = os.environ.get('AES_SECRET_KEY') or os.environ.get('SECRET_KEY', DEFAULT_SECRET_KEY)
+            secret_key = None
+        if not secret_key:
+            secret_key = os.environ.get('AES_SECRET_KEY') or os.environ.get('SECRET_KEY') or DEFAULT_SECRET_KEY
+    if not isinstance(secret_key, str):
+        secret_key = str(secret_key or DEFAULT_SECRET_KEY)
     return hashlib.sha256(secret_key.encode('utf-8')).digest()
 
 def encrypt_credential(plain_text, secret_key=None):
@@ -38,10 +42,22 @@ def encrypt_credential(plain_text, secret_key=None):
         print(f"[AES Encrypt Error] {e}")
         return None
 
-def decrypt_credential(cipher_text, secret_key=None):
-    """使用 AES-256-GCM 对称算法对凭证进行解密"""
+def decrypt_credential(cipher_text, secret_key=None, fallback_plain=False):
+    """使用 AES-256-GCM 对称算法对凭证进行解密，支持旧明文平滑回退"""
     if not cipher_text:
         return None
+    try:
+        key = get_aes_key(secret_key)
+        aesgcm = AESGCM(key)
+        encrypted_raw = base64.b64decode(cipher_text.encode('utf-8'))
+        if len(encrypted_raw) < 13:
+            return cipher_text if fallback_plain else None
+        nonce = encrypted_raw[:12]
+        cipher_bytes = encrypted_raw[12:]
+        decrypted_bytes = aesgcm.decrypt(nonce, cipher_bytes, None)
+        return decrypted_bytes.decode('utf-8')
+    except Exception:
+        return cipher_text if fallback_plain else None
     try:
         key = get_aes_key(secret_key)
         aesgcm = AESGCM(key)
@@ -538,22 +554,41 @@ class BroadcastRead(db.Model):
 
 
 class SharedLedgerLink(db.Model):
-    """免登录只读分享链接模型"""
+    """大账本只读共享外链模型"""
     __tablename__ = 'shared_ledger_links'
     id = db.Column(db.Integer, primary_key=True)
     share_token = db.Column(db.String(64), unique=True, nullable=False)
     title = db.Column(db.String(100), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     banquet_id = db.Column(db.Integer, db.ForeignKey('banquets.id', ondelete='SET NULL'), nullable=True)
-    access_password = db.Column(db.String(64), nullable=True)  # 可选只读访问密码
-    hide_notes = db.Column(db.Boolean, default=False)          # 敏感信息脱敏：隐藏备注
-    hide_amount = db.Column(db.Boolean, default=False)         # 敏感信息脱敏：隐藏具体金额
+    _access_password = db.Column('access_password', db.String(256), nullable=True)  # 可选只读访问密码（AES-256-GCM密文）
+    hide_notes = db.Column(db.Boolean, default=False)          # 隐私信息脱敏：是否隐藏备注
+    hide_amount = db.Column(db.Boolean, default=False)         # 隐私信息脱敏：是否隐藏具体金额
     expires_at = db.Column(db.DateTime, nullable=True)         # 有效期截止时间（None 表示永久有效）
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
     
     user = db.relationship('User', backref=db.backref('shared_links', lazy=True))
     banquet_rel = db.relationship('Banquet', backref=db.backref('shared_links', lazy=True))
+
+    def __init__(self, **kwargs):
+        pwd = kwargs.pop('access_password', None)
+        super(SharedLedgerLink, self).__init__(**kwargs)
+        if pwd is not None:
+            self.access_password = pwd
+
+    @property
+    def access_password(self):
+        if not self._access_password:
+            return None
+        return decrypt_credential(self._access_password, fallback_plain=True)
+
+    @access_password.setter
+    def access_password(self, val):
+        if val is None or str(val).strip() == '':
+            self._access_password = None
+        else:
+            self._access_password = encrypt_credential(str(val).strip())
 
     @property
     def owner(self):
@@ -565,17 +600,17 @@ class SharedLedgerLink(db.Model):
 
 
 class WebhookConfig(db.Model):
-    """多渠道 Webhook / 凭证长连接消息推送配置"""
+    """多渠道 Webhook / 凭证长连接机器人消息推送配置"""
     __tablename__ = 'webhook_configs'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     channel_name = db.Column(db.String(50), nullable=False)  # 微信PushPlus / Server酱 / 钉钉 / 飞书 / 企微 / Bark / 智能机器人
     webhook_url = db.Column(db.String(500), nullable=True)
-    secret_token = db.Column(db.String(256), nullable=True)
+    _secret_token = db.Column('secret_token', db.String(512), nullable=True)  # AES-256-GCM 密文存储
     connection_type = db.Column(db.String(30), default='webhook_url')  # 'webhook_url' (标准 Webhook) | 'long_connection' (凭证长连接)
     bot_platform = db.Column(db.String(50), default='wecom')           # 'wecom' (企业微信机器人) | 'general' (通用长连接)
     bot_id = db.Column(db.String(100), nullable=True)                  # 机器人 Bot ID
-    bot_secret = db.Column(db.String(256), nullable=True)              # 机器人 Secret 凭证
+    _bot_secret = db.Column('bot_secret', db.String(512), nullable=True)  # AES-256-GCM 密文存储，禁止明文落盘
     is_enabled = db.Column(db.Boolean, default=True)
     notify_on_add = db.Column(db.Boolean, default=True)
     notify_on_delete = db.Column(db.Boolean, default=True)
@@ -584,6 +619,15 @@ class WebhookConfig(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
     
     user = db.relationship('User', backref=db.backref('webhooks', lazy=True))
+
+    def __init__(self, **kwargs):
+        sec = kwargs.pop('secret_token', None) or kwargs.pop('secret', None)
+        b_sec = kwargs.pop('bot_secret', None)
+        super(WebhookConfig, self).__init__(**kwargs)
+        if sec is not None:
+            self.secret_token = sec
+        if b_sec is not None:
+            self.bot_secret = b_sec
 
     @property
     def is_long_connection(self):
@@ -606,12 +650,38 @@ class WebhookConfig(db.Model):
         self.webhook_url = val
 
     @property
+    def secret_token(self):
+        if not self._secret_token:
+            return None
+        return decrypt_credential(self._secret_token, fallback_plain=True)
+
+    @secret_token.setter
+    def secret_token(self, val):
+        if val is None or str(val).strip() == '':
+            self._secret_token = None
+        else:
+            self._secret_token = encrypt_credential(str(val).strip())
+
+    @property
     def secret(self):
         return self.secret_token
 
     @secret.setter
     def secret(self, val):
         self.secret_token = val
+
+    @property
+    def bot_secret(self):
+        if not self._bot_secret:
+            return None
+        return decrypt_credential(self._bot_secret, fallback_plain=True)
+
+    @bot_secret.setter
+    def bot_secret(self, val):
+        if val is None or str(val).strip() == '':
+            self._bot_secret = None
+        else:
+            self._bot_secret = encrypt_credential(str(val).strip())
 
     @property
     def is_active(self):

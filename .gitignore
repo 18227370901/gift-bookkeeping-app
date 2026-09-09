@@ -12,3 +12,4 @@ dist/
 *.pid
 *.db-shm
 *.db-wal
+*.dist-info/
