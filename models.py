@@ -1,47 +1,291 @@
+# -*- coding: utf-8 -*-
+import os
+import json
+import base64
+import hashlib
+from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+DEFAULT_SECRET_KEY = 'gift-bookkeeping-secret-key-2026-prod-secure'
+
+def get_aes_key(secret_key=None):
+    if not secret_key:
+        try:
+            from flask import current_app
+            secret_key = current_app.config.get('AES_SECRET_KEY') or current_app.config.get('SECRET_KEY', DEFAULT_SECRET_KEY)
+        except Exception:
+            secret_key = os.environ.get('AES_SECRET_KEY') or os.environ.get('SECRET_KEY', DEFAULT_SECRET_KEY)
+    return hashlib.sha256(secret_key.encode('utf-8')).digest()
+
+def encrypt_credential(plain_text, secret_key=None):
+    """使用 AES-256-GCM 对称算法对凭证进行加密"""
+    if plain_text is None:
+        return None
+    plain_str = str(plain_text)
+    if plain_str == '':
+        return ''
+    try:
+        key = get_aes_key(secret_key)
+        aesgcm = AESGCM(key)
+        nonce = os.urandom(12)  # 96-bit nonce
+        cipher_bytes = aesgcm.encrypt(nonce, plain_str.encode('utf-8'), None)
+        encrypted_raw = nonce + cipher_bytes
+        return base64.b64encode(encrypted_raw).decode('utf-8')
+    except Exception as e:
+        print(f"[AES Encrypt Error] {e}")
+        return None
+
+def decrypt_credential(cipher_text, secret_key=None):
+    """使用 AES-256-GCM 对称算法对凭证进行解密"""
+    if not cipher_text:
+        return None
+    try:
+        key = get_aes_key(secret_key)
+        aesgcm = AESGCM(key)
+        encrypted_raw = base64.b64decode(cipher_text.encode('utf-8'))
+        if len(encrypted_raw) < 13:
+            return None
+        nonce = encrypted_raw[:12]
+        cipher_bytes = encrypted_raw[12:]
+        decrypted_bytes = aesgcm.decrypt(nonce, cipher_bytes, None)
+        return decrypted_bytes.decode('utf-8')
+    except Exception as e:
+        print(f"[AES Decrypt Error] {e}")
+        return None
 
 db = SQLAlchemy()
 
 class User(UserMixin, db.Model):
-
     __tablename__ = 'users'
     
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=False)
+    encrypted_password = db.Column(db.String(512), nullable=True)  # AES-256 可逆凭证密文
     role = db.Column(db.String(20), default='user')  # 'admin' or 'user'
+    is_admin = db.Column(db.Boolean, default=False)
+    session_token = db.Column(db.String(64), nullable=True)
+    
+    # 旧单密保兼容字段
     security_question = db.Column(db.String(200), nullable=True)
     security_answer_hash = db.Column(db.String(256), nullable=True)
+    encrypted_security_answer = db.Column(db.String(512), nullable=True)
+    
+    # 双密保字段（至少 2 个密保问题与答案）
+    security_question_1 = db.Column(db.String(200), nullable=True)
+    security_answer_hash_1 = db.Column(db.String(256), nullable=True)
+    encrypted_security_answer_1 = db.Column(db.String(512), nullable=True)
+    
+    security_question_2 = db.Column(db.String(200), nullable=True)
+    security_answer_hash_2 = db.Column(db.String(256), nullable=True)
+    encrypted_security_answer_2 = db.Column(db.String(512), nullable=True)
+
     is_active = db.Column(db.Boolean, default=True)
     can_view_others = db.Column(db.Boolean, default=False)
     can_edit_others = db.Column(db.Boolean, default=False)
     can_delete_others = db.Column(db.Boolean, default=False)
+    allowed_menus = db.Column(db.String(256), default='ledger')  # 允许访问的菜单列表（如 ledger,banquets 等）
+    menu_permissions = db.Column(db.Text, default='{}')  # 各菜单独立数据权限配置 JSON (如 {'ledger':0,'banquets':1})
     created_at = db.Column(db.DateTime, default=datetime.now)
     
-    # Relationship
-    # records = db.relationship('GiftRecord', backref='user', lazy=True, cascade='all, delete-orphan')
+    records = db.relationship('GiftRecord', backref='owner', lazy=True, cascade='all, delete-orphan')
+    banquets = db.relationship('Banquet', backref='owner', lazy=True, cascade='all, delete-orphan')
+    reminders = db.relationship('AnniversaryReminder', backref='owner', lazy=True, cascade='all, delete-orphan')
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
+        self.encrypted_password = encrypt_credential(password)
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
-    def set_security_answer(self, answer):
-        if answer:
-            self.security_answer_hash = generate_password_hash(answer.strip().lower())
+    def get_allowed_menus(self):
+        if getattr(self, 'is_admin', False):
+            return ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'admin_users', 'admin_logs', 'admin_broadcasts', 'admin_webhooks', 'admin_backups']
+        raw = getattr(self, 'allowed_menus', 'ledger') or 'ledger'
+        return [m.strip() for m in raw.split(',') if m.strip()]
+
+    def can_access_menu(self, menu_key):
+        if getattr(self, 'is_admin', False):
+            return True
+        return menu_key in self.get_allowed_menus()
+
+    def get_menu_permissions(self):
+        """获取用户各菜单独立权限配置字典 { menu_key: perm_level_int }"""
+        raw = getattr(self, 'menu_permissions', None)
+        res = {}
+        if raw:
+            try:
+                res = json.loads(raw)
+            except Exception:
+                res = {}
+        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin']
+        final_perms = {}
+        for m in ALL_MENUS:
+            val = res.get(m)
+            if val is not None:
+                try:
+                    final_perms[m] = int(val)
+                except (ValueError, TypeError):
+                    final_perms[m] = 0
+            else:
+                if m == 'ledger' and not raw:
+                    if getattr(self, 'can_delete_others', False):
+                        final_perms[m] = 3
+                    elif getattr(self, 'can_edit_others', False):
+                        final_perms[m] = 2
+                    elif getattr(self, 'can_view_others', False):
+                        final_perms[m] = 1
+                    else:
+                        final_perms[m] = 0
+                else:
+                    final_perms[m] = 0
+        return final_perms
+
+    def set_menu_permissions(self, perms_dict):
+        """设置各菜单独立数据权限配置"""
+        clean_perms = {}
+        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin']
+        for m in ALL_MENUS:
+            val = perms_dict.get(m, 0) if isinstance(perms_dict, dict) else 0
+            try:
+                clean_perms[m] = int(val)
+            except (ValueError, TypeError):
+                clean_perms[m] = 0
+        self.menu_permissions = json.dumps(clean_perms, ensure_ascii=False)
+
+    def get_menu_perm(self, menu_key):
+        """获取指定菜单的数据权限级别 (0~3)，管理员始终返回 3"""
+        if getattr(self, 'is_admin', False):
+            return 3
+        perms = self.get_menu_permissions()
+        return perms.get(menu_key, 0)
+
+    def can_view_others_for(self, menu_key):
+        if getattr(self, 'is_admin', False):
+            return True
+        return self.get_menu_perm(menu_key) >= 1
+
+    def can_edit_others_for(self, menu_key):
+        if getattr(self, 'is_admin', False):
+            return True
+        return self.get_menu_perm(menu_key) >= 2
+
+    def can_delete_others_for(self, menu_key):
+        if getattr(self, 'is_admin', False):
+            return True
+        return self.get_menu_perm(menu_key) >= 3
+
+    def get_decrypted_password(self):
+        return decrypt_credential(self.encrypted_password)
+
+    def set_security_answers(self, q1, a1, q2=None, a2=None):
+        """设置双密保（同时兼容旧单密保字段）"""
+        if q1 and a1:
+            clean_a1 = a1.strip().lower()
+            self.security_question_1 = q1.strip()
+            self.security_answer_hash_1 = generate_password_hash(clean_a1)
+            self.encrypted_security_answer_1 = encrypt_credential(clean_a1)
+            # 兼容旧字段
+            self.security_question = self.security_question_1
+            self.security_answer_hash = self.security_answer_hash_1
+            self.encrypted_security_answer = self.encrypted_security_answer_1
+
+        if q2 and a2:
+            clean_a2 = a2.strip().lower()
+            self.security_question_2 = q2.strip()
+            self.security_answer_hash_2 = generate_password_hash(clean_a2)
+            self.encrypted_security_answer_2 = encrypt_credential(clean_a2)
+
+    def check_security_answers(self, a1, a2=None):
+        """校验密保答案：如果配置了第2个密保则要求两者均正确"""
+        if not self.security_answer_hash_1 and not self.security_answer_hash:
+            return False
+
+        hash1 = self.security_answer_hash_1 or self.security_answer_hash
+        if not a1 or not check_password_hash(hash1, a1.strip().lower()):
+            return False
+
+        if self.security_question_2 and self.security_answer_hash_2:
+            if not a2 or not check_password_hash(self.security_answer_hash_2, a2.strip().lower()):
+                return False
+
+        return True
+
+    def check_any_security_answer(self, ans):
+        """校验任意一个密保答案（只要答对第1个或第2个密保答案中的任意一个即可通过）"""
+        if not ans:
+            return False
+        clean_ans = ans.strip().lower()
+        hash1 = self.security_answer_hash_1 or self.security_answer_hash
+        if hash1 and check_password_hash(hash1, clean_ans):
+            return True
+        if self.security_answer_hash_2 and check_password_hash(self.security_answer_hash_2, clean_ans):
+            return True
+        return False
 
     def check_security_answer(self, answer):
-        if not self.security_answer_hash or not answer:
-            return False
-        return check_password_hash(self.security_answer_hash, answer.strip().lower())
+        """兼容单密保校验调用"""
+        return self.check_any_security_answer(answer)
+
+    def set_security_answer(self, answer):
+        """兼容单密保设置调用"""
+        q = self.security_question_1 or self.security_question or '默认安全问题'
+        self.set_security_answers(q, answer)
+
+    def get_decrypted_security_answers(self):
+        """获取解密后的明文密保问答（用于超级管理员查看凭证）"""
+        ans1 = decrypt_credential(self.encrypted_security_answer_1 or self.encrypted_security_answer)
+        ans2 = decrypt_credential(self.encrypted_security_answer_2)
+        q1 = self.security_question_1 or self.security_question or '未设置'
+        q2 = self.security_question_2 or '未设置'
+        return {
+            'q1': q1,
+            'a1': ans1 or '无',
+            'q2': q2,
+            'a2': ans2 or '无'
+        }
+
+
+class Banquet(db.Model):
+    """专属宴席 / 活动大账本（如婚礼、百日宴、乔迁宴等）"""
+    __tablename__ = 'banquets'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(128), nullable=False)          # 宴席大账本名称（如“张伟 & 李娜 婚礼喜宴”）
+    event_type = db.Column(db.String(64), nullable=False)       # 宴席类型（婚礼 / 百日宴 / 乔迁 / 寿宴 / 其它）
+    event_date = db.Column(db.String(32), nullable=True)        # 举办日期 (YYYY-MM-DD)
+    venue = db.Column(db.String(256), nullable=True)            # 举办地点 / 酒店
+    budget = db.Column(db.Float, default=0.0)                   # 预算金额
+    banquet_cost = db.Column(db.Float, default=0.0)             # 办宴总成本（酒席/烟酒/婚庆/物料支出）
+    notes = db.Column(db.Text, nullable=True)                   # 备注说明
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    deleted_at = db.Column(db.DateTime, nullable=True)          # 软删除标记
+    creator_type = db.Column(db.String(32), default='manual')  # 'manual' (手动创建) | 'auto' (自动归集生成)
+    creator_id = db.Column(db.Integer, nullable=True)          # 关联创建人/归集所属用户 ID
+    source_username = db.Column(db.String(64), nullable=True)  # 来源用户名
+    
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    records = db.relationship('GiftRecord', backref='banquet', lazy=True)
 
     @property
-    def is_admin(self):
-        return self.role == 'admin'
+    def is_auto_created(self):
+        if self.creator_type == 'auto':
+            return True
+        if self.notes and ('由系统自动归集' in self.notes or '自动归集' in self.notes):
+            return True
+        return False
+
+    @property
+    def display_source_user(self):
+        if self.source_username:
+            return self.source_username
+        if hasattr(self, 'owner') and self.owner:
+            return self.owner.username
+        return '系统'
 
 
 class GiftRecord(db.Model):
@@ -49,13 +293,413 @@ class GiftRecord(db.Model):
     
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(64), nullable=False)           # 姓名 - 必填
+    record_type = db.Column(db.String(20), default='receive') # 记录类型：'receive' (收礼) | 'send' (随礼/送礼)
     age = db.Column(db.Integer, nullable=True)                 # 年龄 - 可选
     address = db.Column(db.String(256), nullable=True)         # 地址 - 可选
     phone = db.Column(db.String(30), nullable=True)            # 联系电话 - 可选
     amount = db.Column(db.Float, nullable=False)               # 礼金数额 - 必填
-    event_reason = db.Column(db.String(128), nullable=False)   # 办席原因 - 必填
+    event_reason = db.Column(db.String(128), nullable=False)   # 办席事由/送礼原因 - 必填
     notes = db.Column(db.Text, nullable=True)                  # 备注 - 可选
     created_at = db.Column(db.DateTime, default=datetime.now)
+    deleted_at = db.Column(db.DateTime, nullable=True)         # 软删除标记（回收站）
     
+    banquet_id = db.Column(db.Integer, db.ForeignKey('banquets.id', ondelete='SET NULL'), nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    user = db.relationship('User', backref=db.backref('gift_records', lazy=True))
+
+    @property
+    def person_name(self):
+        return self.name
+
+    @person_name.setter
+    def person_name(self, val):
+        self.name = val
+
+    @property
+    def gift_type(self):
+        return 'received' if getattr(self, 'record_type', 'receive') != 'send' else 'sent'
+
+    @property
+    def event_category(self):
+        return self.event_reason
+
+    @property
+    def event_date(self):
+        return self.created_at
+
+
+class AnniversaryReminder(db.Model):
+    """亲友重要纪念日提醒（生日、结婚纪念日等）"""
+    __tablename__ = 'anniversary_reminders'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(64), nullable=False)           # 亲友姓名
+    relation = db.Column(db.String(64), nullable=True)         # 关系标签（长辈/同学/朋友/同事/亲戚）
+    phone = db.Column(db.String(30), nullable=True)            # 联系电话
+    target_date = db.Column(db.String(32), nullable=False)     # 纪念日期（如 10-15 或 1995-10-15）
+    anniversary_type = db.Column(db.String(32), default='birthday') # birthday(生日), wedding(结婚纪念), other(其它)
+    advance_days = db.Column(db.Integer, default=3)            # 提前提醒天数（默认 3 天）
+    notes = db.Column(db.String(256), nullable=True)           # 备忘备注
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    deleted_at = db.Column(db.DateTime, nullable=True)         # 软删除标记（回收站）
+    
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+
+
+class SystemSetting(db.Model):
+    __tablename__ = 'system_settings'
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(50), unique=True, nullable=False)
+    value = db.Column(db.String(255), nullable=True)
+
+    @classmethod
+    def get_val(cls, key, default=None):
+        setting = cls.query.filter_by(key=key).first()
+        return setting.value if setting and setting.value is not None else default
+
+    @classmethod
+    def set_val(cls, key, value):
+        setting = cls.query.filter_by(key=key).first()
+        if not setting:
+            setting = cls(key=key, value=str(value) if value is not None else '')
+            db.session.add(setting)
+        else:
+            setting.value = str(value) if value is not None else ''
+        db.session.commit()
+
+
+class RegistrationToken(db.Model):
+    __tablename__ = 'registration_tokens'
+    id = db.Column(db.Integer, primary_key=True)
+    token = db.Column(db.String(64), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    max_uses = db.Column(db.Integer, default=1)
+    use_count = db.Column(db.Integer, default=0)
+    used = db.Column(db.Boolean, default=False)
+    used_at = db.Column(db.DateTime, nullable=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+
+
+class LoginRisk(db.Model):
+    __tablename__ = 'login_risks'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    fail_count = db.Column(db.Integer, default=0, nullable=False)
+    lock_until = db.Column(db.Float, default=0.0, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    @classmethod
+    def get_risk(cls, username):
+        if not username:
+            return 0, 0.0
+        try:
+            risk = cls.query.filter_by(username=username).first()
+            if not risk:
+                return 0, 0.0
+            return risk.fail_count, risk.lock_until
+        except Exception:
+            db.session.rollback()
+            return 0, 0.0
+
+    @classmethod
+    def record_fail(cls, username):
+        if not username:
+            return 1
+        try:
+            risk = cls.query.filter_by(username=username).first()
+            if not risk:
+                risk = cls(username=username, fail_count=1, lock_until=0.0)
+                db.session.add(risk)
+            else:
+                risk.fail_count += 1
+            db.session.commit()
+            return risk.fail_count
+        except Exception:
+            db.session.rollback()
+            return 1
+
+    @classmethod
+    def set_lock_until(cls, username, lock_until):
+        if not username:
+            return
+        try:
+            risk = cls.query.filter_by(username=username).first()
+            if risk:
+                risk.lock_until = lock_until
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    @classmethod
+    def clear_risk(cls, username):
+        if not username:
+            return
+        try:
+            cls.query.filter_by(username=username).delete()
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+
+class SecurityRisk(db.Model):
+    __tablename__ = 'security_risks'
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    fail_count = db.Column(db.Integer, default=0, nullable=False)
+    lock_until = db.Column(db.Float, default=0.0, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    @classmethod
+    def get_risk(cls, username):
+        if not username:
+            return 0, 0.0
+        try:
+            risk = cls.query.filter_by(username=username).first()
+            if not risk:
+                return 0, 0.0
+            return risk.fail_count, risk.lock_until
+        except Exception:
+            db.session.rollback()
+            return 0, 0.0
+
+    @classmethod
+    def record_fail(cls, username):
+        if not username:
+            return 1
+        try:
+            risk = cls.query.filter_by(username=username).first()
+            if not risk:
+                risk = cls(username=username, fail_count=1, lock_until=0.0)
+                db.session.add(risk)
+            else:
+                risk.fail_count += 1
+            db.session.commit()
+            return risk.fail_count
+        except Exception:
+            db.session.rollback()
+            return 1
+
+    @classmethod
+    def set_lock_until(cls, username, lock_until):
+        if not username:
+            return
+        try:
+            risk = cls.query.filter_by(username=username).first()
+            if risk:
+                risk.lock_until = lock_until
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+    @classmethod
+    def clear_risk(cls, username):
+        if not username:
+            return
+        try:
+            cls.query.filter_by(username=username).delete()
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+
+class OperationLog(db.Model):
+    __tablename__ = 'operation_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    username = db.Column(db.String(50), nullable=False)
+    action = db.Column(db.String(50), nullable=False)
+    detail = db.Column(db.String(500), nullable=True)
+    ip_address = db.Column(db.String(50), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    user = db.relationship('User', backref=db.backref('operation_logs', lazy=True))
+
+
+class Broadcast(db.Model):
+    """系统广播通知体系"""
+    __tablename__ = 'broadcasts'
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(100), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    level = db.Column(db.String(20), default='info')  # info, warning, danger, success
+    scope = db.Column(db.String(20), default='all')   # all, admin, user
+    is_active = db.Column(db.Boolean, default=True)
+    created_by_user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class BroadcastRead(db.Model):
+    """系统广播已读记录表"""
+    __tablename__ = 'broadcast_reads'
+    id = db.Column(db.Integer, primary_key=True)
+    broadcast_id = db.Column(db.Integer, db.ForeignKey('broadcasts.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    read_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class SharedLedgerLink(db.Model):
+    """免登录只读分享链接模型"""
+    __tablename__ = 'shared_ledger_links'
+    id = db.Column(db.Integer, primary_key=True)
+    share_token = db.Column(db.String(64), unique=True, nullable=False)
+    title = db.Column(db.String(100), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    banquet_id = db.Column(db.Integer, db.ForeignKey('banquets.id', ondelete='SET NULL'), nullable=True)
+    access_password = db.Column(db.String(64), nullable=True)  # 可选只读访问密码
+    hide_notes = db.Column(db.Boolean, default=False)          # 敏感信息脱敏：隐藏备注
+    hide_amount = db.Column(db.Boolean, default=False)         # 敏感信息脱敏：隐藏具体金额
+    expires_at = db.Column(db.DateTime, nullable=True)         # 有效期截止时间（None 表示永久有效）
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    
+    user = db.relationship('User', backref=db.backref('shared_links', lazy=True))
+    banquet_rel = db.relationship('Banquet', backref=db.backref('shared_links', lazy=True))
+
+    @property
+    def owner(self):
+        return self.user
+
+    @property
+    def token(self):
+        return self.share_token
+
+
+class WebhookConfig(db.Model):
+    """多渠道 Webhook / 凭证长连接消息推送配置"""
+    __tablename__ = 'webhook_configs'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    channel_name = db.Column(db.String(50), nullable=False)  # 微信PushPlus / Server酱 / 钉钉 / 飞书 / 企微 / Bark / 智能机器人
+    webhook_url = db.Column(db.String(500), nullable=True)
+    secret_token = db.Column(db.String(256), nullable=True)
+    connection_type = db.Column(db.String(30), default='webhook_url')  # 'webhook_url' (标准 Webhook) | 'long_connection' (凭证长连接)
+    bot_platform = db.Column(db.String(50), default='wecom')           # 'wecom' (企业微信机器人) | 'general' (通用长连接)
+    bot_id = db.Column(db.String(100), nullable=True)                  # 机器人 Bot ID
+    bot_secret = db.Column(db.String(256), nullable=True)              # 机器人 Secret 凭证
+    is_enabled = db.Column(db.Boolean, default=True)
+    notify_on_add = db.Column(db.Boolean, default=True)
+    notify_on_delete = db.Column(db.Boolean, default=True)
+    notify_on_reminder = db.Column(db.Boolean, default=True)
+    notify_on_broadcast = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    
+    user = db.relationship('User', backref=db.backref('webhooks', lazy=True))
+
+    @property
+    def is_long_connection(self):
+        return self.connection_type == 'long_connection'
+
+    @property
+    def name(self):
+        return self.channel_name
+
+    @name.setter
+    def name(self, val):
+        self.channel_name = val
+
+    @property
+    def url(self):
+        return self.webhook_url
+
+    @url.setter
+    def url(self, val):
+        self.webhook_url = val
+
+    @property
+    def secret(self):
+        return self.secret_token
+
+    @secret.setter
+    def secret(self, val):
+        self.secret_token = val
+
+    @property
+    def is_active(self):
+        return self.is_enabled
+
+    @is_active.setter
+    def is_active(self, val):
+        self.is_enabled = val
+
+
+class BackupConfig(db.Model):
+    """云端 / WebDAV 自动定时备份配置"""
+    __tablename__ = 'backup_configs'
+    id = db.Column(db.Integer, primary_key=True)
+    webdav_url = db.Column(db.String(255), nullable=True)
+    webdav_username = db.Column(db.String(100), nullable=True)
+    webdav_password = db.Column(db.String(255), nullable=True)
+    backup_path = db.Column(db.String(255), default='/gift_backups/')
+    auto_backup_daily = db.Column(db.Boolean, default=False)
+    last_backup_time = db.Column(db.DateTime, nullable=True)
+    last_status = db.Column(db.String(255), nullable=True)
+    updated_at = db.Column(db.DateTime, default=datetime.now)
+
+    @property
+    def server_url(self):
+        return self.webdav_url
+
+    @server_url.setter
+    def server_url(self, val):
+        self.webdav_url = val
+
+    @property
+    def username(self):
+        return self.webdav_username
+
+    @username.setter
+    def username(self, val):
+        self.webdav_username = val
+
+    @property
+    def password(self):
+        return self.get_webdav_password()
+
+    @password.setter
+    def password(self, val):
+        self.set_webdav_password(val)
+
+    @property
+    def remote_dir(self):
+        return self.backup_path
+
+    @remote_dir.setter
+    def remote_dir(self, val):
+        self.backup_path = val
+
+    @property
+    def auto_backup(self):
+        return self.auto_backup_daily
+
+    @auto_backup.setter
+    def auto_backup(self, val):
+        self.auto_backup_daily = val
+
+    def set_webdav_password(self, password):
+        self.webdav_password = encrypt_credential(password)
+
+    def get_webdav_password(self):
+        return decrypt_credential(self.webdav_password)
+
+    @classmethod
+    def get_config(cls):
+        cfg = cls.query.first()
+        if not cfg:
+            cfg = cls()
+            db.session.add(cfg)
+            db.session.commit()
+        return cfg
+
+
+class WebhookLog(db.Model):
+    __tablename__ = 'webhook_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    webhook_id = db.Column(db.Integer, db.ForeignKey('webhook_configs.id', ondelete='CASCADE'), nullable=True)
+    event_type = db.Column(db.String(50), nullable=False)  # add, delete, test, reminder, broadcast
+    payload = db.Column(db.Text, nullable=True)
+    status_code = db.Column(db.Integer, nullable=True)
+    response_body = db.Column(db.Text, nullable=True)
+    is_success = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    user = db.relationship('User', backref=db.backref('webhook_logs', lazy=True))

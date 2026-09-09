@@ -10,3 +10,5 @@ dist/
 *.spec
 *.log
 *.pid
+*.db-shm
+*.db-wal

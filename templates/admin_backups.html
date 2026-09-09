@@ -1,0 +1,280 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row mb-4 align-items-center">
+  <div class="col-md-6">
+    <h3 class="fw-bold mb-1"><i class="fa-solid fa-cloud-arrow-up text-primary me-2"></i>WebDAV 与云端备份</h3>
+    <p class="text-muted mb-0">配置 WebDAV 服务器，实现账本数据库一键云端备份与恢复</p>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-white py-3 border-light">
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置</h5>
+      </div>
+      <div class="card-body">
+        <form action="{{ url_for('admin_save_webdav_config') }}" method="POST" id="webdavConfigForm">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="mb-3">
+            <label class="form-label fw-bold">WebDAV 服务器地址 (URL)</label>
+            <input type="url" name="webdav_url" id="cfg_webdav_url" class="form-control rounded-3" value="{{ config_data.webdav_url or '' }}" placeholder="https://dav.jianguoyun.com/dav/gifts/" required>
+            <div class="form-text">支持坚果云、Nextcloud、群晖、Alist 等 WebDAV 完整路径</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">账号 / 用户名</label>
+            <input type="text" name="webdav_username" id="cfg_webdav_username" class="form-control rounded-3" value="{{ config_data.webdav_username or '' }}" placeholder="username@example.com" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">密码 / 应用专属授权码</label>
+            <div class="input-group">
+              <input type="password" name="webdav_password" id="cfg_webdav_password" class="form-control rounded-start-3 shadow-none" value="{{ config_data.get_webdav_password() or '' }}" placeholder="请输入密码或应用授权码" autocomplete="new-password" required>
+              <button class="btn btn-outline-secondary rounded-end-3" type="button" id="btnToggleWebdavPassword" onclick="toggleWebdavPasswordVisibility()" title="查看/隐藏密码">
+                <i class="fa-regular fa-eye" id="iconToggleWebdavPassword"></i>
+              </button>
+            </div>
+            <div class="form-text small text-muted">点击眼睛图标可切换明文显示/隐藏，方便核对输入</div>
+          </div>
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">
+              <i class="fa-solid fa-floppy-disk me-1"></i>保存配置
+            </button>
+            <button type="button" class="btn btn-outline-secondary rounded-pill px-4" id="btnTestWebdav">
+              <i class="fa-solid fa-plug me-1"></i>测试连接
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-clock-rotate-left text-primary me-2"></i>备份与恢复操作</h5>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="loadWebdavBackups()">
+            <i class="fa-solid fa-rotate me-1"></i>刷新列表
+          </button>
+          <form action="{{ url_for('admin_trigger_webdav_backup') }}" method="POST" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="btn btn-sm btn-primary rounded-pill px-3 shadow-sm">
+              <i class="fa-solid fa-upload me-1"></i>立即上传备份至 WebDAV
+            </button>
+          </form>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th class="ps-4">备份文件</th>
+                <th>大小</th>
+                <th>备份时间</th>
+                <th class="text-end pe-4">操作</th>
+              </tr>
+            </thead>
+            <tbody id="webdavBackupsTableBody">
+              <tr id="loadingWebdavRow">
+                <td colspan="4" class="text-center py-5 text-muted">
+                  <span class="spinner-border spinner-border-sm me-2 text-primary"></span>正在安全拉取云端备份列表...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- 本地离线备份与恢复 -->
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-white py-3 border-light">
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-hard-drive text-success me-2"></i>本地数据库离线备份与恢复</h5>
+      </div>
+      <div class="card-body">
+        <div class="row g-3 align-items-center">
+          <div class="col-md-6">
+            <label class="form-label fw-bold">一键下载当前数据库文件</label>
+            <p class="small text-muted mb-2">直接导出本地 SQLite 完整数据库（.db），安全离线保存至个人电脑或移动硬盘。</p>
+            <a href="{{ url_for('admin_download_local_backup') }}" class="btn btn-success rounded-pill px-3 shadow-sm">
+              <i class="fa-solid fa-download me-1"></i>下载完整数据库备份 (.db)
+            </a>
+          </div>
+          <div class="col-md-6 border-start-md">
+            <form action="{{ url_for('admin_upload_local_backup') }}" method="POST" enctype="multipart/form-data" onsubmit="return confirm('警告：上传恢复数据库将替换现有数据，系统会自动创建历史回滚副本，是否确认恢复？');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label class="form-label fw-bold">上传本地 .db 备份文件恢复</label>
+              <div class="input-group">
+                <input type="file" name="backup_file" accept=".db" class="form-control" required>
+                <button type="submit" class="btn btn-outline-danger">
+                  <i class="fa-solid fa-upload me-1"></i>上传并覆盖恢复
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleWebdavPasswordVisibility() {
+  const input = document.getElementById('cfg_webdav_password');
+  const icon = document.getElementById('iconToggleWebdavPassword');
+  if (!input || !icon) return;
+  if (input.type === 'password') {
+    input.type = 'text';
+    icon.classList.remove('fa-eye');
+    icon.classList.add('fa-eye-slash');
+  } else {
+    input.type = 'password';
+    icon.classList.remove('fa-eye-slash');
+    icon.classList.add('fa-eye');
+  }
+}
+
+// 异步安全拉取 WebDAV 备份列表，杜绝页面加载主线程阻塞
+function loadWebdavBackups() {
+  const tbody = document.getElementById('webdavBackupsTableBody');
+  if (!tbody) return;
+
+  tbody.innerHTML = `
+    <tr>
+      <td colspan="4" class="text-center py-5 text-muted">
+        <span class="spinner-border spinner-border-sm me-2 text-primary"></span>正在安全拉取云端备份列表...
+      </td>
+    </tr>
+  `;
+
+  fetch('/admin/backups/list_ajax')
+    .then(res => res.json())
+    .then(data => {
+      if (!data.configured) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="4" class="text-center py-5 text-muted">
+              <i class="fa-solid fa-cloud-arrow-up fa-3x mb-3 text-secondary opacity-50"></i>
+              <p class="mb-1 fw-bold text-dark">暂未配置 WebDAV 云端服务器</p>
+              <small class="text-muted">请先在左侧填写 WebDAV 地址、账号及密码并保存</small>
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      if (data.success && data.backups && data.backups.length > 0) {
+        let rowsHtml = '';
+        data.backups.forEach(file => {
+          const sizeStr = file.size_human || ((file.size / 1024).toFixed(1) + ' KB');
+          const timeStr = file.modified_time || file.last_modified || '-';
+          rowsHtml += `
+            <tr>
+              <td class="ps-4 fw-bold">
+                <i class="fa-solid fa-database text-secondary me-2"></i>${file.name}
+              </td>
+              <td>${sizeStr}</td>
+              <td><small class="text-muted">${timeStr}</small></td>
+              <td class="text-end pe-4">
+                <form action="/admin/backup/restore" method="POST" class="d-inline" onsubmit="return confirm('警告：恢复备份将覆盖当前数据库，确定继续吗？');">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <input type="hidden" name="filename" value="${file.name}">
+                  <button type="submit" class="btn btn-sm btn-outline-danger">
+                    <i class="fa-solid fa-rotate-left me-1"></i>恢复此版本
+                  </button>
+                </form>
+              </td>
+            </tr>
+          `;
+        });
+        tbody.innerHTML = rowsHtml;
+      } else if (data.success) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="4" class="text-center py-5 text-muted">
+              <i class="fa-solid fa-cloud-arrow-up fa-3x mb-3 text-secondary opacity-50"></i>
+              <p class="mb-1 fw-bold text-dark">云端目录暂无数据库备份文件</p>
+              <small class="text-muted">点击右上角"立即上传备份至 WebDAV"即可创建第一份云端快照</small>
+            </td>
+          </tr>
+        `;
+      } else {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="4" class="text-center py-5 text-danger">
+              <i class="fa-solid fa-triangle-exclamation fa-2x mb-2"></i>
+              <p class="mb-2 fw-bold">${data.message || '获取备份列表失败'}</p>
+              <button class="btn btn-sm btn-outline-secondary" onclick="loadWebdavBackups()">
+                <i class="fa-solid fa-rotate me-1"></i>重试
+              </button>
+            </td>
+          </tr>
+        `;
+      }
+    })
+    .catch(err => {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="4" class="text-center py-5 text-danger">
+            <i class="fa-solid fa-circle-xmark fa-2x mb-2"></i>
+            <p class="mb-2">网络请求异常，无法拉取远端备份列表</p>
+            <button class="btn btn-sm btn-outline-secondary" onclick="loadWebdavBackups()">
+              <i class="fa-solid fa-rotate me-1"></i>重新加载
+            </button>
+          </td>
+        </tr>
+      `;
+    });
+}
+
+// 页面加载完成后异步拉取备份列表
+document.addEventListener('DOMContentLoaded', function() {
+  loadWebdavBackups();
+});
+
+// 测试 WebDAV 连接
+document.getElementById('btnTestWebdav')?.addEventListener('click', function() {
+  const form = document.getElementById('webdavConfigForm');
+  const url = document.getElementById('cfg_webdav_url').value.trim();
+  const username = document.getElementById('cfg_webdav_username').value.trim();
+  const password = document.getElementById('cfg_webdav_password').value.trim();
+  
+  if (!url || !username || !password) {
+    alert('请先填写完整的 WebDAV URL、账号和密码！');
+    return;
+  }
+  
+  const btn = this;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>测试中...';
+  
+  fetch("{{ url_for('admin_test_webdav') }}", {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+      'X-CSRFToken': '{{ csrf_token }}',
+      'X-CSRF-Token': '{{ csrf_token }}'
+    },
+    body: JSON.stringify({ webdav_url: url, webdav_username: username, webdav_password: password })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      alert('✅ WebDAV 连接成功！服务器响应正常。');
+    } else {
+      alert('❌ 连接失败: ' + (data.message || '请检查配置与网络'));
+    }
+  })
+  .catch(err => {
+    alert('请求异常: ' + err);
+  })
+  .finally(() => {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-plug me-1"></i>测试连接';
+  });
+});
+</script>
+{% endblock %}
