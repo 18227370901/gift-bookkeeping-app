@@ -25,11 +25,6 @@ try:
 except ImportError:
     HAS_AIBOT_SDK = False
 
-try:
-    import websocket
-except ImportError:
-    websocket = None
-
 
 def _run_async(coro):
     """在同步线程中安全执行异步协程并返回结果"""

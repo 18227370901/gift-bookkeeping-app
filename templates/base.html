@@ -77,6 +77,11 @@
                         <a class="nav-link text-secondary" href="{{ url_for('recycle_bin_view') }}"><i class="fa-solid fa-trash-arrow-up me-1"></i>回收站</a>
                     </li>
                     {% endif %}
+                    {% if current_user.can_use_ai() %}
+                    <li class="nav-item">
+                        <a class="nav-link text-success" href="{{ url_for('ai_assistant_page') }}"><i class="fa-solid fa-robot me-1"></i>AI 助手</a>
+                    </li>
+                    {% endif %}
                     {% if current_user.is_admin %}
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle text-warning" href="#" id="adminDropdown" role="button" data-bs-toggle="dropdown">
@@ -86,6 +91,7 @@
                             <li><a class="dropdown-item" href="{{ url_for('admin_users') }}"><i class="fa-solid fa-users-gear me-2"></i>用户管理</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin_logs') }}"><i class="fa-solid fa-clipboard-list me-2"></i>操作审计日志</a></li>
                             <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="{{ url_for('admin_ai_config_page') }}"><i class="fa-solid fa-robot me-2"></i>AI 助手配置</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin_broadcasts') }}"><i class="fa-solid fa-bullhorn me-2"></i>系统广播发布</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin_webhooks') }}"><i class="fa-solid fa-satellite-dish me-2"></i>Webhook 通知</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin_backups') }}"><i class="fa-solid fa-cloud-arrow-up me-2"></i>WebDAV 备份</a></li>

@@ -19,7 +19,8 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from models import (
     db, User, GiftRecord, OperationLog, SystemSetting, RegistrationToken,
     LoginRisk, SecurityRisk, Broadcast, BroadcastRead, WebhookConfig, WebhookLog,
-    SharedLedgerLink, BackupConfig, Banquet, AnniversaryReminder
+    SharedLedgerLink, BackupConfig, Banquet, AnniversaryReminder,
+    ChatSession, ChatMessage, AIQueryLog
 )
 from webhook_utils import trigger_webhook_event
 from webdav_utils import (
@@ -653,7 +654,13 @@ def init_database():
             "UPDATE users SET allowed_menus = 'ledger,banquets,reconciliation,reminders,recycle_bin' WHERE is_admin = 1",
             "UPDATE users SET allowed_menus = 'ledger' WHERE allowed_menus IS NULL",
             "UPDATE users SET security_question_1 = security_question, security_answer_hash_1 = security_answer_hash WHERE security_question_1 IS NULL AND security_question IS NOT NULL",
-            "UPDATE gift_records SET record_type = 'receive' WHERE record_type IS NULL"
+            "UPDATE gift_records SET record_type = 'receive' WHERE record_type IS NULL",
+            # --- AI 助手模块迁移 ---
+            "ALTER TABLE users ADD COLUMN ai_api_key VARCHAR(512)",
+            "ALTER TABLE users ADD COLUMN ai_base_url VARCHAR(255) DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN ai_model VARCHAR(100) DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN ai_configs TEXT DEFAULT '[]'",
+            "ALTER TABLE users ADD COLUMN ai_authorized BOOLEAN DEFAULT 0"
         ]
         with db.engine.connect() as conn:
             for sql in migration_sqls:
@@ -2520,6 +2527,10 @@ register_routes_ext(
     clear_login_risk=clear_login_risk,
     clear_forgot_security_risk=clear_forgot_security_risk
 )
+
+# 注册 AI 助手路由
+from routes_ai import register_ai_routes
+register_ai_routes(app, log_action=log_action)
 
 
 if __name__ == '__main__':
