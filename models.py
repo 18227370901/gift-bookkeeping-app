@@ -103,7 +103,7 @@ class User(UserMixin, db.Model):
     can_view_others = db.Column(db.Boolean, default=False)
     can_edit_others = db.Column(db.Boolean, default=False)
     can_delete_others = db.Column(db.Boolean, default=False)
-    allowed_menus = db.Column(db.String(256), default='ledger')  # 允许访问的菜单列表（如 ledger,banquets 等）
+    allowed_menus = db.Column(db.String(256), default='')  # 允许访问的菜单列表（如 ledger,banquets 等），新注册用户默认为空
     
     # --- AI 助手相关字段 ---
     # 旧版单配置（向后兼容）
@@ -114,6 +114,8 @@ class User(UserMixin, db.Model):
     ai_configs = db.Column(db.Text, default='[]')
     # AI 授权标记（管理员可授权普通用户使用 AI）
     ai_authorized = db.Column(db.Boolean, default=False)
+    # 备份授权标记（管理员可授权普通用户使用备份功能）
+    backup_authorized = db.Column(db.Boolean, default=False)
     menu_permissions = db.Column(db.Text, default='{}')  # 各菜单独立数据权限配置 JSON (如 {'ledger':0,'banquets':1})
     created_at = db.Column(db.DateTime, default=datetime.now)
     
@@ -131,7 +133,7 @@ class User(UserMixin, db.Model):
     def get_allowed_menus(self):
         if getattr(self, 'is_admin', False):
             return ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'admin_users', 'admin_logs', 'admin_broadcasts', 'admin_webhooks', 'admin_backups']
-        raw = getattr(self, 'allowed_menus', 'ledger') or 'ledger'
+        raw = getattr(self, 'allowed_menus', '') or ''
         return [m.strip() for m in raw.split(',') if m.strip()]
 
     def can_access_menu(self, menu_key):
@@ -342,6 +344,12 @@ class User(UserMixin, db.Model):
         if getattr(self, 'is_admin', False):
             return True
         return bool(getattr(self, 'ai_authorized', False))
+
+    def can_use_backup(self):
+        """检查用户是否有权使用备份功能"""
+        if getattr(self, 'is_admin', False):
+            return True
+        return bool(getattr(self, 'backup_authorized', False))
 
 
 class ChatSession(db.Model):
@@ -738,6 +746,13 @@ class WebhookConfig(db.Model):
     notify_on_delete = db.Column(db.Boolean, default=True)
     notify_on_reminder = db.Column(db.Boolean, default=True)
     notify_on_broadcast = db.Column(db.Boolean, default=True)
+    # 新增：推送矩阵与自定义模板字段
+    notify_on_update = db.Column(db.Boolean, default=False)
+    notify_on_security = db.Column(db.Boolean, default=False)
+    notify_on_system = db.Column(db.Boolean, default=True)
+    notify_on_status_change = db.Column(db.Boolean, default=False)
+    notify_pages = db.Column(db.Text, default='{}')  # JSON: {event_category: [page_keys]}
+    message_templates = db.Column(db.Text, default='{}')  # JSON: {event_type:page_key or event_type: template_str}
     created_at = db.Column(db.DateTime, default=datetime.now)
     
     user = db.relationship('User', backref=db.backref('webhooks', lazy=True))
@@ -823,6 +838,7 @@ class BackupConfig(db.Model):
     webdav_password = db.Column(db.String(255), nullable=True)
     backup_path = db.Column(db.String(255), default='/gift_backups/')
     auto_backup_daily = db.Column(db.Boolean, default=False)
+    _backup_encrypt_password = db.Column('backup_encrypt_password', db.String(512), nullable=True)  # AES-256-GCM 密文存储
     last_backup_time = db.Column(db.DateTime, nullable=True)
     last_status = db.Column(db.String(255), nullable=True)
     updated_at = db.Column(db.DateTime, default=datetime.now)
@@ -881,6 +897,67 @@ class BackupConfig(db.Model):
             db.session.add(cfg)
             db.session.commit()
         return cfg
+
+    @property
+    def backup_encrypt_password(self):
+        if not self._backup_encrypt_password:
+            return None
+        return decrypt_credential(self._backup_encrypt_password, fallback_plain=True)
+
+    @backup_encrypt_password.setter
+    def backup_encrypt_password(self, val):
+        if val is None or str(val).strip() == '':
+            self._backup_encrypt_password = None
+        else:
+            self._backup_encrypt_password = encrypt_credential(str(val).strip())
+
+
+class ScheduledBackupTask(db.Model):
+    """定时备份任务"""
+    __tablename__ = 'scheduled_backup_tasks'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, default='定时备份')
+    cron_expr = db.Column(db.String(50), nullable=False, default='0 2 * * *')  # 默认每天凌晨2点
+    is_enabled = db.Column(db.Boolean, default=False)
+    encrypt_enabled = db.Column(db.Boolean, default=False)
+    last_run_time = db.Column(db.DateTime, nullable=True)
+    last_run_status = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class BackupAttachment(db.Model):
+    """备份附件文件"""
+    __tablename__ = 'backup_attachments'
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(255), nullable=False)
+    file_size = db.Column(db.Integer, default=0)
+    file_type = db.Column(db.String(50), default='application/octet-stream')
+    is_encrypted = db.Column(db.Boolean, default=False)
+    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    storage_path = db.Column(db.String(500), nullable=True)  # WebDAV 远端路径或本地路径
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    user = db.relationship('User', backref=db.backref('backup_attachments', lazy=True))
+
+
+class PermissionTicket(db.Model):
+    """权限申请工单"""
+    __tablename__ = 'permission_tickets'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    requested_menus = db.Column(db.String(256), nullable=False)  # 申请的菜单列表（逗号分隔）
+    reason = db.Column(db.Text, nullable=True)  # 申请理由
+    status = db.Column(db.String(20), default='pending')  # pending / approved / rejected
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    review_comment = db.Column(db.Text, nullable=True)
+    granted_menus = db.Column(db.String(256), nullable=True)  # 实际批准的菜单列表
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('permission_tickets', lazy=True, cascade='all, delete-orphan'))
+    reviewer = db.relationship('User', foreign_keys=[reviewed_by])
 
 
 class WebhookLog(db.Model):

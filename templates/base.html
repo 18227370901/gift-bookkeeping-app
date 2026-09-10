@@ -54,9 +54,11 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     {% if current_user.is_authenticated %}
+                    {% if current_user.is_admin or current_user.can_access_menu('ledger') %}
                     <li class="nav-item">
                         <a class="nav-link active" href="{{ url_for('index') }}"><i class="fa-solid fa-list me-1"></i>礼金账本</a>
                     </li>
+                    {% endif %}
                     {% if current_user.is_admin or current_user.can_access_menu('banquets') %}
                     <li class="nav-item">
                         <a class="nav-link text-warning" href="{{ url_for('banquets_view') }}"><i class="fa-solid fa-champagne-glasses me-1"></i>专属宴席</a>
@@ -82,6 +84,11 @@
                         <a class="nav-link text-success" href="{{ url_for('ai_assistant_page') }}"><i class="fa-solid fa-robot me-1"></i>AI 助手</a>
                     </li>
                     {% endif %}
+                    {% if not current_user.is_admin and current_user.can_use_backup() %}
+                    <li class="nav-item">
+                        <a class="nav-link text-info" href="{{ url_for('admin_backups') }}"><i class="fa-solid fa-cloud-arrow-up me-1"></i>备份</a>
+                    </li>
+                    {% endif %}
                     {% if current_user.is_admin %}
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle text-warning" href="#" id="adminDropdown" role="button" data-bs-toggle="dropdown">
@@ -90,12 +97,18 @@
                         <ul class="dropdown-menu shadow">
                             <li><a class="dropdown-item" href="{{ url_for('admin_users') }}"><i class="fa-solid fa-users-gear me-2"></i>用户管理</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin_logs') }}"><i class="fa-solid fa-clipboard-list me-2"></i>操作审计日志</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('permission_tickets_view') }}"><i class="fa-solid fa-ticket me-2"></i>权限审批</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin_ai_config_page') }}"><i class="fa-solid fa-robot me-2"></i>AI 助手配置</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin_broadcasts') }}"><i class="fa-solid fa-bullhorn me-2"></i>系统广播发布</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin_webhooks') }}"><i class="fa-solid fa-satellite-dish me-2"></i>Webhook 通知</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin_backups') }}"><i class="fa-solid fa-cloud-arrow-up me-2"></i>WebDAV 备份</a></li>
                         </ul>
+                    </li>
+                    {% endif %}
+                    {% if not current_user.is_admin %}
+                    <li class="nav-item">
+                        <a class="nav-link text-primary" href="{{ url_for('permission_tickets_view') }}"><i class="fa-solid fa-ticket me-1"></i>权限申请</a>
                     </li>
                     {% endif %}
                     {% endif %}

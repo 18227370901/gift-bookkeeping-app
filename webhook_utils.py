@@ -7,6 +7,7 @@ Webhook 与长连接通知工具模块
 """
 
 import json
+import os
 import urllib.parse
 import threading
 import time
@@ -410,8 +411,148 @@ def test_single_webhook(wh, sender_name="admin"):
     return success, code, body
 
 
-def trigger_webhook_event(webhooks, event_type, record_title, details=None, force_channels=False):
-    """异步多线程触发 Webhook 与长连接机器人通知"""
+# === 页面标识与事件类型映射 ===
+
+PAGE_NAMES = {
+    'ledger': '礼金账本', 'banquets': '专属宴席', 'reminders': '纪念日备忘',
+    'reconciliation': '人情对账', 'recycle_bin': '回收站', 'admin_users': '用户管理',
+    'admin_logs': '操作审计日志', 'admin_broadcasts': '系统广播', 'admin_webhooks': 'Webhook通知',
+    'admin_backups': 'WebDAV备份', 'ai_assistant': 'AI助手', 'ai_config': 'AI助手配置',
+    'security': '系统安全', 'invites': '邀请链接',
+}
+
+ALL_PAGES = list(PAGE_NAMES.keys())
+
+# 事件类型 → 开关字段名映射
+EVENT_SWITCH_MAP = {
+    'create': 'notify_on_add', 'record_create': 'notify_on_add',
+    'update': 'notify_on_update', 'record_update': 'notify_on_update',
+    'delete': 'notify_on_delete', 'record_delete': 'notify_on_delete', 'batch_delete': 'notify_on_delete',
+    'status_change': 'notify_on_status_change',
+    'reminder': 'notify_on_reminder', 'auto_reminder': 'notify_on_reminder',
+    'broadcast': 'notify_on_broadcast',
+    'security': 'notify_on_security',
+    'system': 'notify_on_system',
+}
+
+# 需要脱敏的页面（推送消息中不包含敏感数据详情）
+SENSITIVE_PAGES = {'ai_assistant', 'ai_config', 'security', 'admin_webhooks', 'admin_backups'}
+
+
+def _get_notify_pages(webhook):
+    """获取 Webhook 配置的页面过滤列表，返回 {event_category: [page_keys]} 或 None"""
+    import json as _json
+    raw = getattr(webhook, 'notify_pages', None) or '{}'
+    try:
+        data = _json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def _page_matches(webhook, event_type, page_key):
+    """检查该 Webhook 通道是否配置了当前页面的当前事件类型"""
+    if not page_key:
+        return True  # 未指定页面，默认放行
+    notify_pages = _get_notify_pages(webhook)
+    if not notify_pages:
+        # 没有配置页面过滤，默认只放行 ledger
+        return page_key == 'ledger'
+    # 事件分类映射
+    event_category = _get_event_category(event_type)
+    pages_for_event = notify_pages.get(event_category, [])
+    if not pages_for_event:
+        return False
+    return page_key in pages_for_event
+
+
+def _get_event_category(event_type):
+    """将具体事件类型归入大类"""
+    if event_type in ('create', 'record_create'):
+        return 'create'
+    if event_type in ('update', 'record_update'):
+        return 'update'
+    if event_type in ('delete', 'record_delete', 'batch_delete'):
+        return 'delete'
+    if event_type in ('status_change',):
+        return 'status_change'
+    if event_type in ('reminder', 'auto_reminder'):
+        return 'reminder'
+    if event_type in ('broadcast',):
+        return 'broadcast'
+    if event_type in ('security',):
+        return 'security'
+    if event_type in ('system',):
+        return 'system'
+    return event_type
+
+
+def _render_message(webhook, event_type, page_key, default_title, default_details, user_name):
+    """渲染推送消息，支持自定义模板"""
+    import json as _json
+    page_name = PAGE_NAMES.get(page_key, page_key or '系统')
+    # 构建默认消息
+    type_labels = {
+        'create': '新增', 'record_create': '新增', 'update': '修改', 'record_update': '修改',
+        'delete': '删除', 'record_delete': '删除', 'batch_delete': '批量删除',
+        'status_change': '状态变更', 'reminder': '提醒', 'auto_reminder': '提醒',
+        'broadcast': '广播', 'security': '安全风控', 'system': '系统操作',
+    }
+    action_label = type_labels.get(event_type, '操作')
+    title = f'【{page_name}·{action_label}】{default_title}'
+    details = default_details or ''
+    # 脱敏处理
+    if page_key in SENSITIVE_PAGES:
+        details = _sanitize_details(page_key, event_type, user_name, details)
+        title = f'【{page_name}·{action_label}】{user_name} 执行了{action_label}操作'
+    # 尝试使用自定义模板
+    raw_templates = getattr(webhook, 'message_templates', None) or '{}'
+    try:
+        templates = _json.loads(raw_templates) if isinstance(raw_templates, str) else raw_templates
+        if isinstance(templates, dict):
+            template_key = f'{event_type}:{page_key}'
+            tpl = templates.get(template_key) or templates.get(event_type)
+            if tpl and isinstance(tpl, str):
+                title = tpl.format(
+                    user=user_name, page=page_name, action=action_label,
+                    detail=default_details or '', time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    count='', title=default_title
+                )
+                details = ''
+    except Exception:
+        pass
+    return title, details
+
+
+def _sanitize_details(page_key, event_type, user_name, details):
+    """对敏感页面的推送内容进行脱敏"""
+    if page_key == 'ai_assistant':
+        return f'{user_name} 在 AI 助手进行了操作（内容已脱敏）'
+    if page_key == 'ai_config':
+        return f'{user_name} 更新了 AI 配置（密钥等敏感信息已脱敏）'
+    if page_key == 'security':
+        return f'{user_name} 触发了安全风控（详细信息已脱敏）'
+    if page_key == 'admin_webhooks':
+        return f'{user_name} 修改了 Webhook 通道配置（Token等敏感信息已脱敏）'
+    if page_key == 'admin_backups':
+        return f'{user_name} 执行了备份操作（密码等敏感信息已脱敏）'
+    return details
+
+
+def trigger_webhook_event(webhooks, event_type, record_title, details=None, force_channels=False, page_key=None, user_name=None):
+    """异步多线程触发 Webhook 与长连接机器人通知
+    
+    参数:
+        webhooks: WebhookConfig 对象列表
+        event_type: 事件类型（create/update/delete/batch_delete/reminder/broadcast/security/system/status_change）
+        record_title: 推送标题（不含前缀）
+        details: 详情内容
+        force_channels: 是否强制推送（跳过开关过滤）
+        page_key: 来源页面标识（ledger/banquets/reminders 等），用于页面级过滤
+        user_name: 操作人用户名，用于消息内容
+    """
     if not webhooks:
         return
 
@@ -420,13 +561,12 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
         if not getattr(w, "is_enabled", True):
             continue
         if not force_channels:
-            if event_type in ("create", "record_create") and not getattr(w, "notify_on_add", False):
+            # 事件开关过滤
+            switch_field = EVENT_SWITCH_MAP.get(event_type)
+            if switch_field and not getattr(w, switch_field, False):
                 continue
-            if event_type in ("delete", "record_delete", "batch_delete") and not getattr(w, "notify_on_delete", False):
-                continue
-            if event_type == "reminder" and getattr(w, "notify_on_reminder", True) in (False, 0, "0", "false"):
-                continue
-            if event_type == "broadcast" and not getattr(w, "notify_on_broadcast", False):
+            # 页面级过滤
+            if not _page_matches(w, event_type, page_key):
                 continue
 
         hook_data_list.append({
@@ -437,44 +577,35 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
             "connection_type": getattr(w, "connection_type", "webhook_url") or "webhook_url",
             "bot_platform": getattr(w, "bot_platform", "wecom") or "wecom",
             "bot_id": getattr(w, "bot_id", None),
-            "bot_secret": getattr(w, "bot_secret", None)
+            "bot_secret": getattr(w, "bot_secret", None),
+            "_webhook_obj": w  # 保留引用用于模板渲染
         })
 
     if not hook_data_list:
         return
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    type_names = {
-        "create": "【记账新增提醒】",
-        "record_create": "【记账新增提醒】",
-        "update": "【记账变更提醒】",
-        "record_update": "【记账变更提醒】",
-        "delete": "【记账删除提醒】",
-        "record_delete": "【记账删除提醒】",
-        "batch_delete": "【批量删除提醒】",
-        "security": "【安全风控警告】",
-        "reminder": "【亲友重要纪念日提醒】",
-        "auto_reminder": "【亲友重要纪念日提醒】",
-        "broadcast": "【系统站内广播】",
-        "test": "【Webhook 测试推送】"
-    }
-    prefix = type_names.get(event_type, "【礼金记账通知】")
-    if record_title.startswith("【"):
-        title = record_title
-    else:
-        title = f"{prefix} {record_title}"
+    
+    # 为每个通道渲染消息（可能各自有不同模板）
+    rendered_items = []
+    for item in hook_data_list:
+        wh = item.pop("_webhook_obj", None)
+        title, msg_details = _render_message(wh, event_type, page_key, record_title, details, user_name or '系统')
+        rendered_items.append({**item, "title": title, "details": msg_details})
 
     def _worker():
-        for item in hook_data_list:
+        for item in rendered_items:
             try:
                 conn_type = item.get("connection_type", "webhook_url")
+                title = item.get("title", record_title)
+                msg_details = item.get("details", details)
                 if conn_type == "long_connection":
                     b_id = item.get("bot_id", "")
                     b_sec = item.get("bot_secret", "")
                     c_id = extract_chatid_from_url(item.get("url", "")) or _cached_chatids.get(b_id)
                     if b_id and b_sec:
-                        s, c, b = send_wecom_long_connection_message(b_id, b_sec, title, details, now_str, event_type, chatid=c_id)
-                        record_webhook_log(item.get("user_id"), item.get("id"), event_type, {"title": title, "bot_id": b_id, "chatid": c_id, "details": details}, c, b, s)
+                        s, c, b = send_wecom_long_connection_message(b_id, b_sec, title, msg_details, now_str, event_type, chatid=c_id)
+                        record_webhook_log(item.get("user_id"), item.get("id"), event_type, {"title": title, "bot_id": b_id, "chatid": c_id, "details": msg_details}, c, b, s)
                     continue
 
                 url = item.get("url", "")
@@ -486,21 +617,21 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                         "msgtype": "markdown",
                         "markdown": {
                             "title": title,
-                            "text": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {details or '无'}\n\n> 礼金记账系统通知"
+                            "text": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {msg_details or '无'}\n\n> 礼金记账系统通知"
                         }
                     }
                 elif "feishu.cn" in url or "larksuite.com" in url:
                     payload = {
                         "msg_type": "text",
                         "content": {
-                            "text": f"{title}\n时间: {now_str}\n\n{details or '无'}"
+                            "text": f"{title}\n时间: {now_str}\n\n{msg_details or '无'}"
                         }
                     }
                 elif "qyapi.weixin.qq.com" in url:
-                    if details and ("\\n" in details or chr(10) in details):
-                        md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n\n{details}"
+                    if msg_details and ("\\n" in msg_details or chr(10) in msg_details):
+                        md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n\n{msg_details}"
                     else:
-                        md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n> 详情：<font color=\"info\">{details or '无'}</font>"
+                        md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n> 详情：<font color=\"info\">{msg_details or '无'}</font>"
                     payload = {
                         "msgtype": "markdown",
                         "markdown": {"content": md_cnt}
@@ -511,7 +642,7 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                         parsed = urllib.parse.urlparse(url)
                         qs = urllib.parse.parse_qs(parsed.query)
                         token = qs.get("token", [""])[0]
-                    html_details = details.replace(chr(10), "<br>").replace("\\n", "<br>") if details else "无"
+                    html_details = msg_details.replace(chr(10), "<br>").replace("\\n", "<br>") if msg_details else "无"
                     payload = {
                         "token": token,
                         "title": title,
@@ -521,12 +652,12 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                 elif "ftqq.com" in url:
                     payload = {
                         "title": title,
-                        "desp": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {details or '无'}"
+                        "desp": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {msg_details or '无'}"
                     }
                 elif "api.day.app" in url:
                     payload = {
                         "title": title,
-                        "body": f"{details or '无'}\n时间: {now_str}",
+                        "body": f"{msg_details or '无'}\n时间: {now_str}",
                         "group": "礼金记账"
                     }
                 else:
@@ -534,7 +665,7 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                         "event": event_type,
                         "title": title,
                         "time": now_str,
-                        "details": details,
+                        "details": msg_details,
                         "source": "gift_bookkeeping_app"
                     }
 

@@ -8,6 +8,8 @@ WebDAV 客户端工具模块
 
 import os
 import io
+import shutil
+import tempfile
 import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -17,6 +19,13 @@ import urllib3
 
 # 禁用 self-signed SSL 证书警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# 尝试导入 pyzipper 用于 AES-256 加密 zip
+try:
+    import pyzipper
+    HAS_PYZIPPER = True
+except ImportError:
+    HAS_PYZIPPER = False
 
 
 def _normalize_url(url):
@@ -261,3 +270,66 @@ def download_backup(webdav_url_or_config, username=None, password=None, remote_f
         return False, "WebDAV 下载备份文件超时"
     except Exception as e:
         return False, f"WebDAV 下载异常: {str(e)}"
+
+
+def create_encrypted_zip(local_file_path, zip_password, output_path=None):
+    """
+    将本地文件创建为 AES-256 加密的 zip 包。
+    返回 (success, zip_path_or_error_msg)
+    """
+    if not HAS_PYZIPPER:
+        return False, "缺少 pyzipper 库，请运行 pip install pyzipper"
+    if not local_file_path or not os.path.exists(local_file_path):
+        return False, "本地文件不存在"
+    if not zip_password:
+        return False, "加密密码不能为空"
+
+    if output_path is None:
+        output_path = local_file_path + '.zip'
+
+    try:
+        with pyzipper.AESZipFile(output_path, 'w', compression=pyzipper.ZIP_LZMA, encryption=pyzipper.WZ_AES) as zf:
+            zf.setpassword(zip_password.encode('utf-8'))
+            zf.write(local_file_path, os.path.basename(local_file_path))
+        return True, output_path
+    except Exception as e:
+        return False, f"创建加密 zip 失败: {str(e)}"
+
+
+def upload_encrypted_backup(webdav_url_or_config, username=None, password=None, local_file_path=None, remote_filename=None, encrypt_password=None):
+    """
+    先将本地文件加密为 zip，再上传到 WebDAV。
+    encrypt_password 为 None 时不加密，直接上传原始文件。
+    """
+    if not local_file_path or not os.path.exists(local_file_path):
+        return False, "本地数据库文件不存在！"
+
+    if encrypt_password and HAS_PYZIPPER:
+        # 创建加密 zip 到临时目录
+        tmp_dir = tempfile.mkdtemp(prefix='gift_backup_')
+        tmp_zip = os.path.join(tmp_dir, os.path.basename(local_file_path) + '.zip')
+        ok, result = create_encrypted_zip(local_file_path, encrypt_password, tmp_zip)
+        if not ok:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return False, result
+        try:
+            upload_path = tmp_zip
+            if not remote_filename:
+                remote_filename = f"gift_bookkeeping_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+            elif not remote_filename.endswith('.zip'):
+                remote_filename = remote_filename + '.zip'
+            success, msg = upload_backup(webdav_url_or_config, username, password, upload_path, remote_filename)
+            return success, msg
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+    else:
+        if not remote_filename:
+            remote_filename = f"gift_bookkeeping_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        return upload_backup(webdav_url_or_config, username, password, local_file_path, remote_filename)
+
+
+def upload_file_to_webdav(webdav_url_or_config, username=None, password=None, local_file_path=None, remote_filename=None):
+    """
+    通用文件上传方法：上传任意本地文件到 WebDAV 远端。
+    """
+    return upload_backup(webdav_url_or_config, username, password, local_file_path, remote_filename)

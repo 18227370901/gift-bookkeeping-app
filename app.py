@@ -20,7 +20,8 @@ from models import (
     db, User, GiftRecord, OperationLog, SystemSetting, RegistrationToken,
     LoginRisk, SecurityRisk, Broadcast, BroadcastRead, WebhookConfig, WebhookLog,
     SharedLedgerLink, BackupConfig, Banquet, AnniversaryReminder,
-    ChatSession, ChatMessage, AIQueryLog
+    ChatSession, ChatMessage, AIQueryLog,
+    ScheduledBackupTask, BackupAttachment, PermissionTicket
 )
 from webhook_utils import trigger_webhook_event
 from webdav_utils import (
@@ -660,7 +661,52 @@ def init_database():
             "ALTER TABLE users ADD COLUMN ai_base_url VARCHAR(255) DEFAULT ''",
             "ALTER TABLE users ADD COLUMN ai_model VARCHAR(100) DEFAULT ''",
             "ALTER TABLE users ADD COLUMN ai_configs TEXT DEFAULT '[]'",
-            "ALTER TABLE users ADD COLUMN ai_authorized BOOLEAN DEFAULT 0"
+            "ALTER TABLE users ADD COLUMN ai_authorized BOOLEAN DEFAULT 0",
+            # --- Webhook 推送矩阵新字段 ---
+            "ALTER TABLE webhook_configs ADD COLUMN notify_on_update BOOLEAN DEFAULT 0",
+            "ALTER TABLE webhook_configs ADD COLUMN notify_on_security BOOLEAN DEFAULT 0",
+            "ALTER TABLE webhook_configs ADD COLUMN notify_on_system BOOLEAN DEFAULT 1",
+            "ALTER TABLE webhook_configs ADD COLUMN notify_on_status_change BOOLEAN DEFAULT 0",
+            "ALTER TABLE webhook_configs ADD COLUMN notify_pages TEXT DEFAULT '{}'",
+            "ALTER TABLE webhook_configs ADD COLUMN message_templates TEXT DEFAULT '{}'",
+            # --- 备份加密与授权字段 ---
+            "ALTER TABLE users ADD COLUMN backup_authorized BOOLEAN DEFAULT 0",
+            "ALTER TABLE backup_configs ADD COLUMN backup_encrypt_password VARCHAR(512)",
+            # --- 新模型建表 ---
+            """CREATE TABLE IF NOT EXISTS scheduled_backup_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(100) NOT NULL DEFAULT '定时备份',
+                cron_expr VARCHAR(50) NOT NULL DEFAULT '0 2 * * *',
+                is_enabled BOOLEAN DEFAULT 0,
+                encrypt_enabled BOOLEAN DEFAULT 0,
+                last_run_time DATETIME,
+                last_run_status VARCHAR(255),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS backup_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename VARCHAR(255) NOT NULL,
+                file_size INTEGER DEFAULT 0,
+                file_type VARCHAR(50) DEFAULT 'application/octet-stream',
+                is_encrypted BOOLEAN DEFAULT 0,
+                uploaded_by INTEGER REFERENCES users(id),
+                storage_path VARCHAR(500),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS permission_tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                requested_menus VARCHAR(256) NOT NULL,
+                reason TEXT,
+                status VARCHAR(20) DEFAULT 'pending',
+                reviewed_by INTEGER REFERENCES users(id),
+                reviewed_at DATETIME,
+                review_comment TEXT,
+                granted_menus VARCHAR(256),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"""
         ]
         with db.engine.connect() as conn:
             for sql in migration_sqls:
@@ -1140,6 +1186,7 @@ def register():
         user = User(username=username)
         user.set_password(password)
         user.set_security_answers(q1, a1, q2, a2)
+        user.allowed_menus = ''  # 新注册用户默认无任何菜单权限，需通过工单申请
 
         # 增加 token 使用次数，达到上限标记为已使用（自由注册模式下 reg_token 可能为 None）
         if reg_token:
@@ -1152,7 +1199,7 @@ def register():
         db.session.commit()
 
         log_action('用户注册', f'新用户 [{username}] 识别邀请码成功注册账号', user=user)
-        flash('注册成功，请使用新账号登录！', 'success')
+        flash('注册成功！当前账号暂无功能页面权限，登录后请在「权限申请」页面提交权限申请工单，等待管理员审批后即可使用各功能模块。', 'success')
         return redirect(url_for('login'))
 
     return render_template('register.html', token=token_str, invalid_token=False, registration_mode=reg_mode)
@@ -1411,6 +1458,15 @@ def add_record():
 
     type_str = "随礼(出礼)" if record_type == 'send' else "收礼(入礼)"
     log_action('新增记录', f'新增{type_str}: [{name}]，金额: {amount}元，事由: {event_reason}')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
+            f'{current_user.username} 新增{type_str}：客人「{name}」，金额 {amount:.2f}元，事由：{event_reason}',
+            f'操作人：{current_user.username} | 页面：礼金账本 | 类型：{type_str} | 客人：{name} | 金额：{amount:.2f}元 | 事由：{event_reason}',
+            page_key='ledger', user_name=current_user.username
+        )
+    except Exception:
+        pass
     if is_ajax:
         return jsonify({'code': 200, 'message': f'成功保存 [{name}] 的礼金记录！', 'record_id': record.id})
     flash(f'成功保存 [{name}] 的礼金记录！', 'success')
@@ -1494,6 +1550,15 @@ def edit_record(record_id):
 
     db.session.commit()
     log_action('修改记录', f'修改记录 ID #{record_id}: 姓名 [{name}]，金额: {amount}元，事由: {event_reason}')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_update',
+            f'{current_user.username} 修改记录：客人「{name}」，金额 {amount:.2f}元，事由：{event_reason}',
+            f'操作人：{current_user.username} | 页面：礼金账本 | 客人：{name} | 金额：{amount:.2f}元 | 事由：{event_reason}',
+            page_key='ledger', user_name=current_user.username
+        )
+    except Exception:
+        pass
     if is_ajax:
         return jsonify({'code': 200, 'message': f'记录 [{name}] 修改成功！'})
     flash(f'记录 [{name}] 修改成功！', 'success')
@@ -1517,10 +1582,16 @@ def delete_record(record_id):
         return redirect(url_for('index'))
 
     record_name = record.name
+    record_amount = record.amount
     record.deleted_at = datetime.now()
     db.session.commit()
     try:
-        trigger_webhook_event(WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete', record_name, {'id': record.id})
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
+            f'{current_user.username} 删除记录：客人「{record_name}」，金额 {record_amount:.2f}元',
+            f'操作人：{current_user.username} | 页面：礼金账本 | 客人：{record_name} | 金额：{record_amount:.2f}元 | 状态：已移入回收站',
+            page_key='ledger', user_name=current_user.username
+        )
     except Exception:
         pass
     log_action('删除记录至回收站', f'删除记录 ID #{record_id}: 姓名 [{record_name}] 进入回收站')
@@ -1560,7 +1631,12 @@ def batch_delete_records():
     db.session.commit()
     if deleted_count > 0:
         try:
-            trigger_webhook_event(WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete', f'{deleted_count} 条记录', {'count': deleted_count})
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
+                f'{current_user.username} 批量删除 {deleted_count} 条记录',
+                f'操作人：{current_user.username} | 页面：礼金账本 | 数量：{deleted_count} 条 | 状态：已移入回收站',
+                page_key='ledger', user_name=current_user.username
+            )
         except Exception:
             pass
     log_action('批量删除记录至回收站', f'成功批量将 {deleted_count} 条礼金记录移入回收站')
@@ -1591,7 +1667,12 @@ def delete_all_records():
     db.session.commit()
     if deleted_count > 0:
         try:
-            trigger_webhook_event(WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete', f'全部 {deleted_count} 条记录', {'count': deleted_count})
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
+                f'{current_user.username} 全部删除 {deleted_count} 条记录',
+                f'操作人：{current_user.username} | 页面：礼金账本 | 数量：全部 {deleted_count} 条 | 状态：已移入回收站',
+                page_key='ledger', user_name=current_user.username
+            )
         except Exception:
             pass
     log_action('全部删除记录至回收站', f'成功将 {deleted_count} 条礼金记录移入回收站')
@@ -1618,6 +1699,15 @@ def change_password():
         db.session.commit()
 
         log_action('修改密码', f'用户成功修改个人密码')
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'修改密码 [{current_user.username}]',
+                f'操作人：{current_user.username} | 页面：系统安全',
+                page_key='security', user_name=current_user.username
+            )
+        except Exception:
+            pass
         flash('密码修改成功，请使用新密码重新登录！', 'success')
         return redirect(url_for('login'))
 
@@ -1812,6 +1902,15 @@ def generate_invite_link():
     db.session.commit()
 
     log_action('生成注册邀请', f'生成有效时间为 {expire_hours} 小时、可用次数为 {max_uses} 次的注册链接')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+            f'生成注册邀请链接',
+            f'操作人：{current_user.username} | 页面：邀请链接 | 有效期：{expire_hours}小时 | 可用次数：{max_uses}',
+            page_key='invites', user_name=current_user.username
+        )
+    except Exception:
+        pass
     flash(f'注册邀请链接已成功生成（可使用 {max_uses} 次）！', 'success')
     return redirect(url_for('admin_users'))
 
@@ -1828,6 +1927,15 @@ def admin_delete_invite_link(token_id):
     db.session.commit()
 
     log_action('删除注册邀请链接', f'管理员删除了邀请链接前缀为 [{token_val}] 的链接')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
+            f'删除注册邀请链接',
+            f'操作人：{current_user.username} | 页面：邀请链接 | 前缀：{token_val}',
+            page_key='invites', user_name=current_user.username
+        )
+    except Exception:
+        pass
     flash('邀请链接已成功删除！', 'success')
     return redirect(url_for('admin_users'))
 
@@ -1851,6 +1959,15 @@ def admin_batch_delete_invite_links():
             db.session.delete(t)
         db.session.commit()
         log_action('批量删除注册邀请链接', f'管理员批量删除了 {deleted_count} 个注册邀请链接')
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
+                f'批量删除 {deleted_count} 个邀请链接',
+                f'操作人：{current_user.username} | 页面：邀请链接 | 数量：{deleted_count}',
+                page_key='invites', user_name=current_user.username
+            )
+        except Exception:
+            pass
         flash(f'成功批量删除 {deleted_count} 个注册邀请链接！', 'success')
     except Exception as e:
         db.session.rollback()
@@ -2017,6 +2134,10 @@ def admin_update_user_permissions(user_id):
     user.can_edit_others = (ledger_p >= 2)
     user.can_delete_others = (ledger_p >= 3)
 
+    # 3. 备份功能授权
+    backup_auth = request.form.get('backup_authorized', '')
+    user.backup_authorized = (backup_auth == '1' or backup_auth == 'on')
+
     db.session.commit()
 
     summary_parts = []
@@ -2026,6 +2147,15 @@ def admin_update_user_permissions(user_id):
     perm_summary = "，".join(summary_parts)
 
     log_action('修改用户权限', f'管理员修改了用户 [{user.username}] 的各菜单独立数据权限: {perm_summary}')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
+            f'修改用户权限 [{user.username}]',
+            f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username} | 权限：{perm_summary}',
+            page_key='admin_users', user_name=current_user.username
+        )
+    except Exception:
+        pass
     flash(f'用户 [{user.username}] 的各菜单独立数据权限已更新：{perm_summary}', 'success')
     return redirect(url_for('admin_users'))
 
@@ -2098,6 +2228,15 @@ def admin_toggle_user_status(user_id):
 
     status_str = "启用" if user.is_active else "禁用"
     log_action('修改账号状态', f'管理员{status_str}了用户账号 [{user.username}]')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
+            f'{status_str}用户 [{user.username}]',
+            f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username} | 状态：{status_str}',
+            page_key='admin_users', user_name=current_user.username
+        )
+    except Exception:
+        pass
     flash(f'用户 [{user.username}] 已成功{status_str}！', 'success')
     return redirect(url_for('admin_users'))
 
@@ -2142,6 +2281,15 @@ def admin_reset_user_pass(user_id):
     LOGIN_LOCK_UNTILS.pop(user.username, None)
     db.session.commit()
     log_action('重置用户密码', f'管理员重置了用户 [{user.username}] 的密码')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+            f'重置用户密码 [{user.username}]',
+            f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username}',
+            page_key='admin_users', user_name=current_user.username
+        )
+    except Exception:
+        pass
     flash(f'用户 [{user.username}] 的密码已重置成功！', 'success')
 
     return redirect(url_for('admin_users'))
@@ -2211,6 +2359,15 @@ def admin_delete_user(user_id):
     db.session.delete(user)
     db.session.commit()
     log_action('删除用户', f'管理员删除了用户账号 [{deleted_username}]')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
+            f'删除用户 [{deleted_username}]',
+            f'操作人：{current_user.username} | 页面：用户管理 | 用户：{deleted_username}',
+            page_key='admin_users', user_name=current_user.username
+        )
+    except Exception:
+        pass
     flash(f'用户 [{deleted_username}] 及其关联数据已成功删除！', 'success')
     return redirect(url_for('admin_users'))
 
@@ -2506,6 +2663,15 @@ def import_csv():
 
         db.session.commit()
         log_action('导入数据', f'成功导入 {success_count} 条礼金记录（忽略 {skip_count} 条）')
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
+                f'{current_user.username} 导入 {success_count} 条记录',
+                f'操作人：{current_user.username} | 页面：礼金账本 | 导入成功：{success_count} 条 | 忽略：{skip_count} 条',
+                page_key='ledger', user_name=current_user.username
+            )
+        except Exception:
+            pass
         flash(f'批量导入完成！成功导入 {success_count} 条记录' + (f'，忽略 {skip_count} 条无效数据。' if skip_count > 0 else '。'), 'success')
     except Exception as e:
         db.session.rollback()

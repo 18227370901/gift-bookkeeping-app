@@ -548,6 +548,19 @@
                           </div>
                         </div>
 
+                        <!-- 备份功能授权 -->
+                        <div class="mb-3">
+                          <label class="form-label fw-bold small text-dark mb-2">
+                            <i class="fa-solid fa-cloud-arrow-up text-warning me-1"></i>备份功能授权：
+                          </label>
+                          <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="backup_authorized" value="1" id="backup_auth_{{ u.id }}" {% if u.backup_authorized %}checked{% endif %}>
+                            <label class="form-check-label small text-muted" for="backup_auth_{{ u.id }}">
+                              授权该用户使用 WebDAV 备份与恢复功能
+                            </label>
+                          </div>
+                        </div>
+
                         <div class="alert alert-info py-2 px-3 small mb-0">
                           <i class="fa-solid fa-circle-info me-1"></i>
                           每个菜单独立选择，互不影响；未配置的菜单默认“仅管理自身数据”。

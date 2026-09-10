@@ -155,12 +155,10 @@
                                                 </button>
                                                 {% endif %}
                                                 {% if can_user_delete_reminder(current_user, r) %}
-                                                <form action="{{ url_for('reminder_delete', reminder_id=r.id) }}" method="POST" style="display:inline;" onsubmit="return confirm('确定要将亲友 [{{ r.name }}] 的纪念日移入回收站吗？');">
-                                                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                                                    <button type="submit" class="btn btn-outline-danger" title="移入回收站">
-                                                        <i class="fa-solid fa-trash"></i>
-                                                    </button>
-                                                </form>
+                                                <button type="button" class="btn btn-outline-danger" title="移入回收站"
+                                                    onclick="deleteReminder({{ r.id }}, '{{ r.name }}');">
+                                                    <i class="fa-solid fa-trash"></i>
+                                                </button>
                                                 {% endif %}
                                                 {% if not can_user_edit_reminder(current_user, r) and not can_user_delete_reminder(current_user, r) %}
                                                 <span class="badge bg-secondary text-white small">只读</span>
@@ -850,5 +848,20 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 });
+
+function deleteReminder(reminderId, name) {
+    if (!confirm('确定要将亲友 [' + name + '] 的纪念日移入回收站吗？')) return;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '/reminder/delete/' + reminderId;
+    form.style.display = 'none';
+    const csrfInput = document.createElement('input');
+    csrfInput.type = 'hidden';
+    csrfInput.name = 'csrf_token';
+    csrfInput.value = '{{ csrf_token }}';
+    form.appendChild(csrfInput);
+    document.body.appendChild(form);
+    form.submit();
+}
 </script>
 {% endblock %}

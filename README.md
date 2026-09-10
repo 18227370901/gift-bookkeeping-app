@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '4eec7c6a-b7d2-44dd-8624-448bec378424'
+  PropagateID: '4eec7c6a-b7d2-44dd-8624-448bec378424'
+  ReservedCode1: '2b64d083-7e21-4f31-8450-2423d9c062e9'
+  ReservedCode2: '2b64d083-7e21-4f31-8450-2423d9c062e9'
+---
+
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
@@ -121,6 +132,32 @@
 - 💬 **操作反馈与自动淡出**：所有操作提示消息增加自动淡出与关闭机制，优化视觉体验。
 - 🔔 **登录主动广播通知**：普通用户或管理员登录系统时，自动弹出当前正在上线的系统公告通知。
 
+### 10. AI 助手 (AI Assistant) `feature/ai-assistant 分支新增`
+- 🤖 **多会话 AI 聊天**：支持多会话管理（创建/重命名/删除），侧边栏会话列表 + 消息气泡对话区，推荐问题引导。
+- 🔑 **四级 AI 配置优先级容错**：用户多配置 → 用户旧版单配置 → 全局环境变量配置 → 管理员共享配置（仅被授权用户），逐级尝试直至成功。
+- 🌐 **联网搜索增强**：自动检测关键词（天气、新闻、最新等），通过 DuckDuckGo 搜索后结合 AI 生成摘要。
+- 🏠 **本地兜底引擎**：所有 AI 配置均不可用时，内置本地问答引擎提供基础回复。
+- 🛡️ **AI 授权管理**：管理员可授权/撤销普通用户的 AI 使用权限，未授权用户不可见入口。
+- 📝 **管理员多配置管理**：支持配置多个 AI 服务（API Key + Base URL + Model），可启用/禁用、调整优先级。
+
+### 11. Webhook 推送增强 (Webhook Enhancement) `feature/ai-assistant 分支新增`
+- 🎯 **页面级推送矩阵**：14 个页面 checkbox 配置，勾选页面仅推送该页面的操作通知；支持全选/清空。
+- 📋 **扩展事件类型**：在原有新增/删除/纪念日/广播基础上，新增修改/安全/系统配置变更/状态变更 4 种事件类型。
+- 🔒 **敏感页面内容脱敏**：安全相关页面（用户管理、备份、安全设置等）推送内容自动脱敏，仅保留操作人和操作类型。
+- 📝 **自定义消息模板**：支持为不同事件类型自定义推送消息模板。
+- 🔍 **全项目推送补全**：约 40 处 webhook 推送点补全（礼金账本、宴席、对账、纪念日、回收站、用户管理、AI 助手等）。
+
+### 12. 权限申请工单 (Permission Ticket) `feature/ai-assistant 分支新增`
+- 📋 **工单审批流程**：新注册用户默认无任何菜单权限，需通过工单申请并由管理员审批后方可使用。
+- ✅ **管理员审批/驳回**：管理员可查看所有工单，审批通过时勾选授权菜单写入用户权限，驳回时附驳回理由。
+- 🚪 **无权限提示引导**：无权限用户在首页看到友好的权限申请引导卡片，导航栏提供「权限申请」入口。
+
+### 13. 加密备份与定时备份 (Encrypted & Scheduled Backup) `feature/ai-assistant 分支新增`
+- 🔐 **AES-256 加密备份**：使用 `pyzipper` 库实现 AES-256 加密 zip 备份，自动任务用管理员预设密码加密，手动操作可自由选择是否加密并输入密码。
+- ⏰ **定时备份调度器**：支持 Cron 表达式配置定时备份任务，后台守护线程每 60 秒检查并自动执行加密备份上传到 WebDAV。
+- 👥 **备份功能授权**：管理员可授权普通用户使用备份功能（参照 AI 授权模式），被授权用户可执行备份操作。
+- 📊 **定时任务管理**：支持创建/编辑/删除/启用/禁用定时备份任务，查看最近执行时间和状态。
+
 ---
 
 
@@ -140,36 +177,43 @@
 ```text
 gift_bookkeeping_app/
 ├── app.py                      # Flask 核心路由、中间件、权限校验与主应用程序
-├── models.py                   # SQLAlchemy 数据模型 (用户/账本/宴席/备忘/回收站/日志/Webhook等)
+├── models.py                   # SQLAlchemy 数据模型 (用户/账本/宴席/备忘/回收站/日志/Webhook/AI/备份/工单等)
 ├── gift_utils.py               # 自然语言记账多条复合分词、中文大写数字转换、对账衍生聚合工具库
-├── routes_ext.py               # 业务扩展路由 (专属宴席、人情对账、纪念日、回收站、系统广播等)
+├── routes_ext.py               # 业务扩展路由 (宴席/对账/纪念日/回收站/广播/备份/工单/定时备份调度器)
+├── routes_ai.py                # [新增] AI 助手路由 (聊天/会话/配置/授权)
+├── ai_service.py               # [新增] AI 核心服务层 (多配置优先级/联网搜索/本地兜底)
+├── web_search.py               # [新增] 联网搜索模块 (DuckDuckGo)
 ├── webhook_utils.py            # Webhook 多渠道推送、官方 WeCom aibot SDK 长连接与 @ 机器人捕获
-├── webdav_utils.py             # 基于 requests 的高稳 WebDAV 客户端、云端备份与还原管理
+├── webdav_utils.py             # WebDAV 客户端、加密 zip 备份与还原管理
 ├── requirements.txt            # 项目 Python 依赖库列表
 ├── gift_bookkeeping.db         # SQLite 数据库文件 (支持 WAL 模式与并发读写)
 ├── run.sh                      # Linux 后台服务管理与虚拟环境自动创建/启动脚本
 ├── nginx_ssl.conf              # Nginx 自定义 HTTPS 端口反向代理配置文件
 ├── generate_ssl_certs.py       # 自签名 SSL 证书快速生成脚本
+├── AI_ASSISTANT_DESIGN.md      # [新增] AI 助手与综合增强功能技术设计文档
 ├── Project_Survey.md           # 系统架构设计规范与 35 项架构决策记录 (ADR-01 ~ ADR-35)
 ├── README.md                   # 系统使用说明与运维开发手册
 ├── static/                     # 静态资源目录 (Bootstrap, FontAwesome, Chart.js, 自定义脚本)
 └── templates/                  # Jinja2 HTML 模板目录
-    ├── base.html               # 基础模板 (导航栏、菜单权限控制、通用样式与脚本)
-    ├── index.html              # 礼金账本首页 (复合智能录入、数据列表、搜索统计、CSV导出)
-    ├── login.html              # 用户登录页面 (PRG 防重放、算术验证码、阶梯风控锁定)
-    ├── register.html           # 用户注册页面 (邀请码准入、自由注册模式动态适配)
-    ├── forgot_password.html    # 忘记密码与重置凭证页面 (两道密保问题验证)
-    ├── change_password.html    # 修改密码页面 (复杂度强校验、旧密码二次核验)
-    ├── banquets.html           # 专属宴席列表 (大账本汇总、来源归属标识、免刷新分享、批量删除)
+    ├── base.html               # 基础模板 (导航栏、菜单权限控制、AI/备份/工单入口)
+    ├── index.html              # 礼金账本首页 (复合智能录入、数据列表、无权限提示卡片)
+    ├── login.html              # 用户登录页面
+    ├── register.html           # 用户注册页面
+    ├── forgot_password.html    # 忘记密码与重置凭证页面
+    ├── change_password.html    # 修改密码页面
+    ├── banquets.html           # 专属宴席列表
     ├── banquet_detail.html     # 专属宴席明细管理页面
-    ├── reconciliation.html     # 人情对账页面 (明细抽屉、往来收支统计、分页与自定义条数)
-    ├── reminders.html          # 亲友纪念日备忘页面 (文案预览编辑、多通道、多轮推送、批量操作)
-    ├── recycle_bin.html        # 全系统统一回收站 (跨模块软删除管理、标签来源、批量还原/删除)
-    ├── admin_users.html        # 用户管理与各菜单独立权限配置页面
-    ├── admin_logs.html         # 操作审计日志页面 (多维过滤、分页与批量删除)
-    ├── admin_broadcasts.html   # 系统广播管理页面 (异步无感上下线、操作提示自动消失)
-    ├── admin_webhooks.html     # Webhook 与企业微信机器人配置与日志治理页面
-    ├── admin_backups.html      # WebDAV 云端备份与还原页面 (密码显隐切换、连接池通信)
+    ├── reconciliation.html     # 人情对账页面
+    ├── reminders.html          # 亲友纪念日备忘页面
+    ├── recycle_bin.html        # 全系统统一回收站
+    ├── admin_users.html        # 用户管理与权限配置页面 (含备份授权勾选)
+    ├── admin_logs.html         # 操作审计日志页面
+    ├── admin_broadcasts.html   # 系统广播管理页面
+    ├── admin_webhooks.html     # Webhook 配置页面 (扩展事件+页面推送矩阵)
+    ├── admin_backups.html      # WebDAV 备份页面 (加密配置+定时任务+授权管理)
+    ├── ai_assistant.html        # [新增] AI 助手聊天页面
+    ├── admin_ai_config.html     # [新增] 管理员 AI 配置页面
+    ├── permission_tickets.html  # [新增] 权限申请工单管理页面
     └── shared_ledger.html      # 免登录专属宴席只读分享前端视图
 ```
 
@@ -319,3 +363,5 @@ git stash pop
 ## 📄 开源许可证
 
 本项目基于 [MIT License](LICENSE) 开源许可协议发布。
+
+> AI生成

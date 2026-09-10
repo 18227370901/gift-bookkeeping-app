@@ -10,6 +10,8 @@ from flask import render_template, request, redirect, url_for, flash, jsonify, s
 from flask_login import login_required, current_user
 from models import db, User, ChatSession, ChatMessage, AIQueryLog
 from ai_service import ai_chat, _build_config_list, _get_suggestions
+from webhook_utils import trigger_webhook_event
+from models import WebhookConfig
 
 
 def register_ai_routes(app, log_action=None):
@@ -227,6 +229,15 @@ def register_ai_routes(app, log_action=None):
         db.session.commit()
 
         safe_log('AI 删除会话', f'会话 #{session_id} [{title}]', user=current_user)
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
+                f'删除AI会话 [{title}]',
+                f'操作人：{current_user.username} | 页面：AI助手 | 会话：{title}',
+                page_key='ai_assistant', user_name=current_user.username
+            )
+        except Exception:
+            pass
         return jsonify({'code': 200, 'message': '会话已删除'})
 
     # ==================== AI 配置管理（仅管理员） ====================
@@ -267,6 +278,15 @@ def register_ai_routes(app, log_action=None):
         db.session.commit()
 
         safe_log('AI 配置更新', f'更新了 {len(configs_raw)} 个 AI 配置', user=current_user)
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                f'更新AI配置',
+                f'操作人：{current_user.username} | 页面：AI助手配置 | 配置数：{len(configs_raw)}',
+                page_key='ai_config', user_name=current_user.username
+            )
+        except Exception:
+            pass
 
         # 返回清洗后的配置（不暴露 key 明文）
         configs = current_user.get_ai_configs()
@@ -321,6 +341,15 @@ def register_ai_routes(app, log_action=None):
 
         status = '授权' if authorized else '取消授权'
         safe_log('AI 授权管理', f'用户 [{target_user.username}] {status}', user=current_user)
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
+                f'AI授权{status} [{target_user.username}]',
+                f'操作人：{current_user.username} | 页面：AI助手配置 | 用户：{target_user.username} | 操作：{status}',
+                page_key='ai_config', user_name=current_user.username
+            )
+        except Exception:
+            pass
         return jsonify({'code': 200, 'data': {
             'user_id': target_user.id,
             'username': target_user.username,

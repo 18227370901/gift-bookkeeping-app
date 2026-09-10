@@ -81,8 +81,12 @@
               <div class="d-flex flex-wrap gap-1">
                 {% if w.notify_on_add %}<span class="badge bg-light text-dark border small" title="新增记账">新增</span>{% endif %}
                 {% if w.notify_on_delete %}<span class="badge bg-light text-dark border small" title="删除记账">删除</span>{% endif %}
+                {% if w.notify_on_update %}<span class="badge bg-light text-dark border small" title="修改">修改</span>{% endif %}
                 {% if w.notify_on_reminder %}<span class="badge bg-light text-dark border small" title="纪念日">纪念日</span>{% endif %}
                 {% if w.notify_on_broadcast %}<span class="badge bg-light text-dark border small" title="广播">广播</span>{% endif %}
+                {% if w.notify_on_system %}<span class="badge bg-light text-dark border small" title="系统">系统</span>{% endif %}
+                {% if w.notify_on_security %}<span class="badge bg-light text-dark border small" title="安全">安全</span>{% endif %}
+                {% if w.notify_on_status_change %}<span class="badge bg-light text-dark border small" title="状态变更">状态</span>{% endif %}
               </div>
             </td>
             <td>
@@ -106,11 +110,16 @@
                       data-bot-secret="{{ w.bot_secret or '' }}"
                       data-url="{{ w.webhook_url or '' }}"
                       data-secret="{{ w.secret_token or '' }}"
-                      data-notify-add="{{ 1 if w.notify_on_add else 0 }}"
-                      data-notify-delete="{{ 1 if w.notify_on_delete else 0 }}"
-                      data-notify-reminder="{{ 1 if w.notify_on_reminder else 0 }}"
-                      data-notify-broadcast="{{ 1 if w.notify_on_broadcast else 0 }}"
-                      title="编辑配置">
+               data-notify-add="{{ 1 if w.notify_on_add else 0 }}"
+               data-notify-delete="{{ 1 if w.notify_on_delete else 0 }}"
+               data-notify-reminder="{{ 1 if w.notify_on_reminder else 0 }}"
+               data-notify-broadcast="{{ 1 if w.notify_on_broadcast else 0 }}"
+               data-notify-update="{{ 1 if w.notify_on_update else 0 }}"
+               data-notify-security="{{ 1 if w.notify_on_security else 0 }}"
+               data-notify-system="{{ 1 if w.notify_on_system else 0 }}"
+               data-notify-status="{{ 1 if w.notify_on_status_change else 0 }}"
+               data-notify-pages="{{ w.notify_pages or '{}' }}"
+               title="编辑配置">
                 <i class="fa-solid fa-pen-to-square"></i>
               </button>
               <form action="{{ url_for('admin_toggle_webhook', webhook_id=w.id) }}" method="POST" class="d-inline">
@@ -319,8 +328,9 @@
         <h5 class="modal-title fw-bold"><i class="fa-solid fa-satellite-dish text-primary me-2"></i>添加通知通道</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <form action="{{ url_for('admin_create_webhook') }}" method="POST">
+      <form id="newWebhookForm" action="{{ url_for('admin_create_webhook') }}" method="POST">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="notify_pages" id="newNotifyPagesHidden" value="{}">
         <div class="modal-body p-4">
           <!-- 渠道名称 -->
           <div class="mb-3">
@@ -402,42 +412,92 @@
             </div>
           </div>
 
-          <!-- 触发事件配置 -->
-          <div class="mb-2">
-            <label class="form-label fw-bold">触发通知事件</label>
-            <div class="row g-2">
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_add" id="newNotifyAdd" checked>
-                  <label class="form-check-label small" for="newNotifyAdd">礼金记账新增通知</label>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_delete" id="newNotifyDelete" checked>
-                  <label class="form-check-label small" for="newNotifyDelete">礼金记录删除预警</label>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_reminder" id="newNotifyReminder" checked>
-                  <label class="form-check-label small" for="newNotifyReminder">亲友重要纪念日临期提醒</label>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="newNotifyBroadcast" checked>
-                  <label class="form-check-label small" for="newNotifyBroadcast">系统站内重要广播推送</label>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer border-light">
-          <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
-          <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">保存通道</button>
-        </div>
-      </form>
+           <!-- 触发事件配置 -->
+           <div class="mb-2">
+             <label class="form-label fw-bold">触发通知事件</label>
+             <div class="row g-2">
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_add" id="newNotifyAdd" checked>
+                   <label class="form-check-label small" for="newNotifyAdd">礼金记账新增通知</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_delete" id="newNotifyDelete" checked>
+                   <label class="form-check-label small" for="newNotifyDelete">礼金记录删除预警</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_reminder" id="newNotifyReminder" checked>
+                   <label class="form-check-label small" for="newNotifyReminder">亲友重要纪念日临期提醒</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="newNotifyBroadcast" checked>
+                   <label class="form-check-label small" for="newNotifyBroadcast">系统站内重要广播推送</label>
+                 </div>
+               </div>
+             </div>
+           </div>
+
+           <!-- 扩展事件开关 -->
+           <div class="mb-2">
+             <label class="form-label fw-bold small text-muted">扩展事件类型</label>
+             <div class="row g-2">
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_update" id="newNotifyUpdate">
+                   <label class="form-check-label small" for="newNotifyUpdate">修改/更新操作</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_security" id="newNotifySecurity">
+                   <label class="form-check-label small" for="newNotifySecurity">安全相关操作</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_system" id="newNotifySystem" checked>
+                   <label class="form-check-label small" for="newNotifySystem">系统配置变更</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_status_change" id="newNotifyStatusChange">
+                   <label class="form-check-label small" for="newNotifyStatusChange">状态变更（启用/禁用等）</label>
+                 </div>
+               </div>
+             </div>
+           </div>
+
+           <!-- 推送页面矩阵 -->
+           <div class="mb-2">
+             <div class="d-flex justify-content-between align-items-center mb-1">
+               <label class="form-label fw-bold small text-muted mb-0">页面推送矩阵（勾选需推送的页面）</label>
+               <div class="btn-group btn-group-sm">
+                 <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="selectAllPages('new')">全选</button>
+                 <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="clearAllPages('new')">清空</button>
+               </div>
+             </div>
+             <div class="border rounded-3 p-2 bg-light" style="max-height: 200px; overflow-y: auto;">
+               <div class="row g-1" id="newPageMatrix">
+                 {% set pages = [('ledger','礼金账本'),('banquets','专属宴席'),('reminders','纪念日备忘'),('reconciliation','人情对账'),('recycle_bin','回收站'),('admin_users','用户管理'),('admin_logs','操作审计'),('admin_broadcasts','系统广播'),('admin_webhooks','Webhook通知'),('admin_backups','WebDAV备份'),('ai_assistant','AI助手'),('ai_config','AI配置'),('security','系统安全'),('invites','邀请链接')] %}
+                 {% for key, label in pages %}
+                 <div class="col-sm-4 col-md-3">
+                   <div class="form-check">
+                     <input class="form-check-input" type="checkbox" name="notify_pages_all" value="{{ key }}" id="new_page_{{ key }}" checked>
+                     <label class="form-check-label small" for="new_page_{{ key }}">{{ label }}</label>
+                   </div>
+                 </div>
+                 {% endfor %}
+               </div>
+             </div>
+             <div class="form-text small text-muted">勾选页面后，仅推送勾选页面的操作通知；不勾选任何页面则推送全部。</div>
+           </div>
     </div>
   </div>
 </div>
@@ -452,6 +512,7 @@
       </div>
       <form id="editWebhookForm" action="" method="POST">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="notify_pages" id="editNotifyPagesHidden" value="{}">
         <div class="modal-body p-4">
           <!-- 渠道名称 -->
           <div class="mb-3">
@@ -529,36 +590,91 @@
             </div>
           </div>
 
-          <!-- 触发事件配置 -->
-          <div class="mb-2">
-            <label class="form-label fw-bold">触发通知事件</label>
-            <div class="row g-2">
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_add" id="editNotifyAdd">
-                  <label class="form-check-label small" for="editNotifyAdd">礼金记账新增通知</label>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_delete" id="editNotifyDelete">
-                  <label class="form-check-label small" for="editNotifyDelete">礼金记录删除预警</label>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_reminder" id="editNotifyReminder">
-                  <label class="form-check-label small" for="editNotifyReminder">亲友重要纪念日临期提醒</label>
-                </div>
-              </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="editNotifyBroadcast">
-                  <label class="form-check-label small" for="editNotifyBroadcast">系统站内重要广播推送</label>
-                </div>
-              </div>
-            </div>
-          </div>
+           <!-- 触发事件配置 -->
+           <div class="mb-2">
+             <label class="form-label fw-bold">触发通知事件</label>
+             <div class="row g-2">
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_add" id="editNotifyAdd">
+                   <label class="form-check-label small" for="editNotifyAdd">礼金记账新增通知</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_delete" id="editNotifyDelete">
+                   <label class="form-check-label small" for="editNotifyDelete">礼金记录删除预警</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_reminder" id="editNotifyReminder">
+                   <label class="form-check-label small" for="editNotifyReminder">亲友重要纪念日临期提醒</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="editNotifyBroadcast">
+                   <label class="form-check-label small" for="editNotifyBroadcast">系统站内重要广播推送</label>
+                 </div>
+               </div>
+             </div>
+           </div>
+
+           <!-- 扩展事件开关 -->
+           <div class="mb-2">
+             <label class="form-label fw-bold small text-muted">扩展事件类型</label>
+             <div class="row g-2">
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_update" id="editNotifyUpdate">
+                   <label class="form-check-label small" for="editNotifyUpdate">修改/更新操作</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_security" id="editNotifySecurity">
+                   <label class="form-check-label small" for="editNotifySecurity">安全相关操作</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_system" id="editNotifySystem" checked>
+                   <label class="form-check-label small" for="editNotifySystem">系统配置变更</label>
+                 </div>
+               </div>
+               <div class="col-sm-6">
+                 <div class="form-check">
+                   <input class="form-check-input" type="checkbox" name="notify_on_status_change" id="editNotifyStatusChange">
+                   <label class="form-check-label small" for="editNotifyStatusChange">状态变更（启用/禁用等）</label>
+                 </div>
+               </div>
+             </div>
+           </div>
+
+           <!-- 推送页面矩阵 -->
+           <div class="mb-2">
+             <div class="d-flex justify-content-between align-items-center mb-1">
+               <label class="form-label fw-bold small text-muted mb-0">页面推送矩阵（勾选需推送的页面）</label>
+               <div class="btn-group btn-group-sm">
+                 <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="selectAllPages('edit')">全选</button>
+                 <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="clearAllPages('edit')">清空</button>
+               </div>
+             </div>
+             <div class="border rounded-3 p-2 bg-light" style="max-height: 200px; overflow-y: auto;">
+               <div class="row g-1" id="editPageMatrix">
+                 {% set pages = [('ledger','礼金账本'),('banquets','专属宴席'),('reminders','纪念日备忘'),('reconciliation','人情对账'),('recycle_bin','回收站'),('admin_users','用户管理'),('admin_logs','操作审计'),('admin_broadcasts','系统广播'),('admin_webhooks','Webhook通知'),('admin_backups','WebDAV备份'),('ai_assistant','AI助手'),('ai_config','AI配置'),('security','系统安全'),('invites','邀请链接')] %}
+                 {% for key, label in pages %}
+                 <div class="col-sm-4 col-md-3">
+                   <div class="form-check">
+                     <input class="form-check-input" type="checkbox" name="notify_pages_all" value="{{ key }}" id="edit_page_{{ key }}">
+                     <label class="form-check-label small" for="edit_page_{{ key }}">{{ label }}</label>
+                   </div>
+                 </div>
+                 {% endfor %}
+               </div>
+             </div>
+           </div>
         </div>
         <div class="modal-footer border-light">
           <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
@@ -606,11 +722,58 @@ function togglePasswordVisibility(inputId, btn) {
   }
 }
 
+// 页面矩阵全选/清空
+function selectAllPages(prefix) {
+  const container = document.getElementById(prefix + 'PageMatrix');
+  if (container) {
+    container.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+  }
+}
+function clearAllPages(prefix) {
+  const container = document.getElementById(prefix + 'PageMatrix');
+  if (container) {
+    container.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+  }
+}
+
+// 将页面矩阵中勾选的 checkbox 组装为 notify_pages JSON
+// 格式: {"create": [...], "update": [...], "delete": [...], "reminder": [...], "broadcast": [...], "security": [...], "system": [...], "status_change": [...]}
+// 简化方案: 选中的页面统一放入所有事件类别下
+function assembleNotifyPages(prefix) {
+  const container = document.getElementById(prefix + 'PageMatrix');
+  if (!container) return '{}';
+  const checkedPages = [];
+  container.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+    checkedPages.push(cb.value);
+  });
+  // 如果全部勾选或不勾选，返回空对象 {} 表示不过滤
+  if (checkedPages.length === 0 || checkedPages.length === 14) return '{}';
+  // 将选中的页面放入各事件类别下
+  const categories = ['create', 'update', 'delete', 'reminder', 'broadcast', 'security', 'system', 'status_change'];
+  const pagesObj = {};
+  categories.forEach(cat => { pagesObj[cat] = checkedPages.slice(); });
+  return JSON.stringify(pagesObj);
+}
+
 // 初始化新增模态框字段状态
 document.addEventListener('DOMContentLoaded', function() {
   toggleConnTypeFields('new');
   onLogFilterChange();
 
+
+  // 提交前组装 notify_pages JSON
+  const newForm = document.getElementById('newWebhookForm');
+  if (newForm) {
+    newForm.addEventListener('submit', function() {
+      document.getElementById('newNotifyPagesHidden').value = assembleNotifyPages('new');
+    });
+  }
+  const editForm = document.getElementById('editWebhookForm');
+  if (editForm) {
+    editForm.addEventListener('submit', function() {
+      document.getElementById('editNotifyPagesHidden').value = assembleNotifyPages('edit');
+    });
+  }
 
   // 编辑模态框填充
   document.querySelectorAll('.btn-edit-webhook').forEach(btn => {
@@ -639,6 +802,39 @@ document.addEventListener('DOMContentLoaded', function() {
       document.getElementById('editNotifyDelete').checked = (data.notifyDelete === '1');
       document.getElementById('editNotifyReminder').checked = (data.notifyReminder === '1');
       document.getElementById('editNotifyBroadcast').checked = (data.notifyBroadcast === '1');
+
+      // 扩展事件
+      document.getElementById('editNotifyUpdate').checked = (data.notifyUpdate === '1');
+      document.getElementById('editNotifySecurity').checked = (data.notifySecurity === '1');
+      document.getElementById('editNotifySystem').checked = (data.notifySystem === '1');
+      document.getElementById('editNotifyStatusChange').checked = (data.notifyStatus === '1');
+
+      // 页面矩阵
+      try {
+        const pagesData = JSON.parse(data.notifyPages || '{}');
+        const allPageKeys = ['ledger','banquets','reminders','reconciliation','recycle_bin','admin_users','admin_logs','admin_broadcasts','admin_webhooks','admin_backups','ai_assistant','ai_config','security','invites'];
+        allPageKeys.forEach(pk => {
+          const cb = document.getElementById('edit_page_' + pk);
+          if (cb) {
+            // 如果 pagesData 为空对象 {}，则默认全部勾选
+            if (Object.keys(pagesData).length === 0) {
+              cb.checked = true;
+            } else {
+              cb.checked = false;
+              // 检查各个事件类别下的页面列表
+              for (const cat in pagesData) {
+                if (Array.isArray(pagesData[cat]) && pagesData[cat].includes(pk)) {
+                  cb.checked = true;
+                  break;
+                }
+              }
+            }
+          }
+        });
+      } catch(e) {
+        // 解析失败时默认全选
+        document.querySelectorAll('#editPageMatrix input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+      }
 
       toggleConnTypeFields('edit');
       const editModal = new bootstrap.Modal(document.getElementById('editWebhookModal'));

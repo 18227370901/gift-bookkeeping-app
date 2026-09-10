@@ -3,6 +3,23 @@
 {% block title %}礼金明细大薄 - 礼金人情记账系统{% endblock %}
 
 {% block content %}
+{% if not current_user.is_admin and not current_user.can_access_menu('ledger') %}
+<!-- 无权限提示卡片 -->
+<div class="row justify-content-center mt-5">
+    <div class="col-md-6 col-lg-5">
+        <div class="card shadow border-0 text-center">
+            <div class="card-body p-5">
+                <i class="fa-solid fa-lock fa-3x text-muted opacity-50 mb-3 d-block"></i>
+                <h4 class="fw-bold mb-2">暂无访问权限</h4>
+                <p class="text-muted mb-3">您当前尚未获得任何功能模块的访问权限。<br>请提交权限申请工单，管理员审批后即可使用。</p>
+                <a href="{{ url_for('permission_tickets_view') }}" class="btn btn-primary shadow-sm">
+                    <i class="fa-solid fa-ticket me-1"></i> 前往申请权限
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center gap-3 mb-4">
     <div>
         <h3 class="fw-bold mb-1"><i class="fa-solid fa-book-bookmark text-danger me-2"></i>礼金收支明细大薄</h3>
@@ -1060,5 +1077,6 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 </script>
+{% endif %}
 {% endblock %}
 

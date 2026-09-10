@@ -56,6 +56,19 @@
         color: #6c757d;
         margin-top: 2px;
     }
+    .session-delete-btn {
+        opacity: 0.35;
+        transition: opacity 0.2s;
+        font-size: 0.85rem;
+        padding: 2px 4px;
+        line-height: 1;
+    }
+    .session-item:hover .session-delete-btn {
+        opacity: 0.7;
+    }
+    .session-delete-btn:hover {
+        opacity: 1 !important;
+    }
     .chat-messages {
         flex: 1;
         overflow-y: auto;
@@ -268,10 +281,34 @@ async function loadSessions() {
     }
     list.innerHTML = data.data.map(s => `
         <div class="session-item ${s.id === currentSessionId ? 'active' : ''}" onclick="switchSession(${s.id})">
-            <div class="session-title">${escapeHtml(s.title)}</div>
-            <div class="session-meta">${s.message_count} 条消息 · ${s.updated_at}</div>
+            <div class="d-flex justify-content-between align-items-start">
+                <div class="flex-grow-1 overflow-hidden">
+                    <div class="session-title">${escapeHtml(s.title)}</div>
+                    <div class="session-meta">${s.message_count} 条消息 · ${s.updated_at}</div>
+                </div>
+                <button class="btn btn-sm btn-link text-danger p-0 ms-2 session-delete-btn" onclick="event.stopPropagation(); deleteSession(${s.id})" title="删除会话">
+                    <i class="fa-solid fa-trash-can"></i>
+                </button>
+            </div>
         </div>
     `).join('');
+}
+
+// 删除会话
+async function deleteSession(sessionId) {
+    if (!confirm('确定删除这个会话吗？删除后无法恢复。')) return;
+    const data = await aiFetch(`/api/ai/sessions/${sessionId}/delete`, {
+        method: 'DELETE'
+    });
+    if (!data || data.code !== 200) {
+        alert(data && data.message ? data.message : '删除失败，请重试');
+        return;
+    }
+    if (currentSessionId === sessionId) {
+        createNewSession();
+    } else {
+        loadSessions();
+    }
 }
 
 // 切换会话

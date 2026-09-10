@@ -9,6 +9,7 @@
 </div>
 
 <div class="row g-4">
+  <!-- 左侧：WebDAV 配置 + 加密设置 -->
   <div class="col-lg-5">
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light">
@@ -36,7 +37,30 @@
             </div>
             <div class="form-text small text-muted">点击眼睛图标可切换明文显示/隐藏，方便核对输入</div>
           </div>
-          <div class="d-flex gap-2">
+
+          <!-- 加密密码配置（管理员预设自动任务加密密码） -->
+          <hr class="my-3">
+          <h6 class="text-muted mb-2"><i class="fa-solid fa-lock me-1 text-warning"></i>自动备份加密密码（可选）</h6>
+          <div class="mb-2">
+            <label class="form-label small text-muted">为自动定时备份预设加密密码，留空则不加密</label>
+            <div class="input-group">
+              <input type="password" name="backup_encrypt_password" id="cfg_encrypt_pwd" class="form-control rounded-start-3" placeholder="预设加密密码（留空不加密）" autocomplete="new-password">
+              <button class="btn btn-outline-secondary rounded-end-3" type="button" onclick="togglePasswordVisibility('cfg_encrypt_pwd', this)" title="查看/隐藏密码">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+            {% if not has_pyzipper %}
+            <div class="form-text small text-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>未安装 pyzipper 库，加密功能不可用。请运行 pip install pyzipper</div>
+            {% else %}
+            <div class="form-text small text-muted">使用 AES-256 加密，手动备份时可单独选择密码</div>
+            {% endif %}
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="backup_encrypt_password_clear" value="1" id="clearEncryptPwd">
+            <label class="form-check-label small text-muted" for="clearEncryptPwd">勾选此项清除已保存的加密密码</label>
+          </div>
+
+          <div class="d-flex gap-2 mt-2">
             <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">
               <i class="fa-solid fa-floppy-disk me-1"></i>保存配置
             </button>
@@ -47,8 +71,114 @@
         </form>
       </div>
     </div>
+
+    <!-- 定时备份任务管理 -->
+    {% if current_user.is_admin %}
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-clock text-success me-2"></i>定时备份任务</h5>
+        <button type="button" class="btn btn-sm btn-outline-success rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#scheduledTaskModal">
+          <i class="fa-solid fa-plus me-1"></i>新增
+        </button>
+      </div>
+      <div class="card-body p-0">
+        {% if scheduled_tasks %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th class="ps-3">名称</th>
+                <th>Cron 表达式</th>
+                <th style="width:70px">状态</th>
+                <th>上次执行</th>
+                <th style="width:100px">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for t in scheduled_tasks %}
+              <tr>
+                <td class="ps-3 fw-bold">{{ t.name }}</td>
+                <td><code class="small">{{ t.cron_expr }}</code></td>
+                <td>
+                  <span class="badge bg-{{ 'success' if t.is_enabled else 'secondary' }}">{{ '启用' if t.is_enabled else '禁用' }}</span>
+                </td>
+                <td class="small text-muted">{{ t.last_run_time.strftime('%m-%d %H:%M') if t.last_run_time else '—' }}</td>
+                <td>
+                  <button class="btn btn-sm btn-outline-{{ 'secondary' if t.is_enabled else 'success' }} py-0 px-1" onclick="toggleScheduledTask({{ t.id }})" title="{{ '禁用' if t.is_enabled else '启用' }}">
+                    <i class="fa-solid fa-{{ 'pause' if t.is_enabled else 'play' }}"></i>
+                  </button>
+                  <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="editScheduledTask({{ t.id }}, '{{ t.name }}', '{{ t.cron_expr }}', {{ t.is_enabled|tojson }})" title="编辑">
+                    <i class="fa-solid fa-pen"></i>
+                  </button>
+                  <form action="{{ url_for('admin_delete_scheduled_task', task_id=t.id) }}" method="POST" class="d-inline" onsubmit="return confirm('确定删除定时任务「{{ t.name }}」？');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1" title="删除">
+                      <i class="fa-solid fa-trash"></i>
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted">
+          <i class="fa-solid fa-clock fa-2x opacity-25 mb-2 d-block"></i>
+          <p class="mb-0 small">暂无定时备份任务</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <!-- 备份授权管理 -->
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-white py-3 border-light">
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-user-shield text-warning me-2"></i>备份功能授权</h5>
+      </div>
+      <div class="card-body p-0">
+        {% if all_users %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th class="ps-3">用户名</th>
+                <th style="width:80px">授权状态</th>
+                <th style="width:80px">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for u in all_users %}
+              <tr>
+                <td class="ps-3"><i class="fa-solid fa-user text-secondary me-1"></i>{{ u.username }}</td>
+                <td>
+                  <span class="badge bg-{{ 'success' if u.backup_authorized else 'secondary' }}" id="backupBadge_{{ u.id }}">
+                    {{ '已授权' if u.backup_authorized else '未授权' }}
+                  </span>
+                </td>
+                <td>
+                  <button class="btn btn-sm btn-outline-{{ 'danger' if u.backup_authorized else 'success' }} py-0 px-1"
+                    onclick="toggleBackupAuth({{ u.id }})" title="{{ '撤销' if u.backup_authorized else '授权' }}">
+                    <i class="fa-solid fa-{{ 'xmark' if u.backup_authorized else 'check' }}"></i>
+                  </button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted">
+          <i class="fa-solid fa-users fa-2x opacity-25 mb-2 d-block"></i>
+          <p class="mb-0 small">暂无普通用户</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
   </div>
 
+  <!-- 右侧：备份与恢复操作 -->
   <div class="col-lg-7">
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
@@ -57,15 +187,44 @@
           <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="loadWebdavBackups()">
             <i class="fa-solid fa-rotate me-1"></i>刷新列表
           </button>
-          <form action="{{ url_for('admin_trigger_webdav_backup') }}" method="POST" class="d-inline">
+        </div>
+      </div>
+      <div class="card-body">
+        <!-- 手动备份选项：加密选择 + 密码输入 + 双确认 -->
+        <div class="alert alert-light border rounded-3 mb-3 p-3">
+          <h6 class="fw-bold mb-2"><i class="fa-solid fa-upload text-primary me-1"></i>手动上传备份</h6>
+          <form action="{{ url_for('admin_trigger_webdav_backup') }}" method="POST" id="manualBackupForm">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="btn btn-sm btn-primary rounded-pill px-3 shadow-sm">
+            <div class="form-check mb-2">
+              <input class="form-check-input" type="checkbox" name="use_encrypt" id="useEncrypt" onchange="toggleEncryptSection()">
+              <label class="form-check-label fw-bold" for="useEncrypt">加密备份</label>
+              <span class="form-text small text-muted ms-2">勾选后可输入自定义加密密码，留空则使用管理员预设密码</span>
+            </div>
+            <div id="encryptSection" style="display:none;">
+              <div class="row g-2 mb-2">
+                <div class="col-md-6">
+                  <label class="form-label small text-muted">加密密码</label>
+                  <div class="input-group">
+                    <input type="password" name="manual_encrypt_password" id="manualEncryptPwd" class="form-control form-control-sm" placeholder="输入加密密码（留空用预设密码）" autocomplete="new-password">
+                    <button class="btn btn-outline-secondary btn-sm" type="button" onclick="togglePasswordVisibility('manualEncryptPwd', this)"><i class="fa-regular fa-eye"></i></button>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <label class="form-label small text-muted">确认密码</label>
+                  <div class="input-group">
+                    <input type="password" name="manual_encrypt_password_confirm" id="manualEncryptPwdConfirm" class="form-control form-control-sm" placeholder="再次输入密码确认" autocomplete="new-password">
+                    <button class="btn btn-outline-secondary btn-sm" type="button" onclick="togglePasswordVisibility('manualEncryptPwdConfirm', this)"><i class="fa-regular fa-eye"></i></button>
+                  </div>
+                </div>
+              </div>
+              <div class="form-text small text-warning mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>请牢记密码，加密备份无法在无密码情况下恢复</div>
+            </div>
+            <button type="submit" class="btn btn-primary rounded-pill px-3 shadow-sm btn-sm" id="manualBackupBtn" onclick="return validateManualBackup();">
               <i class="fa-solid fa-upload me-1"></i>立即上传备份至 WebDAV
             </button>
           </form>
         </div>
-      </div>
-      <div class="card-body p-0">
+
         <div class="table-responsive">
           <table class="table table-hover align-middle mb-0">
             <thead class="table-light">
@@ -120,6 +279,41 @@
   </div>
 </div>
 
+<!-- 定时任务 Modal -->
+<div class="modal fade" id="scheduledTaskModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST" action="{{ url_for('admin_save_scheduled_task') }}" id="scheduledTaskForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="task_id" id="task_id">
+        <div class="modal-header">
+          <h5 class="modal-title text-success"><i class="fa-solid fa-clock me-2"></i>定时备份任务</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label">任务名称</label>
+            <input type="text" name="task_name" id="task_name" class="form-control" placeholder="如：每日凌晨备份" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Cron 表达式</label>
+            <input type="text" name="cron_expr" id="cron_expr" class="form-control font-monospace" placeholder="0 2 * * *" value="0 2 * * *" required>
+            <div class="form-text small text-muted">格式：分 时 日 月 周，例如 <code>0 2 * * *</code> = 每天凌晨2点，<code>0 2 * * 0</code> = 每周日凌晨2点</div>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" name="is_enabled" id="task_enabled" checked>
+            <label class="form-check-label" for="task_enabled">立即启用</label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-success btn-sm"><i class="fa-solid fa-check me-1"></i>保存</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script>
 function toggleWebdavPasswordVisibility() {
   const input = document.getElementById('cfg_webdav_password');
@@ -136,32 +330,96 @@ function toggleWebdavPasswordVisibility() {
   }
 }
 
-// 异步安全拉取 WebDAV 备份列表，杜绝页面加载主线程阻塞
+// 加密选项切换
+function toggleEncryptSection() {
+  const cb = document.getElementById('useEncrypt');
+  const section = document.getElementById('encryptSection');
+  section.style.display = cb.checked ? 'block' : 'none';
+}
+
+// 手动备份验证
+function validateManualBackup() {
+  const useEncrypt = document.getElementById('useEncrypt');
+  if (!useEncrypt.checked) return true;
+
+  const pwd = document.getElementById('manualEncryptPwd').value;
+  const pwdConfirm = document.getElementById('manualEncryptPwdConfirm').value;
+
+  if (pwd && pwd !== pwdConfirm) {
+    alert('两次输入的加密密码不一致！');
+    return false;
+  }
+  return confirm('确认上传加密备份至 WebDAV？');
+}
+
+// 定时任务切换
+function toggleScheduledTask(taskId) {
+  fetch(`/admin/backups/scheduled_tasks/${taskId}/toggle`, {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': '{{ csrf_token }}',
+      'X-CSRF-Token': '{{ csrf_token }}',
+      'X-Requested-With': 'XMLHttpRequest'
+    }
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      location.reload();
+    } else {
+      alert(data.message || '操作失败');
+    }
+  })
+  .catch(() => alert('网络请求异常'));
+}
+
+// 编辑定时任务
+function editScheduledTask(id, name, cron, enabled) {
+  document.getElementById('task_id').value = id;
+  document.getElementById('task_name').value = name;
+  document.getElementById('cron_expr').value = cron;
+  document.getElementById('task_enabled').checked = enabled;
+  new bootstrap.Modal(document.getElementById('scheduledTaskModal')).show();
+}
+
+// 备份授权切换
+function toggleBackupAuth(userId) {
+  fetch(`/admin/backups/authorize/${userId}`, {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': '{{ csrf_token }}',
+      'X-CSRF-Token': '{{ csrf_token }}',
+      'X-Requested-With': 'XMLHttpRequest'
+    }
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      const badge = document.getElementById('backupBadge_' + userId);
+      if (badge) {
+        badge.className = 'badge bg-' + (data.backup_authorized ? 'success' : 'secondary');
+        badge.textContent = data.backup_authorized ? '已授权' : '未授权';
+      }
+      location.reload();
+    } else {
+      alert(data.message || '操作失败');
+    }
+  })
+  .catch(() => alert('网络请求异常'));
+}
+
+// 异步安全拉取 WebDAV 备份列表
 function loadWebdavBackups() {
   const tbody = document.getElementById('webdavBackupsTableBody');
   if (!tbody) return;
 
-  tbody.innerHTML = `
-    <tr>
-      <td colspan="4" class="text-center py-5 text-muted">
-        <span class="spinner-border spinner-border-sm me-2 text-primary"></span>正在安全拉取云端备份列表...
-      </td>
-    </tr>
-  `;
+  tbody.innerHTML = '<tr><td colspan="4" class="text-center py-5 text-muted"><span class="spinner-border spinner-border-sm me-2 text-primary"></span>正在安全拉取云端备份列表...</td></tr>';
 
   fetch('/admin/backups/list_ajax')
     .then(res => res.json())
     .then(data => {
       if (!data.configured) {
-        tbody.innerHTML = `
-          <tr>
-            <td colspan="4" class="text-center py-5 text-muted">
-              <i class="fa-solid fa-cloud-arrow-up fa-3x mb-3 text-secondary opacity-50"></i>
-              <p class="mb-1 fw-bold text-dark">暂未配置 WebDAV 云端服务器</p>
-              <small class="text-muted">请先在左侧填写 WebDAV 地址、账号及密码并保存</small>
-            </td>
-          </tr>
-        `;
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-5 text-muted"><i class="fa-solid fa-cloud-arrow-up fa-3x mb-3 text-secondary opacity-50"></i><p class="mb-1 fw-bold text-dark">暂未配置 WebDAV 云端服务器</p><small class="text-muted">请先在左侧填写 WebDAV 地址、账号及密码并保存</small></td></tr>';
         return;
       }
 
@@ -170,86 +428,51 @@ function loadWebdavBackups() {
         data.backups.forEach(file => {
           const sizeStr = file.size_human || ((file.size / 1024).toFixed(1) + ' KB');
           const timeStr = file.modified_time || file.last_modified || '-';
-          rowsHtml += `
-            <tr>
-              <td class="ps-4 fw-bold">
-                <i class="fa-solid fa-database text-secondary me-2"></i>${file.name}
-              </td>
-              <td>${sizeStr}</td>
-              <td><small class="text-muted">${timeStr}</small></td>
-              <td class="text-end pe-4">
-                <form action="/admin/backup/restore" method="POST" class="d-inline" onsubmit="return confirm('警告：恢复备份将覆盖当前数据库，确定继续吗？');">
-                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                  <input type="hidden" name="filename" value="${file.name}">
-                  <button type="submit" class="btn btn-sm btn-outline-danger">
-                    <i class="fa-solid fa-rotate-left me-1"></i>恢复此版本
-                  </button>
-                </form>
-              </td>
-            </tr>
-          `;
+          const isZip = file.name.toLowerCase().endsWith('.zip');
+          rowsHtml += `<tr>
+            <td class="ps-4 fw-bold"><i class="fa-solid fa-${isZip ? 'lock' : 'database'} text-${isZip ? 'warning' : 'secondary'} me-2"></i>${file.name}</td>
+            <td>${sizeStr}</td>
+            <td><small class="text-muted">${timeStr}</small></td>
+            <td class="text-end pe-4">
+              <form action="/admin/backup/restore" method="POST" class="d-inline" onsubmit="return confirm('警告：恢复备份将覆盖当前数据库，确定继续吗？');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="filename" value="${file.name}">
+                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-rotate-left me-1"></i>恢复此版本</button>
+              </form>
+            </td>
+          </tr>`;
         });
         tbody.innerHTML = rowsHtml;
       } else if (data.success) {
-        tbody.innerHTML = `
-          <tr>
-            <td colspan="4" class="text-center py-5 text-muted">
-              <i class="fa-solid fa-cloud-arrow-up fa-3x mb-3 text-secondary opacity-50"></i>
-              <p class="mb-1 fw-bold text-dark">云端目录暂无数据库备份文件</p>
-              <small class="text-muted">点击右上角"立即上传备份至 WebDAV"即可创建第一份云端快照</small>
-            </td>
-          </tr>
-        `;
+        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-5 text-muted"><i class="fa-solid fa-cloud-arrow-up fa-3x mb-3 text-secondary opacity-50"></i><p class="mb-1 fw-bold text-dark">云端目录暂无数据库备份文件</p><small class="text-muted">点击上方"立即上传备份至 WebDAV"即可创建第一份云端快照</small></td></tr>';
       } else {
-        tbody.innerHTML = `
-          <tr>
-            <td colspan="4" class="text-center py-5 text-danger">
-              <i class="fa-solid fa-triangle-exclamation fa-2x mb-2"></i>
-              <p class="mb-2 fw-bold">${data.message || '获取备份列表失败'}</p>
-              <button class="btn btn-sm btn-outline-secondary" onclick="loadWebdavBackups()">
-                <i class="fa-solid fa-rotate me-1"></i>重试
-              </button>
-            </td>
-          </tr>
-        `;
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-5 text-danger"><i class="fa-solid fa-triangle-exclamation fa-2x mb-2"></i><p class="mb-2 fw-bold">${data.message || '获取备份列表失败'}</p><button class="btn btn-sm btn-outline-secondary" onclick="loadWebdavBackups()"><i class="fa-solid fa-rotate me-1"></i>重试</button></td></tr>`;
       }
     })
-    .catch(err => {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="4" class="text-center py-5 text-danger">
-            <i class="fa-solid fa-circle-xmark fa-2x mb-2"></i>
-            <p class="mb-2">网络请求异常，无法拉取远端备份列表</p>
-            <button class="btn btn-sm btn-outline-secondary" onclick="loadWebdavBackups()">
-              <i class="fa-solid fa-rotate me-1"></i>重新加载
-            </button>
-          </td>
-        </tr>
-      `;
+    .catch(() => {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-center py-5 text-danger"><i class="fa-solid fa-circle-xmark fa-2x mb-2"></i><p class="mb-2">网络请求异常，无法拉取远端备份列表</p><button class="btn btn-sm btn-outline-secondary" onclick="loadWebdavBackups()"><i class="fa-solid fa-rotate me-1"></i>重新加载</button></td></tr>';
     });
 }
 
-// 页面加载完成后异步拉取备份列表
 document.addEventListener('DOMContentLoaded', function() {
   loadWebdavBackups();
 });
 
 // 测试 WebDAV 连接
 document.getElementById('btnTestWebdav')?.addEventListener('click', function() {
-  const form = document.getElementById('webdavConfigForm');
   const url = document.getElementById('cfg_webdav_url').value.trim();
   const username = document.getElementById('cfg_webdav_username').value.trim();
   const password = document.getElementById('cfg_webdav_password').value.trim();
-  
+
   if (!url || !username || !password) {
     alert('请先填写完整的 WebDAV URL、账号和密码！');
     return;
   }
-  
+
   const btn = this;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>测试中...';
-  
+
   fetch("{{ url_for('admin_test_webdav') }}", {
     method: 'POST',
     headers: {
@@ -263,14 +486,12 @@ document.getElementById('btnTestWebdav')?.addEventListener('click', function() {
   .then(res => res.json())
   .then(data => {
     if (data.success) {
-      alert('✅ WebDAV 连接成功！服务器响应正常。');
+      alert('WebDAV 连接成功！服务器响应正常。');
     } else {
-      alert('❌ 连接失败: ' + (data.message || '请检查配置与网络'));
+      alert('连接失败: ' + (data.message || '请检查配置与网络'));
     }
   })
-  .catch(err => {
-    alert('请求异常: ' + err);
-  })
+  .catch(err => alert('请求异常: ' + err))
   .finally(() => {
     btn.disabled = false;
     btn.innerHTML = '<i class="fa-solid fa-plug me-1"></i>测试连接';
