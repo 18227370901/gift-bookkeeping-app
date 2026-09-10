@@ -830,9 +830,11 @@ class WebhookConfig(db.Model):
 
 
 class BackupConfig(db.Model):
-    """云端 / WebDAV 自动定时备份配置"""
+    """云端 / WebDAV 自动定时备份配置（支持多用户隔离）"""
     __tablename__ = 'backup_configs'
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=True)  # NULL=管理员全局配置，非NULL=用户私有配置
+    allow_view_others_tasks = db.Column(db.Boolean, default=False)  # 管理员全局配置：是否允许普通用户查看他人任务
     webdav_url = db.Column(db.String(255), nullable=True)
     webdav_username = db.Column(db.String(100), nullable=True)
     webdav_password = db.Column(db.String(255), nullable=True)
@@ -891,13 +893,32 @@ class BackupConfig(db.Model):
         return decrypt_credential(self.webdav_password)
 
     @classmethod
-    def get_config(cls):
-        cfg = cls.query.first()
-        if not cfg:
-            cfg = cls()
-            db.session.add(cfg)
-            db.session.commit()
-        return cfg
+    def get_config(cls, user_id=None):
+        """获取配置：user_id=None 返回管理员全局配置，否则返回用户私有配置"""
+        if user_id is None:
+            # 管理员全局配置（user_id 为 NULL 的记录）
+            cfg = cls.query.filter(cls.user_id.is_(None)).first()
+            if not cfg:
+                cfg = cls()
+                db.session.add(cfg)
+                db.session.commit()
+            return cfg
+        else:
+            # 用户私有配置
+            cfg = cls.query.filter(cls.user_id == user_id).first()
+            if not cfg:
+                # 复制管理员全局配置作为用户私有副本
+                global_cfg = cls.query.filter(cls.user_id.is_(None)).first()
+                cfg = cls(user_id=user_id)
+                if global_cfg:
+                    cfg.webdav_url = global_cfg.webdav_url
+                    cfg.webdav_username = global_cfg.webdav_username
+                    cfg.webdav_password = global_cfg.webdav_password
+                    cfg.backup_path = global_cfg.backup_path
+                    cfg.backup_subdir = global_cfg.backup_subdir
+                db.session.add(cfg)
+                db.session.commit()
+            return cfg
 
     @property
     def backup_encrypt_password(self):
@@ -926,8 +947,26 @@ class ScheduledBackupTask(db.Model):
     custom_script = db.Column(db.Text, nullable=True)  # 自定义脚本，custom 类型用
     last_run_time = db.Column(db.DateTime, nullable=True)
     last_run_status = db.Column(db.String(255), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # 创建者ID
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    creator = db.relationship('User', foreign_keys=[created_by], backref=db.backref('scheduled_tasks', lazy=True))
+
+
+class ScheduledTaskExecutionLog(db.Model):
+    """定时任务执行历史日志"""
+    __tablename__ = 'scheduled_task_execution_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    task_id = db.Column(db.Integer, db.ForeignKey('scheduled_backup_tasks.id', ondelete='CASCADE'), nullable=False)
+    start_time = db.Column(db.DateTime, nullable=True)
+    end_time = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(20), default='running')  # running / success / failed
+    output_log = db.Column(db.Text, nullable=True)  # 执行输出日志
+    executed_by = db.Column(db.String(100), nullable=True)  # 执行人用户名（定时任务自动执行时为 'system'）
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    task = db.relationship('ScheduledBackupTask', backref=db.backref('execution_logs', lazy=True, cascade='all, delete-orphan'))
 
 
 class BackupAttachment(db.Model):
@@ -952,7 +991,7 @@ class PermissionTicket(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     requested_menus = db.Column(db.String(256), nullable=False)  # 申请的菜单列表（逗号分隔）
     reason = db.Column(db.Text, nullable=True)  # 申请理由
-    status = db.Column(db.String(20), default='pending')  # pending / approved / rejected
+    status = db.Column(db.String(20), default='pending')  # pending / approved / rejected / revoked
     reviewed_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
     reviewed_at = db.Column(db.DateTime, nullable=True)
     review_comment = db.Column(db.Text, nullable=True)

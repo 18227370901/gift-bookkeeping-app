@@ -48,7 +48,13 @@
 
           <!-- 加密密码配置 -->
           <hr class="my-3">
-          <h6 class="text-muted mb-2"><i class="fa-solid fa-lock me-1 text-warning"></i>自动备份加密密码（可选）</h6>
+          <h6 class="text-muted mb-2"><i class="fa-solid fa-lock me-1 text-warning"></i>自动备份加密密码（可选）
+            {% if has_encrypt_password %}
+            <span class="badge bg-success-subtle text-success ms-2"><i class="fa-solid fa-check-circle me-1"></i>已设置</span>
+            {% else %}
+            <span class="badge bg-secondary-subtle text-secondary ms-2"><i class="fa-solid fa-circle me-1"></i>未设置</span>
+            {% endif %}
+          </h6>
           <div class="mb-2">
             <label class="form-label small text-muted">为自动定时备份预设加密密码，留空则不加密</label>
             <div class="input-group">
@@ -67,6 +73,12 @@
             <input class="form-check-input" type="checkbox" name="backup_encrypt_password_clear" value="1" id="clearEncryptPwd">
             <label class="form-check-label small text-muted" for="clearEncryptPwd">勾选此项清除已保存的加密密码</label>
           </div>
+          {% if current_user.is_admin %}
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="allow_view_others_tasks" value="on" id="allowViewOthers" {% if allow_view_others %}checked{% endif %}>
+            <label class="form-check-label small text-muted" for="allowViewOthers">允许普通用户查看其他用户的定时任务</label>
+          </div>
+          {% endif %}
 
           <div class="d-flex gap-2 mt-2">
             <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">
@@ -80,15 +92,37 @@
       </div>
     </div>
     {% else %}
-    <!-- 普通用户：只读状态卡片 -->
+    <!-- 普通用户：可编辑自己的私有 WebDAV 配置 -->
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置</h5>
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置（个人）</h5>
       </div>
-      <div class="card-body text-center py-4">
-        <i class="fa-solid fa-circle-check text-success fa-3x mb-3 d-block opacity-75"></i>
-        <p class="fw-bold text-dark mb-1">WebDAV 备份已由管理员配置</p>
-        <p class="text-muted small mb-0">如需修改配置，请联系管理员</p>
+      <div class="card-body">
+        <form action="{{ url_for('admin_save_webdav_config') }}" method="POST" id="webdavConfigFormUser">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="mb-3">
+            <label class="form-label fw-bold">WebDAV 服务器地址 (URL)</label>
+            <input type="url" name="webdav_url" id="cfg_webdav_url_user" class="form-control rounded-3" value="{{ config_data.webdav_url or '' }}" placeholder="https://dav.jianguoyun.com/dav/">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">账号 / 用户名</label>
+            <input type="text" name="webdav_username" id="cfg_webdav_username_user" class="form-control rounded-3" value="{{ config_data.webdav_username or '' }}" placeholder="username@example.com">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">密码 / 应用专属授权码</label>
+            <div class="input-group">
+              <input type="password" name="webdav_password" id="cfg_webdav_password_user" class="form-control rounded-start-3" placeholder="留空不修改密码" autocomplete="new-password">
+              <button class="btn btn-outline-secondary rounded-end-3" type="button" onclick="togglePasswordVisibility('cfg_webdav_password_user', this)"><i class="fa-regular fa-eye"></i></button>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">备份存储子目录</label>
+            <input type="text" name="backup_subdir" class="form-control rounded-3" value="{{ config_data.backup_subdir or 'gift_backups' }}" placeholder="gift_backups">
+          </div>
+          <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">
+            <i class="fa-solid fa-floppy-disk me-1"></i>保存我的配置
+          </button>
+        </form>
       </div>
     </div>
     {% endif %}
@@ -115,7 +149,9 @@
                 <th>Cron 表达式</th>
                 <th style="width:70px">状态</th>
                 <th>上次执行</th>
-                {% if current_user.is_admin %}
+                <th>创建人</th>
+                <th style="width:70px">历史</th>
+                {% if current_user.is_admin or current_user.can_use_backup() %}
                 <th style="width:100px">操作</th>
                 {% endif %}
               </tr>
@@ -138,7 +174,13 @@
                   <span class="badge bg-{{ 'success' if t.is_enabled else 'secondary' }}">{{ '启用' if t.is_enabled else '禁用' }}</span>
                 </td>
                 <td class="small text-muted">{{ t.last_run_time.strftime('%m-%d %H:%M') if t.last_run_time else '—' }}</td>
-                {% if current_user.is_admin %}
+                <td class="small">{% if t.creator %}{{ t.creator.username }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                <td>
+                  <button class="btn btn-sm btn-outline-info py-0 px-1" onclick="showExecutionLogs({{ t.id }})" title="执行历史">
+                    <i class="fa-solid fa-clock-rotate-left"></i>
+                  </button>
+                </td>
+                {% if current_user.is_admin or current_user.can_use_backup() %}
                 <td>
                   <button class="btn btn-sm btn-outline-{{ 'secondary' if t.is_enabled else 'success' }} py-0 px-1" onclick="toggleScheduledTask({{ t.id }})" title="{{ '禁用' if t.is_enabled else '启用' }}">
                     <i class="fa-solid fa-{{ 'pause' if t.is_enabled else 'play' }}"></i>
@@ -270,20 +312,28 @@
           <table class="table table-hover align-middle mb-0">
             <thead class="table-light">
               <tr>
-                <th class="ps-4">备份文件</th>
+                <th style="width:36px"><input type="checkbox" id="selectAllBackups" onclick="toggleSelectAllBackups(this)"></th>
+                <th class="ps-1">备份文件</th>
                 <th>大小</th>
                 <th>备份时间</th>
+                <th>创建者</th>
                 <th class="text-end pe-4">操作</th>
               </tr>
             </thead>
             <tbody id="webdavBackupsTableBody">
               <tr id="loadingWebdavRow">
-                <td colspan="4" class="text-center py-5 text-muted">
+                <td colspan="6" class="text-center py-5 text-muted">
                   <span class="spinner-border spinner-border-sm me-2 text-primary"></span>正在安全拉取云端备份列表...
                 </td>
               </tr>
             </tbody>
           </table>
+          <div class="d-flex justify-content-between align-items-center mt-2 px-2">
+            <button type="button" class="btn btn-sm btn-outline-danger" id="btnBatchDelete" onclick="batchDeleteBackups()" style="display:none;">
+              <i class="fa-solid fa-trash me-1"></i>批量删除选中
+            </button>
+            <span class="small text-muted" id="selectedCount"></span>
+          </div>
         </div>
       </div>
     </div>
@@ -384,6 +434,12 @@
             <input class="form-check-input" type="checkbox" name="is_enabled" id="task_enabled" checked>
             <label class="form-check-label" for="task_enabled">立即启用</label>
           </div>
+          {% if has_encrypt_password %}
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" name="encrypt_enabled" id="encrypt_enabled">
+            <label class="form-check-label" for="encrypt_enabled">加密备份（使用预设加密密码）</label>
+          </div>
+          {% endif %}
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
@@ -505,13 +561,16 @@ function loadWebdavBackups() {
   const tbody = document.getElementById('webdavBackupsTableBody');
   if (!tbody) return;
 
-  tbody.innerHTML = '<tr><td colspan="4" class="text-center py-5 text-muted"><span class="spinner-border spinner-border-sm me-2 text-primary"></span>正在安全拉取云端备份列表...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="6" class="text-center py-5 text-muted"><span class="spinner-border spinner-border-sm me-2 text-primary"></span>正在安全拉取云端备份列表...</td></tr>';
 
   fetch('/admin/backups/list_ajax')
     .then(res => res.json())
     .then(data => {
+      const btnBatch = document.getElementById('btnBatchDelete');
+      if (btnBatch) btnBatch.style.display = 'none';
+
       if (!data.configured) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-5 text-muted"><i class="fa-solid fa-cloud-arrow-up fa-3x mb-3 text-secondary opacity-50"></i><p class="mb-1 fw-bold text-dark">暂未配置 WebDAV 云端服务器</p><small class="text-muted">请先在左侧填写 WebDAV 地址、账号及密码并保存</small></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-5 text-muted"><i class="fa-solid fa-cloud-arrow-up fa-3x mb-3 text-secondary opacity-50"></i><p class="mb-1 fw-bold text-dark">暂未配置 WebDAV 云端服务器</p><small class="text-muted">请先在左侧填写 WebDAV 地址、账号及密码并保存</small></td></tr>';
         return;
       }
 
@@ -521,29 +580,143 @@ function loadWebdavBackups() {
           const sizeStr = file.size_human || ((file.size / 1024).toFixed(1) + ' KB');
           const timeStr = file.modified_time || file.last_modified || '-';
           const isZip = file.name.toLowerCase().endsWith('.zip');
+          const createdBy = file.created_by || 'admin';
+          const canRestore = file.can_restore !== false;
+          const canDelete = file.can_delete !== false;
+          const restoreDisabled = canRestore ? '' : 'disabled';
+          const restoreStyle = canRestore ? '' : 'opacity-0.5';
+          const restoreTitle = canRestore ? '恢复此版本' : '仅可恢复自己创建的备份';
+          const deleteBtn = canDelete ? `<button type="button" class="btn btn-sm btn-outline-danger ms-1" onclick="deleteBackup('${file.name}')" title="删除"><i class="fa-solid fa-trash"></i></button>` : '';
           rowsHtml += `<tr>
-            <td class="ps-4 fw-bold"><i class="fa-solid fa-${isZip ? 'lock' : 'database'} text-${isZip ? 'warning' : 'secondary'} me-2"></i>${file.name}</td>
+            <td><input type="checkbox" class="backup-checkbox" value="${file.name}" onchange="updateBatchDeleteBtn()"></td>
+            <td class="ps-1 fw-bold"><i class="fa-solid fa-${isZip ? 'lock' : 'database'} text-${isZip ? 'warning' : 'secondary'} me-2"></i>${file.name}</td>
             <td>${sizeStr}</td>
             <td><small class="text-muted">${timeStr}</small></td>
+            <td><span class="badge bg-info-subtle text-info">${createdBy}</span></td>
             <td class="text-end pe-4">
-              <form action="/admin/backup/restore" method="POST" class="d-inline" onsubmit="return confirm('警告：恢复备份将覆盖当前数据库，确定继续吗？');">
+              <form action="/admin/backup/restore" method="POST" class="d-inline" onsubmit="return confirm('警告：恢复备份将覆盖当前数据库，确定继续吗？');" style="${restoreStyle}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="filename" value="${file.name}">
-                <button type="submit" class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-rotate-left me-1"></i>恢复此版本</button>
+                <button type="submit" class="btn btn-sm btn-outline-danger" ${restoreDisabled} title="${restoreTitle}"><i class="fa-solid fa-rotate-left me-1"></i>恢复</button>
               </form>
+              ${deleteBtn}
             </td>
           </tr>`;
         });
         tbody.innerHTML = rowsHtml;
       } else if (data.success) {
-        tbody.innerHTML = '<tr><td colspan="4" class="text-center py-5 text-muted"><i class="fa-solid fa-cloud-arrow-up fa-3x mb-3 text-secondary opacity-50"></i><p class="mb-1 fw-bold text-dark">云端目录暂无数据库备份文件</p><small class="text-muted">点击上方"立即上传备份至 WebDAV"即可创建第一份云端快照</small></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-5 text-muted"><i class="fa-solid fa-cloud-arrow-up fa-3x mb-3 text-secondary opacity-50"></i><p class="mb-1 fw-bold text-dark">云端目录暂无数据库备份文件</p><small class="text-muted">点击上方"立即上传备份至 WebDAV"即可创建第一份云端快照</small></td></tr>';
       } else {
-        tbody.innerHTML = `<tr><td colspan="4" class="text-center py-5 text-danger"><i class="fa-solid fa-triangle-exclamation fa-2x mb-2"></i><p class="mb-2 fw-bold">${data.message || '获取备份列表失败'}</p><button class="btn btn-sm btn-outline-secondary" onclick="loadWebdavBackups()"><i class="fa-solid fa-rotate me-1"></i>重试</button></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="text-center py-5 text-danger"><i class="fa-solid fa-triangle-exclamation fa-2x mb-2"></i><p class="mb-2 fw-bold">${data.message || '获取备份列表失败'}</p><button class="btn btn-sm btn-outline-secondary" onclick="loadWebdavBackups()"><i class="fa-solid fa-rotate me-1"></i>重试</button></td></tr>`;
       }
     })
     .catch(() => {
-      tbody.innerHTML = '<tr><td colspan="4" class="text-center py-5 text-danger"><i class="fa-solid fa-circle-xmark fa-2x mb-2"></i><p class="mb-2">网络请求异常，无法拉取远端备份列表</p><button class="btn btn-sm btn-outline-secondary" onclick="loadWebdavBackups()"><i class="fa-solid fa-rotate me-1"></i>重新加载</button></td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center py-5 text-danger"><i class="fa-solid fa-circle-xmark fa-2x mb-2"></i><p class="mb-2">网络请求异常，无法拉取远端备份列表</p><button class="btn btn-sm btn-outline-secondary" onclick="loadWebdavBackups()"><i class="fa-solid fa-rotate me-1"></i>重新加载</button></td></tr>';
     });
+}
+
+// 全选/取消全选
+function toggleSelectAllBackups(checkbox) {
+  document.querySelectorAll('.backup-checkbox').forEach(cb => cb.checked = checkbox.checked);
+  updateBatchDeleteBtn();
+}
+
+// 更新批量删除按钮显示
+function updateBatchDeleteBtn() {
+  const checked = document.querySelectorAll('.backup-checkbox:checked');
+  const btn = document.getElementById('btnBatchDelete');
+  const countSpan = document.getElementById('selectedCount');
+  if (checked.length > 0) {
+    if (btn) btn.style.display = 'inline-block';
+    if (countSpan) countSpan.textContent = `已选 ${checked.length} 项`;
+  } else {
+    if (btn) btn.style.display = 'none';
+    if (countSpan) countSpan.textContent = '';
+  }
+}
+
+// 删除单个备份
+function deleteBackup(filename) {
+  if (!confirm(`确定删除远端备份文件「${filename}」？此操作不可恢复！`)) return;
+  fetch('/admin/backups/delete', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-CSRFToken': '{{ csrf_token }}',
+      'X-CSRF-Token': '{{ csrf_token }}'
+    },
+    body: `filename=${encodeURIComponent(filename)}&csrf_token={{ csrf_token }}`
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      alert('删除成功！');
+      loadWebdavBackups();
+    } else {
+      alert(data.message || data.results?.[0]?.message || '删除失败');
+    }
+  })
+  .catch(() => alert('网络请求异常'));
+}
+
+// 批量删除备份
+function batchDeleteBackups() {
+  const checked = document.querySelectorAll('.backup-checkbox:checked');
+  if (checked.length === 0) return;
+  if (!confirm(`确定删除选中的 ${checked.length} 个备份文件？此操作不可恢复！`)) return;
+  const filenames = Array.from(checked).map(cb => cb.value).join(',');
+  fetch('/admin/backups/delete', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'X-CSRFToken': '{{ csrf_token }}',
+      'X-CSRF-Token': '{{ csrf_token }}'
+    },
+    body: `filenames=${encodeURIComponent(filenames)}&csrf_token={{ csrf_token }}`
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      alert('批量删除成功！');
+      loadWebdavBackups();
+    } else {
+      const failed = (data.results || []).filter(r => !r.success).map(r => r.filename).join(', ');
+      alert(failed ? `部分文件删除失败: ${failed}` : (data.message || '删除失败'));
+      loadWebdavBackups();
+    }
+  })
+  .catch(() => alert('网络请求异常'));
+}
+
+// 查看定时任务执行历史
+function showExecutionLogs(taskId) {
+  fetch(`/admin/backups/scheduled_tasks/${taskId}/execution_logs`, {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (!data.success) {
+      alert(data.message || '获取执行历史失败');
+      return;
+    }
+    let html = '<div class="modal fade" id="execLogModal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content"><div class="modal-header"><h5 class="modal-title"><i class="fa-solid fa-clock-rotate-left me-2"></i>' + (data.task_name || '任务') + ' - 执行历史</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body" style="max-height:60vh;overflow-y:auto;">';
+    if (data.logs && data.logs.length > 0) {
+      html += '<table class="table table-sm table-hover"><thead><tr><th>开始时间</th><th>结束时间</th><th>状态</th><th>执行人</th><th>输出</th></tr></thead><tbody>';
+      data.logs.forEach(log => {
+        const statusBadge = log.status === 'success' ? '<span class="badge bg-success-subtle text-success">成功</span>' : log.status === 'failed' ? '<span class="badge bg-danger-subtle text-danger">失败</span>' : '<span class="badge bg-warning-subtle text-warning">运行中</span>';
+        html += `<tr><td class="small">${log.start_time}</td><td class="small">${log.end_time}</td><td>${statusBadge}</td><td class="small">${log.executed_by}</td><td class="small text-muted" style="max-width:200px;word-break:break-all;">${log.output_log || '—'}</td></tr>`;
+      });
+      html += '</tbody></table>';
+    } else {
+      html += '<div class="text-center py-4 text-muted"><i class="fa-solid fa-clock fa-2x opacity-25 mb-2 d-block"></i><p class="mb-0">暂无执行历史</p></div>';
+    }
+    html += '</div><div class="modal-footer"><button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">关闭</button></div></div></div></div>';
+    const old = document.getElementById('execLogModal');
+    if (old) old.remove();
+    document.body.insertAdjacentHTML('beforeend', html);
+    new bootstrap.Modal(document.getElementById('execLogModal')).show();
+  })
+  .catch(() => alert('网络请求异常'));
 }
 
 document.addEventListener('DOMContentLoaded', function() {

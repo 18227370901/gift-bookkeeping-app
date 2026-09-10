@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'c2e22f65-d6a1-44f9-b23e-dfb1f1d85459'
-  PropagateID: 'c2e22f65-d6a1-44f9-b23e-dfb1f1d85459'
-  ReservedCode1: '184972fa-bd48-44fa-9ec4-bee8da55d865'
-  ReservedCode2: '184972fa-bd48-44fa-9ec4-bee8da55d865'
+  ProduceID: 'c67086d6-a8ed-4fb7-b077-f90d55f40b29'
+  PropagateID: 'c67086d6-a8ed-4fb7-b077-f90d55f40b29'
+  ReservedCode1: '4ec16e61-be1e-4321-8218-f29d37693307'
+  ReservedCode2: '4ec16e61-be1e-4321-8218-f29d37693307'
 ---
 
 # AI 助手模块技术设计方案
@@ -302,6 +302,86 @@ Response: {
 10. **新增 `static/ai_assistant.js`**：前端交互逻辑
 11. **更新 `templates/base.html`**：导航栏追加 AI 助手入口
 12. **数据库迁移与验证**
+
+> AI生成
+
+---
+
+## 第十章 V3 修复与优化（2026-09-10）
+
+### 10.1 权限工单撤销功能
+- 新增 `permission_ticket_revoke` 路由（POST `/permission_tickets/<id>/revoke`），管理员可撤销已批准的工单
+- 撤销时从 `user.allowed_menus` 移除该工单 `granted_menus` 中的菜单项，工单状态改为 `revoked`
+- `PermissionTicket.status` 新增 `revoked` 状态值（pending/approved/rejected/revoked）
+- `permission_tickets.html` 已批准工单增加撤销按钮和确认 Modal
+- 工单列表状态过滤支持 `revoked`
+
+### 10.2 WebDAV 备份文件删除 + 恢复 500 修复
+- `webdav_utils.py` 新增 `delete_webdav_backup` 函数（HTTP DELETE 删除指定备份文件）
+- `routes_ext.py` 新增 `admin_delete_webdav_backup` 路由（POST `/admin/backups/delete`），支持单文件和批量删除
+- `admin_backups.html` 备份列表增加复选框列、全选、批量删除按钮、单行删除按钮
+- 恢复路由 `admin_restore_webdav_backup` 增加 try-except 错误处理，修复 500 错误
+- 修复 delete 路由 `request.get_json()` 运算符优先级 bug：改为先判断 `request.is_json` 再安全调用
+
+### 10.3 加密密码回显 + 定时任务加密
+- `admin_backups.html` 加密密码区域增加"已设置/未设置"徽章（基于 `has_encrypt_password` 布尔值回显）
+- 定时任务 Modal 新增 `encrypt_enabled` 复选框（仅当全局加密密码已配置时显示）
+- `admin_save_scheduled_task` 路由新增读取 `encrypt_enabled` 参数
+- 定时备份执行时根据 `encrypt_enabled` 标志决定是否加密
+
+### 10.4 定时任务执行人 + 执行历史
+- `models.py` 新增 `ScheduledTaskExecutionLog` 模型（task_id, start_time, end_time, status, output_log, executed_by）
+- `ScheduledBackupTask` 新增 `created_by` 字段 + `creator` relationship
+- `_backup_scheduler_worker` 每次执行创建执行日志记录（running → success/failed）
+- `admin_backups.html` 定时任务列表增加"创建人"列和"执行历史"按钮
+- 新增 `admin_get_execution_logs` 路由（GET `/admin/backups/scheduled_tasks/<id>/execution_logs`）
+
+### 10.5 附件上传到 WebDAV
+- `admin_upload_attachment` 路由在本地保存后调用 `upload_file_to_webdav` 上传到 WebDAV `attachments/` 子目录
+- WebDAV 上传失败不阻断本地保存，记录 warning 日志
+
+### 10.6 Webhook 凭证校验 AJAX 化
+- `admin_create_webhook` 和 `admin_edit_webhook` 路由改为兼容 AJAX（检测 `X-Requested-With` header）
+- 校验失败返回 `jsonify` 错误信息而非重定向页面
+- `admin_webhooks.html` 表单提交改为 `e.preventDefault()` + `submitWebhookFormAjax` 函数
+- Modal 内新增错误提示容器（`newWebhookError`/`editWebhookError`），校验失败就地显示红色 alert
+
+### 10.7 多用户 WebDAV 配置/定时任务隔离
+- `BackupConfig` 新增 `user_id` 字段（关联 users.id）和 `allow_view_others_tasks` 字段
+- `get_config(user_id)` 改为按用户查询：NULL=管理员全局配置，非 NULL=用户私有配置（自动复制全局配置作为副本）
+- 所有备份路由改为 `BackupConfig.get_config(None if current_user.is_admin else current_user.id)`
+- 定时任务 CRUD 按 `created_by` 过滤，普通用户只能操作自己的任务
+- `admin_backups.html` 普通用户区域从只读卡片改为可编辑自己的私有 WebDAV 配置表单
+- 管理员配置区增加"允许普通用户查看他人任务"复选框
+
+### 10.8 备份文件权限控制
+- 备份文件名格式改为 `{timestamp}_{username}_{type}.db`（如 `20260910_142300_admin_db_backup.db`）
+- `admin_backups_list_ajax` 解析文件名中的用户标识，返回 `created_by`、`can_restore`、`can_delete` 字段
+- `admin_backups.html` 备份列表增加"创建者"列，恢复/删除按钮按权限启用/禁用
+- `admin_restore_webdav_backup` 增加权限判断（仅管理员或创建者可恢复）
+
+### 10.9 AI 授权同步到用户管理页面
+- `app.py` 的 `admin_update_user_permissions` 路由新增读取 `ai_authorized` 参数
+- `app.py` 的 `admin_batch_user_permissions` 路由新增批量 AI 授权
+- `admin_users.html` 权限配置 Modal 新增 AI 授权 checkbox
+- `admin_users.html` 批量权限配置 Modal 新增 AI 授权 checkbox
+
+### 10.10 数据模型变更
+- `BackupConfig` 新增 `user_id`（Integer, nullable）、`allow_view_others_tasks`（Boolean, default=0）
+- `ScheduledBackupTask` 新增 `created_by`（Integer, FK users.id, nullable）
+- 新增 `ScheduledTaskExecutionLog` 模型：id, task_id(FK), start_time, end_time, status, output_log(Text), executed_by
+- `PermissionTicket.status` 新增 `revoked` 状态值
+- 迁移 SQL 已追加到 app.py migration_sqls 列表
+
+### 10.11 涉及文件
+- `models.py` — 数据模型修改（BackupConfig/ScheduledBackupTask/ScheduledTaskExecutionLog/PermissionTicket）
+- `app.py` — 迁移 SQL + 用户权限路由（ai_authorized）
+- `webdav_utils.py` — 新增 delete_webdav_backup 函数
+- `routes_ext.py` — 全部 9 项问题的后端路由修改
+- `templates/admin_backups.html` — 备份管理页面全面改造
+- `templates/admin_webhooks.html` — Webhook 页面 AJAX 化
+- `templates/permission_tickets.html` — 工单页面撤销功能
+- `templates/admin_users.html` — 用户管理页面 AI 授权
 
 > AI生成
 

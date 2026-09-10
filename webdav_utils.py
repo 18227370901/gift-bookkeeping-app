@@ -409,3 +409,36 @@ def upload_file_to_webdav(webdav_url_or_config, username=None, password=None, lo
     通用文件上传方法：上传任意本地文件到 WebDAV 远端。
     """
     return upload_backup(webdav_url_or_config, username, password, local_file_path, remote_filename)
+
+
+def delete_webdav_backup(webdav_url_or_config, username=None, password=None, remote_filename=None):
+    """
+    删除 WebDAV 远端指定备份文件。
+    支持传入 config 对象或 (url, username, password, filename) 传统入参。
+    返回 (success, message)
+    """
+    if hasattr(webdav_url_or_config, 'server_url') or hasattr(webdav_url_or_config, 'webdav_url'):
+        cfg = webdav_url_or_config
+        webdav_url, username, password = _unpack_auth_params(cfg)
+    else:
+        webdav_url = webdav_url_or_config
+    if not webdav_url or not str(webdav_url).strip():
+        return False, "未配置 WebDAV 服务器地址"
+    if not remote_filename:
+        return False, "未指定要删除的文件名"
+
+    target_dir_url = _normalize_url(webdav_url).rstrip('/') + '/'
+    file_delete_url = urllib.parse.urljoin(target_dir_url, urllib.parse.quote(remote_filename))
+    session = _get_session(username, password)
+
+    try:
+        resp = session.delete(file_delete_url, timeout=30, verify=False)
+        if resp.status_code in (200, 204):
+            return True, f"成功删除远端文件：{remote_filename}"
+        if resp.status_code == 404:
+            return False, f"远端文件不存在：{remote_filename}"
+        return False, f"删除失败，HTTP 状态码: {resp.status_code}"
+    except requests.exceptions.Timeout:
+        return False, "WebDAV 删除文件超时"
+    except Exception as e:
+        return False, f"WebDAV 删除异常: {str(e)}"

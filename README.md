@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '461f8eba-242a-4592-98fe-4b95ac86d1ef'
-  PropagateID: '461f8eba-242a-4592-98fe-4b95ac86d1ef'
-  ReservedCode1: 'e8c274e9-7d5c-4b0a-a1dc-772241042b8d'
-  ReservedCode2: 'e8c274e9-7d5c-4b0a-a1dc-772241042b8d'
+  ProduceID: 'ffab0f6b-cb6c-4a7c-aee1-a96d6cbea523'
+  PropagateID: 'ffab0f6b-cb6c-4a7c-aee1-a96d6cbea523'
+  ReservedCode1: 'd1806d23-92ef-4dc8-aed6-7540bef46699'
+  ReservedCode2: 'd1806d23-92ef-4dc8-aed6-7540bef46699'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -194,6 +194,30 @@ AIGC:
 #### 定时任务
 - 定时任务从仅支持数据库备份扩展为三种类型：数据库备份/文件备份/自定义脚本
 - 任务 Modal 新增类型选择下拉框，按类型动态显示配置区域
+
+### V3 修复与优化（2026-09-10）
+
+#### 权限工单
+- 新增工单撤销功能：管理员可撤销已批准的权限工单，自动回收已授予的菜单权限
+
+#### WebDAV 备份增强
+- 新增 WebDAV 备份文件删除功能（支持单文件/批量删除）
+- 加密密码回显：备份配置区显示"已设置/未设置"徽章，无需输入即可查看状态
+- 定时任务支持加密备份：创建定时任务时可勾选加密选项
+- 定时任务新增创建人列和执行历史查看
+- 多用户 WebDAV 配置隔离：普通用户可编辑自己的私有 WebDAV 配置
+- 备份文件名增加用户标识，列表显示创建者，恢复/删除按权限控制
+- 修复恢复备份时 500 错误（增加异常处理）
+
+#### Webhook 管理
+- Webhook 新增/编辑表单改为 AJAX 提交，校验失败在 Modal 内就地显示错误，不再关闭弹窗
+
+#### 用户管理
+- 用户管理页权限配置 Modal 新增 AI 授权 checkbox
+- 批量权限配置 Modal 新增 AI 授权 checkbox
+
+#### 附件备份
+- 附件上传后自动同步到 WebDAV `attachments/` 子目录（失败不阻断本地保存）
 
 ## 📂 项目文件结构
 

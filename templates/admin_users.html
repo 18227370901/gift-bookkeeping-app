@@ -561,6 +561,19 @@
                           </div>
                         </div>
 
+                        <!-- V3: AI 助手授权 -->
+                        <div class="mb-3">
+                          <label class="form-label fw-bold small text-dark mb-2">
+                            <i class="fa-solid fa-robot text-info me-1"></i>AI 助手授权：
+                          </label>
+                          <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="ai_authorized" value="1" id="ai_auth_{{ u.id }}" {% if u.ai_authorized %}checked{% endif %}>
+                            <label class="form-check-label small text-muted" for="ai_auth_{{ u.id }}">
+                              授权该用户使用 AI 助手功能
+                            </label>
+                          </div>
+                        </div>
+
                         <div class="alert alert-info py-2 px-3 small mb-0">
                           <i class="fa-solid fa-circle-info me-1"></i>
                           每个菜单独立选择，互不影响；未配置的菜单默认“仅管理自身数据”。
@@ -1098,6 +1111,19 @@ function copyCredPassword() {
                   </select>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- V3: 批量 AI 助手授权 -->
+          <div class="mb-3">
+            <label class="form-label fw-bold small text-dark mb-2">
+              <i class="fa-solid fa-robot text-info me-1"></i>AI 助手授权：
+            </label>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="ai_authorized" value="1" id="batch_ai_auth">
+              <label class="form-check-label small text-muted" for="batch_ai_auth">
+                勾选后批量授权选中用户使用 AI 助手功能
+              </label>
             </div>
           </div>
 

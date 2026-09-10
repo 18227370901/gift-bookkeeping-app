@@ -716,6 +716,25 @@ def init_database():
             "ALTER TABLE scheduled_backup_tasks ADD COLUMN target_files TEXT",
             "ALTER TABLE scheduled_backup_tasks ADD COLUMN custom_script TEXT",
         ])
+        # --- V3 修复：新增字段与新表迁移 ---
+        migration_sqls.extend([
+            # BackupConfig 支持多用户隔离
+            "ALTER TABLE backup_configs ADD COLUMN user_id INTEGER",
+            "ALTER TABLE backup_configs ADD COLUMN allow_view_others_tasks BOOLEAN DEFAULT 0",
+            # ScheduledBackupTask 新增创建者
+            "ALTER TABLE scheduled_backup_tasks ADD COLUMN created_by INTEGER REFERENCES users(id)",
+            # 定时任务执行历史日志表
+            """CREATE TABLE IF NOT EXISTS scheduled_task_execution_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL REFERENCES scheduled_backup_tasks(id) ON DELETE CASCADE,
+                start_time DATETIME,
+                end_time DATETIME,
+                status VARCHAR(20) DEFAULT 'running',
+                output_log TEXT,
+                executed_by VARCHAR(100),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+        ])
         with db.engine.connect() as conn:
             for sql in migration_sqls:
                 try:
@@ -2060,6 +2079,10 @@ def admin_batch_user_permissions():
             legacy_p = request.form.get('perm_level', '0')
             menu_perms[m] = int(legacy_p) if str(legacy_p).isdigit() else 0
 
+    # V3: 批量 AI 助手授权
+    ai_auth = request.form.get('ai_authorized', '')
+    ai_auth_val = (ai_auth == '1' or ai_auth == 'on')
+
     count = 0
     for uid_str in user_ids:
         try:
@@ -2072,6 +2095,8 @@ def admin_batch_user_permissions():
                 u.can_view_others = (ledger_p >= 1)
                 u.can_edit_others = (ledger_p >= 2)
                 u.can_delete_others = (ledger_p >= 3)
+                # V3: 批量 AI 授权
+                u.ai_authorized = ai_auth_val
                 count += 1
         except Exception:
             continue
@@ -2145,6 +2170,10 @@ def admin_update_user_permissions(user_id):
     # 3. 备份功能授权
     backup_auth = request.form.get('backup_authorized', '')
     user.backup_authorized = (backup_auth == '1' or backup_auth == 'on')
+
+    # V3: AI 助手授权
+    ai_auth = request.form.get('ai_authorized', '')
+    user.ai_authorized = (ai_auth == '1' or ai_auth == 'on')
 
     db.session.commit()
 
