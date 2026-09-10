@@ -8,6 +8,7 @@ WebDAV 客户端工具模块
 
 import os
 import io
+import time
 import shutil
 import tempfile
 import urllib.parse
@@ -88,33 +89,105 @@ def test_connection(webdav_url, username=None, password=None):
         return False, f"连接异常: {str(e)}"
 
 
-def ensure_remote_dir(webdav_url, username, password):
-    """确保远端目录存在，不存在则自动创建"""
-    target_url = _normalize_url(webdav_url).rstrip('/') + '/'
+def _resolve_target_dir_url(base_url, backup_subdir=None):
+    """智能标准化 WebDAV 目标目录 URL
+    
+    - 如果 URL 以 /dav 或 /dav/ 结尾，自动追加子目录（默认 gift_backups）
+    - 确保返回的 URL 以 / 结尾
+    """
+    url = base_url.strip().rstrip('/')
+    if not url:
+        return url + '/'
+    
+    # 判断是否是根 /dav 路径
+    path = urllib.parse.urlparse(url).path.rstrip('/')
+    if path.endswith('/dav') or path == '/dav':
+        subdir = (backup_subdir or 'gift_backups').strip('/')
+        url = url + '/' + subdir
+    elif not path:
+        subdir = (backup_subdir or 'gift_backups').strip('/')
+        url = url + '/' + subdir
+    
+    return url.rstrip('/') + '/'
+
+
+def ensure_remote_dir(webdav_url, username, password, backup_subdir=None):
+    """确保远端目录存在，递归创建多级子目录"""
+    target_url = _resolve_target_dir_url(webdav_url, backup_subdir)
     session = _get_session(username, password)
     headers = {'Depth': '0'}
-
+    
+    # 先检查完整路径是否已存在
     try:
         resp = session.request('PROPFIND', target_url, headers=headers, timeout=12, verify=False)
         if resp.status_code in [200, 207]:
             return True
-        if resp.status_code == 404:
-            mk_resp = session.request('MKCOL', target_url, timeout=12, verify=False)
-            if mk_resp.status_code in [200, 201, 204]:
-                return True
     except Exception:
         pass
-    return False
+    
+    # 递归创建各级子目录
+    parsed = urllib.parse.urlparse(target_url)
+    path_parts = [p for p in parsed.path.split('/') if p]
+    
+    # 逐级构建路径
+    current_path = ''
+    base_url_base = f"{parsed.scheme}://{parsed.netloc}"
+    
+    for i, part in enumerate(path_parts):
+        current_path = current_path + '/' + part
+        current_url = base_url_base + current_path + '/'
+        
+        # 先检查是否存在
+        try:
+            resp = session.request('PROPFIND', current_url, headers=headers, timeout=10, verify=False)
+            if resp.status_code in [200, 207]:
+                continue  # 已存在，检查下一级
+        except Exception:
+            pass
+        
+        # 不存在则创建
+        try:
+            mk_resp = session.request('MKCOL', current_url, timeout=10, verify=False)
+            if mk_resp.status_code in [200, 201, 204]:
+                time.sleep(0.1)  # 避免触发限频
+                continue
+            elif mk_resp.status_code == 405:
+                # 405 Method Not Allowed 通常意味着目录已存在
+                continue
+            elif mk_resp.status_code == 409:
+                # 409 Conflict: 父目录不存在 — 不应该发生，因为我们逐级创建
+                # 但某些服务器对 /dav 根目录写保护会返回 409/403
+                if i == 0:
+                    # 第一级目录创建失败（可能是根目录写保护）
+                    # 尝试在根下直接上传，跳过目录创建
+                    return False
+                continue
+        except Exception:
+            pass
+    
+    # 最终验证目标目录是否可用
+    try:
+        resp = session.request('PROPFIND', target_url, headers=headers, timeout=10, verify=False)
+        if resp.status_code in [200, 207]:
+            return True
+    except Exception:
+        pass
+    
+    # 即使 PROPFIND 失败，目录可能已创建成功（某些服务器对 PROPFIND 限制）
+    # 直接返回 True，让后续上传尝试
+    return True
 
 
 def upload_backup(webdav_url_or_config, username=None, password=None, local_file_path=None, remote_filename=None):
     """上传本地备份文件到 WebDAV 远端"""
+    backup_subdir = None
     if hasattr(webdav_url_or_config, 'server_url') or hasattr(webdav_url_or_config, 'webdav_url'):
         cfg = webdav_url_or_config
         if local_file_path is None and username is not None:
             local_file_path = username
             remote_filename = password
         webdav_url, username, password = _unpack_auth_params(cfg)
+        backup_subdir = getattr(cfg, 'backup_subdir', None)
     else:
         webdav_url = webdav_url_or_config
 
@@ -127,8 +200,8 @@ def upload_backup(webdav_url_or_config, username=None, password=None, local_file
         timestamp_str = datetime.now().strftime('%Y%m%d_%H%M%S')
         remote_filename = f"gift_bookkeeping_backup_{timestamp_str}.db"
 
-    target_dir_url = _normalize_url(webdav_url).rstrip('/') + '/'
-    ensure_remote_dir(target_dir_url, username, password)
+    target_dir_url = _resolve_target_dir_url(webdav_url, backup_subdir)
+    ensure_remote_dir(target_dir_url, username, password, backup_subdir=backup_subdir)
 
     file_upload_url = urllib.parse.urljoin(target_dir_url, urllib.parse.quote(remote_filename))
     session = _get_session(username, password)
@@ -154,10 +227,13 @@ def upload_backup(webdav_url_or_config, username=None, password=None, local_file
 
 def list_backups(webdav_url_or_config, username=None, password=None):
     """列出 WebDAV 远端目录下的所有备份文件"""
+    backup_subdir = None
+    if hasattr(webdav_url_or_config, 'server_url') or hasattr(webdav_url_or_config, 'webdav_url'):
+        backup_subdir = getattr(webdav_url_or_config, 'backup_subdir', None)
     webdav_url, username, password = _unpack_auth_params(webdav_url_or_config, username, password)
     if not webdav_url or not str(webdav_url).strip():
         return False, "未配置 WebDAV 服务器地址"
-    target_url = _normalize_url(webdav_url).rstrip('/') + '/'
+    target_url = _resolve_target_dir_url(webdav_url, backup_subdir)
     session = _get_session(username, password)
     
     headers = {

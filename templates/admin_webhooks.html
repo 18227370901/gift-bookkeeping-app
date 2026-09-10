@@ -239,6 +239,7 @@
             </th>
             <th>时间</th>
             <th>触发通道</th>
+            <th>发起用户</th>
             <th>事件类型</th>
             <th>状态</th>
             <th>响应结果 / 状态码</th>
@@ -258,6 +259,7 @@
             </td>
             <td class="text-nowrap text-muted">{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') if log.created_at else '-' }}</td>
             <td class="fw-bold">#{{ log.webhook_id or '-' }}</td>
+            <td class="text-muted">{{ log.operator.username if log.operator else '系统' }}</td>
             <td>
               {% if log.event_type == 'test' %}
                 <span class="badge bg-info-subtle text-info border border-info-subtle">测试通知</span>
@@ -496,8 +498,14 @@
                  {% endfor %}
                </div>
              </div>
-             <div class="form-text small text-muted">勾选页面后，仅推送勾选页面的操作通知；不勾选任何页面则推送全部。</div>
-           </div>
+              <div class="form-text small text-muted">勾选页面后，仅推送勾选页面的操作通知；不勾选任何页面则推送全部。</div>
+            </div>
+        </div>
+        <div class="modal-footer border-light">
+          <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
+          <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">保存配置</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>

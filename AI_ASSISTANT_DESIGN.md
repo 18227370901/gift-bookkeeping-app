@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '8e3d66e3-109a-49ef-a9f2-948c09563497'
-  PropagateID: '8e3d66e3-109a-49ef-a9f2-948c09563497'
-  ReservedCode1: '4bc5aba2-e3b0-4126-9891-c6aa3ceac511'
-  ReservedCode2: '4bc5aba2-e3b0-4126-9891-c6aa3ceac511'
+  ProduceID: 'c2e22f65-d6a1-44f9-b23e-dfb1f1d85459'
+  PropagateID: 'c2e22f65-d6a1-44f9-b23e-dfb1f1d85459'
+  ReservedCode1: '184972fa-bd48-44fa-9ec4-bee8da55d865'
+  ReservedCode2: '184972fa-bd48-44fa-9ec4-bee8da55d865'
 ---
 
 # AI 助手模块技术设计方案
@@ -525,5 +525,61 @@ Response: {
 - 编辑按钮 data 属性增加扩展事件和 `notify_pages` 数据
 - JS 回填逻辑实现扩展事件和页面矩阵的编辑回填
 - 列表"触发通知"列增加扩展事件 badge 显示
+
+---
+
+## 第九章 V2 修复与优化（2026-09-10）
+
+### 9.1 Webhook 修复
+- 新增 Modal 补全 modal-footer 保存按钮（问题 #2）
+- 编辑按钮因 HTML 结构修复而恢复（问题 #3）
+- pyzipper 依赖安装确认（问题 #4）
+- WebhookLog 新增 operator_id 字段，记录操作发起人（问题 #11）
+- 日志表格新增"发起用户"列，展示操作人用户名（问题 #11）
+- trigger_webhook_event 函数新增 operator_id 参数，所有调用点已传入 current_user.id（问题 #11）
+- Webhook CRUD 路由补充 safe_log 审计日志（问题 #13）：toggle/test/delete_log 路由新增 safe_log 调用
+
+### 9.2 权限工单优化
+- 后端查询用户已申请(pending)和已拥有(allowed_menus)的菜单集合，传给模板（问题 #1）
+- 前端 checkbox 对已申请/已有权限的菜单添加 disabled 属性 + 删除线样式 + "已有/申请中"标签（问题 #1）
+- 后端提交校验：提交的菜单如在 pending 工单或已有权限中，拒绝并提示（问题 #1）
+
+### 9.3 WebDAV 备份增强
+- WebDAV 配置权限隔离：管理员可编辑完整配置 / 普通用户只读状态卡片，不显示敏感信息（问题 #5）
+- admin_save_webdav_config 路由增加管理员权限限制（问题 #5）
+- 定时任务对授权用户可见（is_admin or can_use_backup），授权用户只读查看（问题 #6）
+- 备份页排版重构：WebDAV配置 → 定时任务 → WebDAV云端备份 → 本地数据库备份 → 附件恢复 → 授权管理（问题 #9）
+- 本地上传分拆：数据库恢复(.db) + 附件恢复(.json/.csv/.txt/.xlsx/.docx/.zip)独立卡片（问题 #7）
+- 新增 admin_upload_attachment 路由处理附件文件上传（问题 #7）
+
+### 9.4 WebDAV 上传 404 修复
+- 新增 _resolve_target_dir_url() 函数：对 /dav 根路径自动追加 backup_subdir 子目录（问题 #8）
+- ensure_remote_dir() 改为递归多级目录创建：逐级 PROPFIND 检查 → MKCOL 创建（问题 #8）
+- upload_backup() 和 list_backups() 使用 _resolve_target_dir_url 标准化 URL（问题 #8）
+- BackupConfig 新增 backup_subdir 字段（默认 gift_backups），模板增加子目录输入框（问题 #8）
+
+### 9.5 恢复数据库修复
+- admin_upload_local_backup 和 admin_restore_webdav_backup 路由在文件覆盖后调用 db.engine.dispose()（问题 #10）
+- dispose 释放连接池旧句柄，下次访问自动重建连接读取新数据库文件（问题 #10）
+- flash 提示用户刷新页面确认数据更新（问题 #10）
+
+### 9.6 定时任务改造
+- ScheduledBackupTask 模型新增 task_type、target_files、custom_script 字段（问题 #9）
+- 定时任务支持三种类型：db_backup(数据库备份) / file_backup(文件备份) / custom(自定义脚本)（问题 #9）
+- _backup_scheduler_worker 根据 task_type 执行不同逻辑分支（问题 #9）
+- 模板定时任务 Modal 新增任务类型选择下拉框，动态显示对应配置区域（问题 #9）
+- 卡片标题从"定时备份任务"改为"定时任务"（问题 #9）
+
+### 9.7 审计日志补全
+- admin_test_webdav 路由新增 safe_log 记录测试连接结果（问题 #12）
+- admin_backups_list_ajax 路由新增 safe_log 记录查看备份列表（问题 #12）
+
+### 9.8 数据模型变更
+- BackupConfig 新增 backup_subdir (String(100), default='gift_backups')
+- ScheduledBackupTask 新增 task_type (String(20), default='db_backup')
+- ScheduledBackupTask 新增 target_files (Text, nullable)
+- ScheduledBackupTask 新增 custom_script (Text, nullable)
+- WebhookLog 新增 operator_id (Integer, FK users.id, nullable)
+- 迁移 SQL 已追加到 app.py migration_sqls 列表
 
 > AI生成

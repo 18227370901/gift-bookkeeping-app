@@ -708,6 +708,14 @@ def init_database():
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )"""
         ]
+        # --- V2 修复：新增字段迁移 ---
+        migration_sqls.extend([
+            "ALTER TABLE webhook_logs ADD COLUMN operator_id INTEGER REFERENCES users(id)",
+            "ALTER TABLE backup_configs ADD COLUMN backup_subdir VARCHAR(100) DEFAULT 'gift_backups'",
+            "ALTER TABLE scheduled_backup_tasks ADD COLUMN task_type VARCHAR(20) DEFAULT 'db_backup'",
+            "ALTER TABLE scheduled_backup_tasks ADD COLUMN target_files TEXT",
+            "ALTER TABLE scheduled_backup_tasks ADD COLUMN custom_script TEXT",
+        ])
         with db.engine.connect() as conn:
             for sql in migration_sqls:
                 try:

@@ -200,8 +200,12 @@
                     <div class="d-flex flex-wrap gap-3 mb-3">
                         {% for key, label in menu_options %}
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="requested_menus" value="{{ key }}" id="req_{{ key }}">
-                            <label class="form-check-label" for="req_{{ key }}">{{ label }}</label>
+                            <input class="form-check-input" type="checkbox" name="requested_menus" value="{{ key }}" id="req_{{ key }}"
+                                {% if key in already_requested %}disabled{% endif %}>
+                            <label class="form-check-label {% if key in already_requested %}text-muted text-decoration-line-through{% endif %}"
+                                for="req_{{ key }}">{{ label }}
+                                {% if key in already_requested %}<span class="badge bg-secondary-subtle text-secondary small ms-1">已有/申请中</span>{% endif %}
+                            </label>
                         </div>
                         {% endfor %}
                     </div>

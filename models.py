@@ -841,6 +841,7 @@ class BackupConfig(db.Model):
     _backup_encrypt_password = db.Column('backup_encrypt_password', db.String(512), nullable=True)  # AES-256-GCM 密文存储
     last_backup_time = db.Column(db.DateTime, nullable=True)
     last_status = db.Column(db.String(255), nullable=True)
+    backup_subdir = db.Column(db.String(100), default='gift_backups')
     updated_at = db.Column(db.DateTime, default=datetime.now)
 
     @property
@@ -913,13 +914,16 @@ class BackupConfig(db.Model):
 
 
 class ScheduledBackupTask(db.Model):
-    """定时备份任务"""
+    """定时任务（支持数据库备份、文件备份、自定义脚本）"""
     __tablename__ = 'scheduled_backup_tasks'
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False, default='定时备份')
+    name = db.Column(db.String(100), nullable=False, default='定时任务')
     cron_expr = db.Column(db.String(50), nullable=False, default='0 2 * * *')  # 默认每天凌晨2点
     is_enabled = db.Column(db.Boolean, default=False)
     encrypt_enabled = db.Column(db.Boolean, default=False)
+    task_type = db.Column(db.String(20), default='db_backup')  # db_backup / file_backup / custom
+    target_files = db.Column(db.Text, nullable=True)  # JSON 数组，file_backup 类型用
+    custom_script = db.Column(db.Text, nullable=True)  # 自定义脚本，custom 类型用
     last_run_time = db.Column(db.DateTime, nullable=True)
     last_run_status = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.now)
@@ -964,6 +968,7 @@ class WebhookLog(db.Model):
     __tablename__ = 'webhook_logs'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    operator_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     webhook_id = db.Column(db.Integer, db.ForeignKey('webhook_configs.id', ondelete='CASCADE'), nullable=True)
     event_type = db.Column(db.String(50), nullable=False)  # add, delete, test, reminder, broadcast
     payload = db.Column(db.Text, nullable=True)
@@ -971,4 +976,5 @@ class WebhookLog(db.Model):
     response_body = db.Column(db.Text, nullable=True)
     is_success = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
-    user = db.relationship('User', backref=db.backref('webhook_logs', lazy=True))
+    user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('webhook_logs', lazy=True))
+    operator = db.relationship('User', foreign_keys=[operator_id])

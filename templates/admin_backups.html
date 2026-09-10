@@ -9,8 +9,11 @@
 </div>
 
 <div class="row g-4">
-  <!-- 左侧：WebDAV 配置 + 加密设置 -->
+  <!-- 左侧：WebDAV 配置 + 定时任务 + 授权管理 -->
   <div class="col-lg-5">
+
+    <!-- WebDAV 配置：管理员可编辑 / 普通用户只读状态 -->
+    {% if current_user.is_admin %}
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light">
         <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置</h5>
@@ -20,7 +23,7 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <div class="mb-3">
             <label class="form-label fw-bold">WebDAV 服务器地址 (URL)</label>
-            <input type="url" name="webdav_url" id="cfg_webdav_url" class="form-control rounded-3" value="{{ config_data.webdav_url or '' }}" placeholder="https://dav.jianguoyun.com/dav/gifts/" required>
+            <input type="url" name="webdav_url" id="cfg_webdav_url" class="form-control rounded-3" value="{{ config_data.webdav_url or '' }}" placeholder="https://dav.jianguoyun.com/dav/" required>
             <div class="form-text">支持坚果云、Nextcloud、群晖、Alist 等 WebDAV 完整路径</div>
           </div>
           <div class="mb-3">
@@ -37,8 +40,13 @@
             </div>
             <div class="form-text small text-muted">点击眼睛图标可切换明文显示/隐藏，方便核对输入</div>
           </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">备份存储子目录</label>
+            <input type="text" name="backup_subdir" class="form-control rounded-3" value="{{ config_data.backup_subdir or 'gift_backups' }}" placeholder="gift_backups">
+            <div class="form-text small text-muted">备份文件在 WebDAV 服务器上的存储子目录名，默认 gift_backups</div>
+          </div>
 
-          <!-- 加密密码配置（管理员预设自动任务加密密码） -->
+          <!-- 加密密码配置 -->
           <hr class="my-3">
           <h6 class="text-muted mb-2"><i class="fa-solid fa-lock me-1 text-warning"></i>自动备份加密密码（可选）</h6>
           <div class="mb-2">
@@ -71,15 +79,30 @@
         </form>
       </div>
     </div>
+    {% else %}
+    <!-- 普通用户：只读状态卡片 -->
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-white py-3 border-light">
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置</h5>
+      </div>
+      <div class="card-body text-center py-4">
+        <i class="fa-solid fa-circle-check text-success fa-3x mb-3 d-block opacity-75"></i>
+        <p class="fw-bold text-dark mb-1">WebDAV 备份已由管理员配置</p>
+        <p class="text-muted small mb-0">如需修改配置，请联系管理员</p>
+      </div>
+    </div>
+    {% endif %}
 
-    <!-- 定时备份任务管理 -->
-    {% if current_user.is_admin %}
+    <!-- 定时任务管理：管理员 CRUD / 授权用户只读 -->
+    {% if current_user.is_admin or current_user.can_use_backup() %}
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-clock text-success me-2"></i>定时备份任务</h5>
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-clock text-success me-2"></i>定时任务</h5>
+        {% if current_user.is_admin %}
         <button type="button" class="btn btn-sm btn-outline-success rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#scheduledTaskModal">
           <i class="fa-solid fa-plus me-1"></i>新增
         </button>
+        {% endif %}
       </div>
       <div class="card-body p-0">
         {% if scheduled_tasks %}
@@ -88,26 +111,39 @@
             <thead class="table-light">
               <tr>
                 <th class="ps-3">名称</th>
+                <th>类型</th>
                 <th>Cron 表达式</th>
                 <th style="width:70px">状态</th>
                 <th>上次执行</th>
+                {% if current_user.is_admin %}
                 <th style="width:100px">操作</th>
+                {% endif %}
               </tr>
             </thead>
             <tbody>
               {% for t in scheduled_tasks %}
               <tr>
                 <td class="ps-3 fw-bold">{{ t.name }}</td>
+                <td>
+                  {% if t.task_type == 'file_backup' %}
+                    <span class="badge bg-info-subtle text-info">文件备份</span>
+                  {% elif t.task_type == 'custom' %}
+                    <span class="badge bg-warning-subtle text-warning">自定义脚本</span>
+                  {% else %}
+                    <span class="badge bg-primary-subtle text-primary">数据库备份</span>
+                  {% endif %}
+                </td>
                 <td><code class="small">{{ t.cron_expr }}</code></td>
                 <td>
                   <span class="badge bg-{{ 'success' if t.is_enabled else 'secondary' }}">{{ '启用' if t.is_enabled else '禁用' }}</span>
                 </td>
                 <td class="small text-muted">{{ t.last_run_time.strftime('%m-%d %H:%M') if t.last_run_time else '—' }}</td>
+                {% if current_user.is_admin %}
                 <td>
                   <button class="btn btn-sm btn-outline-{{ 'secondary' if t.is_enabled else 'success' }} py-0 px-1" onclick="toggleScheduledTask({{ t.id }})" title="{{ '禁用' if t.is_enabled else '启用' }}">
                     <i class="fa-solid fa-{{ 'pause' if t.is_enabled else 'play' }}"></i>
                   </button>
-                  <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="editScheduledTask({{ t.id }}, '{{ t.name }}', '{{ t.cron_expr }}', {{ t.is_enabled|tojson }})" title="编辑">
+                  <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="editScheduledTask({{ t.id }}, '{{ t.name }}', '{{ t.cron_expr }}', {{ t.is_enabled|tojson }}, '{{ t.task_type or 'db_backup' }}')" title="编辑">
                     <i class="fa-solid fa-pen"></i>
                   </button>
                   <form action="{{ url_for('admin_delete_scheduled_task', task_id=t.id) }}" method="POST" class="d-inline" onsubmit="return confirm('确定删除定时任务「{{ t.name }}」？');">
@@ -117,6 +153,7 @@
                     </button>
                   </form>
                 </td>
+                {% endif %}
               </tr>
               {% endfor %}
             </tbody>
@@ -125,13 +162,15 @@
         {% else %}
         <div class="text-center py-4 text-muted">
           <i class="fa-solid fa-clock fa-2x opacity-25 mb-2 d-block"></i>
-          <p class="mb-0 small">暂无定时备份任务</p>
+          <p class="mb-0 small">暂无定时任务</p>
         </div>
         {% endif %}
       </div>
     </div>
+    {% endif %}
 
-    <!-- 备份授权管理 -->
+    <!-- 备份授权管理：仅管理员 -->
+    {% if current_user.is_admin %}
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light">
         <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-user-shield text-warning me-2"></i>备份功能授权</h5>
@@ -180,9 +219,11 @@
 
   <!-- 右侧：备份与恢复操作 -->
   <div class="col-lg-7">
+
+    <!-- WebDAV 云端备份与恢复 -->
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-clock-rotate-left text-primary me-2"></i>备份与恢复操作</h5>
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-clock-rotate-left text-primary me-2"></i>WebDAV 云端备份与恢复</h5>
         <div class="d-flex gap-2">
           <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="loadWebdavBackups()">
             <i class="fa-solid fa-rotate me-1"></i>刷新列表
@@ -190,7 +231,7 @@
         </div>
       </div>
       <div class="card-body">
-        <!-- 手动备份选项：加密选择 + 密码输入 + 双确认 -->
+        <!-- 手动备份选项 -->
         <div class="alert alert-light border rounded-3 mb-3 p-3">
           <h6 class="fw-bold mb-2"><i class="fa-solid fa-upload text-primary me-1"></i>手动上传备份</h6>
           <form action="{{ url_for('admin_trigger_webdav_backup') }}" method="POST" id="manualBackupForm">
@@ -247,10 +288,10 @@
       </div>
     </div>
 
-    <!-- 本地离线备份与恢复 -->
+    <!-- 本地数据库备份与恢复 -->
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-hard-drive text-success me-2"></i>本地数据库离线备份与恢复</h5>
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-database text-success me-2"></i>本地数据库备份与恢复</h5>
       </div>
       <div class="card-body">
         <div class="row g-3 align-items-center">
@@ -264,16 +305,37 @@
           <div class="col-md-6 border-start-md">
             <form action="{{ url_for('admin_upload_local_backup') }}" method="POST" enctype="multipart/form-data" onsubmit="return confirm('警告：上传恢复数据库将替换现有数据，系统会自动创建历史回滚副本，是否确认恢复？');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <label class="form-label fw-bold">上传本地 .db 备份文件恢复</label>
+              <label class="form-label fw-bold">上传 .db 备份文件恢复</label>
               <div class="input-group">
                 <input type="file" name="backup_file" accept=".db" class="form-control" required>
                 <button type="submit" class="btn btn-outline-danger">
                   <i class="fa-solid fa-upload me-1"></i>上传并覆盖恢复
                 </button>
               </div>
+              <div class="form-text small text-muted">仅支持 SQLite 数据库文件 (.db)</div>
             </form>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- 附件文件恢复 -->
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-white py-3 border-light">
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-paperclip text-info me-2"></i>附件文件恢复</h5>
+      </div>
+      <div class="card-body">
+        <form action="{{ url_for('admin_upload_attachment') }}" method="POST" enctype="multipart/form-data">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <label class="form-label fw-bold">上传其他备份文件</label>
+          <div class="input-group">
+            <input type="file" name="attachment_file" accept=".json,.csv,.txt,.xlsx,.docx,.zip" class="form-control" required>
+            <button type="submit" class="btn btn-outline-info">
+              <i class="fa-solid fa-upload me-1"></i>上传附件
+            </button>
+          </div>
+          <div class="form-text small text-muted">支持 JSON、CSV、TXT、XLSX、DOCX、ZIP 格式文件</div>
+        </form>
       </div>
     </div>
   </div>
@@ -287,13 +349,31 @@
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="task_id" id="task_id">
         <div class="modal-header">
-          <h5 class="modal-title text-success"><i class="fa-solid fa-clock me-2"></i>定时备份任务</h5>
+          <h5 class="modal-title text-success"><i class="fa-solid fa-clock me-2"></i>定时任务</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body">
           <div class="mb-3">
             <label class="form-label">任务名称</label>
             <input type="text" name="task_name" id="task_name" class="form-control" placeholder="如：每日凌晨备份" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">任务类型</label>
+            <select name="task_type" id="task_type" class="form-select" onchange="toggleTaskTypeFields()">
+              <option value="db_backup">数据库备份</option>
+              <option value="file_backup">文件备份</option>
+              <option value="custom">自定义脚本</option>
+            </select>
+          </div>
+          <div class="mb-3" id="targetFilesGroup" style="display:none;">
+            <label class="form-label">目标文件路径（逗号分隔）</label>
+            <input type="text" name="target_files" id="target_files" class="form-control" placeholder="/path/to/file1, /path/to/file2">
+            <div class="form-text small text-muted">输入需要备份的文件绝对路径，多个文件用逗号分隔</div>
+          </div>
+          <div class="mb-3" id="customScriptGroup" style="display:none;">
+            <label class="form-label">自定义脚本内容</label>
+            <textarea name="custom_script" id="custom_script" class="form-control font-monospace" rows="4" placeholder="#!/bin/bash&#10;echo 'Hello World'"></textarea>
+            <div class="form-text small text-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i>脚本将以当前系统用户身份执行，请确保脚本安全</div>
           </div>
           <div class="mb-3">
             <label class="form-label">Cron 表达式</label>
@@ -352,6 +432,13 @@ function validateManualBackup() {
   return confirm('确认上传加密备份至 WebDAV？');
 }
 
+// 定时任务类型切换
+function toggleTaskTypeFields() {
+  const taskType = document.getElementById('task_type').value;
+  document.getElementById('targetFilesGroup').style.display = (taskType === 'file_backup') ? 'block' : 'none';
+  document.getElementById('customScriptGroup').style.display = (taskType === 'custom') ? 'block' : 'none';
+}
+
 // 定时任务切换
 function toggleScheduledTask(taskId) {
   fetch(`/admin/backups/scheduled_tasks/${taskId}/toggle`, {
@@ -374,11 +461,16 @@ function toggleScheduledTask(taskId) {
 }
 
 // 编辑定时任务
-function editScheduledTask(id, name, cron, enabled) {
+function editScheduledTask(id, name, cron, enabled, taskType) {
   document.getElementById('task_id').value = id;
   document.getElementById('task_name').value = name;
   document.getElementById('cron_expr').value = cron;
   document.getElementById('task_enabled').checked = enabled;
+  const typeSelect = document.getElementById('task_type');
+  if (typeSelect && taskType) {
+    typeSelect.value = taskType;
+    toggleTaskTypeFields();
+  }
   new bootstrap.Modal(document.getElementById('scheduledTaskModal')).show();
 }
 
@@ -458,44 +550,47 @@ document.addEventListener('DOMContentLoaded', function() {
   loadWebdavBackups();
 });
 
-// 测试 WebDAV 连接
-document.getElementById('btnTestWebdav')?.addEventListener('click', function() {
-  const url = document.getElementById('cfg_webdav_url').value.trim();
-  const username = document.getElementById('cfg_webdav_username').value.trim();
-  const password = document.getElementById('cfg_webdav_password').value.trim();
+// 测试 WebDAV 连接（仅管理员页面有此按钮）
+var btnTestWebdav = document.getElementById('btnTestWebdav');
+if (btnTestWebdav) {
+  btnTestWebdav.addEventListener('click', function() {
+    const url = document.getElementById('cfg_webdav_url').value.trim();
+    const username = document.getElementById('cfg_webdav_username').value.trim();
+    const password = document.getElementById('cfg_webdav_password').value.trim();
 
-  if (!url || !username || !password) {
-    alert('请先填写完整的 WebDAV URL、账号和密码！');
-    return;
-  }
-
-  const btn = this;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>测试中...';
-
-  fetch("{{ url_for('admin_test_webdav') }}", {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Requested-With': 'XMLHttpRequest',
-      'X-CSRFToken': '{{ csrf_token }}',
-      'X-CSRF-Token': '{{ csrf_token }}'
-    },
-    body: JSON.stringify({ webdav_url: url, webdav_username: username, webdav_password: password })
-  })
-  .then(res => res.json())
-  .then(data => {
-    if (data.success) {
-      alert('WebDAV 连接成功！服务器响应正常。');
-    } else {
-      alert('连接失败: ' + (data.message || '请检查配置与网络'));
+    if (!url || !username || !password) {
+      alert('请先填写完整的 WebDAV URL、账号和密码！');
+      return;
     }
-  })
-  .catch(err => alert('请求异常: ' + err))
-  .finally(() => {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-plug me-1"></i>测试连接';
+
+    const btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>测试中...';
+
+    fetch("{{ url_for('admin_test_webdav') }}", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-CSRFToken': '{{ csrf_token }}',
+        'X-CSRF-Token': '{{ csrf_token }}'
+      },
+      body: JSON.stringify({ webdav_url: url, webdav_username: username, webdav_password: password })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        alert('WebDAV 连接成功！服务器响应正常。');
+      } else {
+        alert('连接失败: ' + (data.message || '请检查配置与网络'));
+      }
+    })
+    .catch(err => alert('请求异常: ' + err))
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-plug me-1"></i>测试连接';
+    });
   });
-});
+}
 </script>
 {% endblock %}

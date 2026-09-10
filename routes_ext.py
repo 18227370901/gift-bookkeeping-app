@@ -334,7 +334,7 @@ def _backup_scheduler_worker(flask_app):
                             continue
 
                     # 执行备份
-                    print(f"[Backup Scheduler] 执行定时备份任务: {task.name} (cron: {task.cron_expr})")
+                    print(f"[Backup Scheduler] 执行定时任务: {task.name} (cron: {task.cron_expr}, type: {task.task_type})")
                     try:
                         config = BackupConfig.get_config()
                         if not config.server_url or not config.username:
@@ -344,41 +344,83 @@ def _backup_scheduler_worker(flask_app):
                             continue
 
                         db_path = flask_app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
+                        task_type = getattr(task, 'task_type', 'db_backup') or 'db_backup'
 
-                        # 确定加密密码
-                        encrypt_pwd = None
-                        if task.encrypt_enabled:
-                            encrypt_pwd = config.backup_encrypt_password
-                            if not encrypt_pwd:
+                        if task_type == 'custom':
+                            # 自定义脚本执行
+                            script = getattr(task, 'custom_script', None)
+                            if not script:
                                 task.last_run_time = now
-                                task.last_run_status = '失败: 未配置加密密码'
+                                task.last_run_status = '失败: 未配置自定义脚本'
                                 db.session.commit()
                                 continue
-
-                        success, msg = upload_encrypted_backup(config, local_file_path=db_path, encrypt_password=encrypt_pwd)
-                        if success:
-                            task.last_run_time = now
-                            task.last_run_status = f'成功: {msg}'
-                            config.last_backup_time = now
-                            config.last_status = '定时备份成功'
-                            db.session.commit()
-                            print(f"[Backup Scheduler] 定时备份成功: {msg}")
-                            # Webhook 通知
+                            import subprocess
                             try:
-                                trigger_webhook_event(
-                                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
-                                    f'定时备份成功 [{task.name}]',
-                                    f'页面：WebDAV备份 | 文件：{msg} | 时间：{now.strftime("%Y-%m-%d %H:%M:%S")}',
-                                    page_key='admin_backups', user_name='系统定时任务'
+                                result = subprocess.run(
+                                    script, shell=True, capture_output=True, text=True, timeout=300
                                 )
+                                if result.returncode == 0:
+                                    task.last_run_time = now
+                                    task.last_run_status = f'成功: 脚本执行完成'
+                                    db.session.commit()
+                                else:
+                                    task.last_run_time = now
+                                    task.last_run_status = f'失败: 脚本返回码 {result.returncode}, {result.stderr[:200]}'
+                                    db.session.commit()
+                            except Exception as se:
+                                task.last_run_time = now
+                                task.last_run_status = f'异常: {str(se)[:200]}'
+                                db.session.commit()
+
+                        elif task_type == 'file_backup':
+                            # 文件备份：打包指定文件上传
+                            target_files_str = getattr(task, 'target_files', None)
+                            if not target_files_str:
+                                task.last_run_time = now
+                                task.last_run_status = '失败: 未指定备份文件'
+                                db.session.commit()
+                                continue
+                            import json as _json
+                            try:
+                                file_list = _json.loads(target_files_str)
                             except Exception:
-                                pass
+                                file_list = [f.strip() for f in target_files_str.split(',') if f.strip()]
+                            success, msg = upload_encrypted_backup(config, local_file_path=file_list, encrypt_password=None)
+                            if success:
+                                task.last_run_time = now
+                                task.last_run_status = f'成功: {msg}'
+                                db.session.commit()
+                            else:
+                                task.last_run_time = now
+                                task.last_run_status = f'失败: {msg}'
+                                db.session.commit()
+
                         else:
-                            task.last_run_time = now
-                            task.last_run_status = f'失败: {msg}'
-                            config.last_status = f'定时备份失败: {msg}'
-                            db.session.commit()
-                            print(f"[Backup Scheduler] 定时备份失败: {msg}")
+                            # 默认：数据库备份
+                            # 确定加密密码
+                            encrypt_pwd = None
+                            if task.encrypt_enabled:
+                                encrypt_pwd = config.backup_encrypt_password
+                                if not encrypt_pwd:
+                                    task.last_run_time = now
+                                    task.last_run_status = '失败: 未配置加密密码'
+                                    db.session.commit()
+                                    continue
+
+                            success, msg = upload_encrypted_backup(config, local_file_path=db_path, encrypt_password=encrypt_pwd)
+                            if success:
+                                task.last_run_time = now
+                                task.last_run_status = f'成功: {msg}'
+                                config.last_backup_time = now
+                                config.last_status = '定时备份成功'
+                                db.session.commit()
+                                print(f"[Backup Scheduler] 定时备份成功: {msg}")
+                            else:
+                                task.last_run_time = now
+                                task.last_run_status = f'失败: {msg}'
+                                config.last_status = f'定时备份失败: {msg}'
+                                db.session.commit()
+                                print(f"[Backup Scheduler] 定时备份失败: {msg}")
                     except Exception as e:
                         task.last_run_time = now
                         task.last_run_status = f'异常: {str(e)}'
@@ -708,7 +750,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
                 f'还原回收站数据 [{title}]',
                 f'操作人：{current_user.username} | 页面：回收站 | 类型：{target_type} | 名称：{title}',
-                page_key='recycle_bin', user_name=current_user.username
+                page_key='recycle_bin', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -757,7 +800,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
                 f'彻底删除 [{title}]',
                 f'操作人：{current_user.username} | 页面：回收站 | 类型：{target_type} | 名称：{title}',
-                page_key='recycle_bin', user_name=current_user.username
+                page_key='recycle_bin', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -811,7 +855,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
                     f'批量还原 {count} 条回收站数据',
                     f'操作人：{current_user.username} | 页面：回收站 | 数量：{count}',
-                    page_key='recycle_bin', user_name=current_user.username
+                    page_key='recycle_bin', user_name=current_user.username,
+                    operator_id=current_user.id
                 )
             except Exception:
                 pass
@@ -868,7 +913,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
                     f'批量彻底删除 {count} 条回收站数据',
                     f'操作人：{current_user.username} | 页面：回收站 | 数量：{count}',
-                    page_key='recycle_bin', user_name=current_user.username
+                    page_key='recycle_bin', user_name=current_user.username,
+                    operator_id=current_user.id
                 )
             except Exception:
                 pass
@@ -923,7 +969,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
                     f'清空回收站 {count} 条数据',
                     f'操作人：{current_user.username} | 页面：回收站 | 数量：{count}',
-                    page_key='recycle_bin', user_name=current_user.username
+                    page_key='recycle_bin', user_name=current_user.username,
+                    operator_id=current_user.id
                 )
             except Exception:
                 pass
@@ -1156,7 +1203,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
                 f'NLP极简记账录入 {len(added_records)} 条',
                 f'操作人：{current_user.username} | 页面：礼金账本 | ' + "、".join(desc_list),
-                page_key='ledger', user_name=current_user.username
+                page_key='ledger', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -1377,7 +1425,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
                     f'创建宴席账本 [{title}]',
                     f'操作人：{current_user.username} | 页面：专属宴席 | 名称：{title} | 办宴成本：{banquet_cost}元',
-                    page_key='banquets', user_name=current_user.username
+                    page_key='banquets', user_name=current_user.username,
+                    operator_id=current_user.id
                 )
             except Exception:
                 pass
@@ -1515,7 +1564,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_update',
                 f'修改宴席账本 [{b.title}]',
                 f'操作人：{current_user.username} | 页面：专属宴席 | 账本：{b.title}',
-                page_key='banquets', user_name=current_user.username
+                page_key='banquets', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -1549,7 +1599,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
                 f'删除宴席账本 [{b_title}]',
                 f'操作人：{current_user.username} | 页面：专属宴席 | 账本：{b_title}',
-                page_key='banquets', user_name=current_user.username
+                page_key='banquets', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -1601,7 +1652,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
                 f'批量删除 {count} 个宴席账本',
                 f'操作人：{current_user.username} | 页面：专属宴席 | 数量：{count}',
-                page_key='banquets', user_name=current_user.username
+                page_key='banquets', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -1644,7 +1696,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
                 f'删除宴席明细 [{rec_name}]',
                 f'操作人：{current_user.username} | 页面：专属宴席 | 宴席：{b.title} | 客人：{rec_name}',
-                page_key='banquets', user_name=current_user.username
+                page_key='banquets', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -1703,7 +1756,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
                 f'批量删除宴席明细 {count} 条',
                 f'操作人：{current_user.username} | 页面：专属宴席 | 宴席：{b.title} | 数量：{count}',
-                page_key='banquets', user_name=current_user.username
+                page_key='banquets', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -1819,7 +1873,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
                 f'宴席快速录入 [{name}] ¥{amount:.2f}',
                 f'操作人：{current_user.username} | 页面：专属宴席 | 宴席：{b.title} | 客人：{name} | 金额：{amount}元',
-                page_key='banquets', user_name=current_user.username
+                page_key='banquets', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -1922,7 +1977,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
                     f'引入宴席明细 {count} 笔',
                     f'操作人：{current_user.username} | 页面：专属宴席 | 宴席：{b.title} | 引入数量：{count}',
-                    page_key='banquets', user_name=current_user.username
+                    page_key='banquets', user_name=current_user.username,
+                    operator_id=current_user.id
                 )
             except Exception:
                 pass
@@ -2099,7 +2155,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
                     f'添加纪念日 [{name}]',
                     f'操作人：{current_user.username} | 页面：纪念日备忘 | 姓名：{name} | 类型：{anniversary_type} | 提前 {advance_days} 天',
-                    page_key='reminders', user_name=current_user.username
+                    page_key='reminders', user_name=current_user.username,
+                    operator_id=current_user.id
                 )
             except Exception:
                 pass
@@ -2176,7 +2233,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_update',
                 f'修改纪念日 [{rem.name}]',
                 f'操作人：{current_user.username} | 页面：纪念日备忘 | 姓名：{rem.name}',
-                page_key='reminders', user_name=current_user.username
+                page_key='reminders', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -2209,7 +2267,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
                 f'删除纪念日 [{rem.name}]',
                 f'操作人：{current_user.username} | 页面：纪念日备忘 | 姓名：{rem.name}',
-                page_key='reminders', user_name=current_user.username
+                page_key='reminders', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -2244,10 +2303,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             try:
                 trigger_webhook_event(
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
-                    f'批量删除 {count} 条纪念日',
-                    f'操作人：{current_user.username} | 页面：纪念日备忘 | 数量：{count}',
-                    page_key='reminders', user_name=current_user.username
-                )
+                f'批量删除 {count} 条纪念日',
+                f'操作人：{current_user.username} | 页面：纪念日备忘 | 数量：{count}',
+                page_key='reminders', user_name=current_user.username,
+                operator_id=current_user.id
+            )
             except Exception:
                 pass
             flash(f'已成功将选中的 {count} 条纪念日移入回收站！', 'success')
@@ -2291,7 +2351,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 all_with_days.sort(key=lambda x: x[1])
                 nearest = all_with_days[:3]
                 title, detail_msg, lines = format_reminder_notification_content(nearest)
-                trigger_webhook_event(webhooks, 'reminder', f"{title}（测试推送最近 {len(nearest)} 条）", detail_msg)
+                trigger_webhook_event(webhooks, 'reminder', f"{title}（测试推送最近 {len(nearest)} 条）", detail_msg, operator_id=current_user.id)
                 safe_log('推送纪念日提醒', f"Webhook 测试推送了最近 {len(nearest)} 条纪念日", user=current_user)
                 return jsonify({
                     'code': 200,
@@ -2302,7 +2362,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return jsonify({'code': 200, 'message': '当前暂无任何有效的亲友纪念日记录，请先添加纪念日！', 'count': 0})
 
         title, detail_msg, lines = format_reminder_notification_content(upcoming)
-        trigger_webhook_event(webhooks, 'reminder', title, detail_msg)
+        trigger_webhook_event(webhooks, 'reminder', title, detail_msg, operator_id=current_user.id)
         safe_log('推送纪念日提醒', f"向 Webhook 推送了 {len(upcoming)} 条即将到期的纪念日", user=current_user)
 
         unbound_names = []
@@ -2604,7 +2664,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                         WebhookConfig.query.filter_by(is_enabled=True).all(), 'broadcast',
                         f'{current_user.username} 发布广播：「{title or "系统公告"}」，等级：{level}',
                         f'操作人：{current_user.username} | 页面：系统广播 | 标题：{title or "系统公告"} | 等级：{level} | 内容：{content[:100]}',
-                        page_key='admin_broadcasts', user_name=current_user.username
+                        page_key='admin_broadcasts', user_name=current_user.username,
+                        operator_id=current_user.id
                     )
                 except Exception:
                     pass
@@ -2796,7 +2857,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
                 f'新增Webhook通道 [{name}]',
                 f'操作人：{current_user.username} | 页面：Webhook通知 | 名称：{name} | 连接方式：{connection_type}',
-                page_key='admin_webhooks', user_name=current_user.username
+                page_key='admin_webhooks', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -2873,7 +2935,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
                 f'编辑Webhook通道 [{name}]',
                 f'操作人：{current_user.username} | 页面：Webhook通知 | ID：{webhook_id} | 名称：{name}',
-                page_key='admin_webhooks', user_name=current_user.username
+                page_key='admin_webhooks', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -2893,12 +2956,14 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return redirect(url_for('admin_webhooks'))
         hook.is_enabled = not hook.is_enabled
         db.session.commit()
+        safe_log('切换Webhook状态', f"通道: {hook.channel_name}, 状态: {'启用' if hook.is_enabled else '停用'}")
         try:
             trigger_webhook_event(
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
                 f'切换Webhook状态 [{hook.channel_name}]',
                 f'操作人：{current_user.username} | 页面：Webhook通知 | 通道：{hook.channel_name} | 状态：{"启用" if hook.is_enabled else "停用"}',
-                page_key='admin_webhooks', user_name=current_user.username
+                page_key='admin_webhooks', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -2922,9 +2987,10 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             try:
                 trigger_webhook_event(
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
-                    f'删除Webhook通道 [{hook_name}]',
-                    f'操作人：{current_user.username} | 页面：Webhook通知 | ID：{webhook_id} | 名称：{hook_name}',
-                    page_key='admin_webhooks', user_name=current_user.username
+                f'删除Webhook通道 [{hook_name}]',
+                f'操作人：{current_user.username} | 页面：Webhook通知 | ID：{webhook_id} | 名称：{hook_name}',
+                page_key='admin_webhooks', user_name=current_user.username,
+                operator_id=current_user.id
                 )
             except Exception:
                 pass
@@ -2944,6 +3010,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         try:
             success, code, msg = test_single_webhook(hook, sender_name=current_user.username)
+            safe_log('测试Webhook推送', f"通道: {hook.channel_name}, 结果: {'成功' if success else '失败'}, 状态码: {code}")
             return jsonify({
                 'success': bool(success),
                 'code': 200 if success else 500,
@@ -2964,6 +3031,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return jsonify({'code': 404, 'message': '日志不存在或已被删除'}), 404
         db.session.delete(log_item)
         db.session.commit()
+        safe_log('删除推送日志', f"日志ID: {log_id}")
         return jsonify({'code': 200, 'message': '推送日志已成功删除！'})
 
     @app.route('/admin/webhook/logs/batch_delete', methods=['POST'])
@@ -3137,6 +3205,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         config = BackupConfig.get_config()
         if not config.server_url or not config.username:
             return jsonify({'success': True, 'configured': False, 'backups': [], 'message': '未配置 WebDAV'})
+        safe_log('查看备份列表', f"WebDAV: {config.server_url}")
         try:
             ok, res = list_webdav_backups(config)
             if ok:
@@ -3150,16 +3219,17 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @app.route('/admin/backup/config', methods=['POST'])
     @login_required
     def admin_save_webdav_config():
-        """保存 WebDAV 配置"""
-        if not current_user.is_admin and not current_user.can_use_backup():
-            flash('权限不足', 'danger')
-            return redirect(url_for('index'))
+        """保存 WebDAV 配置（仅管理员可操作）"""
+        if not current_user.is_admin:
+            flash('权限不足：仅管理员可修改 WebDAV 配置', 'danger')
+            return redirect(url_for('admin_backups'))
 
         config = BackupConfig.get_config()
         server_url = request.form.get('webdav_url', '').strip() or request.form.get('server_url', '').strip()
         username = request.form.get('webdav_username', '').strip() or request.form.get('username', '').strip()
         password = request.form.get('webdav_password', '').strip() or request.form.get('password', '').strip()
         remote_dir = request.form.get('remote_dir', '').strip() or request.form.get('backup_path', '').strip()
+        backup_subdir = request.form.get('backup_subdir', '').strip() or 'gift_backups'
         # 加密密码（管理员预设的自动备份加密密码）
         encrypt_pwd = request.form.get('backup_encrypt_password', '').strip()
 
@@ -3169,6 +3239,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             config.set_webdav_password(password)
         if remote_dir:
             config.backup_path = remote_dir
+        config.backup_subdir = backup_subdir
         # 保存或清除加密密码
         if encrypt_pwd:
             config.backup_encrypt_password = encrypt_pwd
@@ -3176,13 +3247,14 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             config.backup_encrypt_password = None
 
         db.session.commit()
-        safe_log('更新WebDAV配置', f"服务器: {server_url}")
+        safe_log('更新WebDAV配置', f"服务器: {server_url}, 子目录: {backup_subdir}")
         try:
             trigger_webhook_event(
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
                 f'更新WebDAV配置',
                 f'操作人：{current_user.username} | 页面：WebDAV备份 | 服务器：{server_url}',
-                page_key='admin_backups', user_name=current_user.username
+                page_key='admin_backups', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -3228,9 +3300,10 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             try:
                 trigger_webhook_event(
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
-                    f'WebDAV备份成功',
-                    f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{msg}',
-                    page_key='admin_backups', user_name=current_user.username
+                f'WebDAV备份成功',
+                f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{msg}',
+                page_key='admin_backups', user_name=current_user.username,
+                operator_id=current_user.id
                 )
             except Exception:
                 pass
@@ -3287,10 +3360,43 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             if os.path.exists(db_path):
                 shutil.copy2(db_path, db_path + f".bak_{int(time.time())}")
             file.save(db_path)
+            db.engine.dispose()  # 释放连接池，强制下次访问重新连接新数据库
             safe_log('上传恢复本地备份', f"成功恢复了上传的数据库文件: {file.filename}")
-            flash('本地数据库备份文件已成功恢复生效！', 'success')
+            flash('本地数据库已成功恢复，请刷新页面确认数据更新。', 'success')
         except Exception as e:
             flash(f'恢复数据库文件失败: {e}', 'danger')
+
+        return redirect(url_for('admin_backups'))
+
+    @app.route('/admin/backup/upload_attachment', methods=['POST'])
+    @login_required
+    def admin_upload_attachment():
+        """上传附件文件（非 .db 的其他备份文件）"""
+        if not current_user.is_admin and not current_user.can_use_backup():
+            flash('权限不足', 'danger')
+            return redirect(url_for('index'))
+
+        file = request.files.get('attachment_file')
+        if not file or not file.filename:
+            flash('请选择需要上传的附件文件！', 'warning')
+            return redirect(url_for('admin_backups'))
+
+        allowed_extensions = ('.json', '.csv', '.txt', '.xlsx', '.docx', '.zip')
+        if not file.filename.lower().endswith(allowed_extensions):
+            flash('仅支持 JSON、CSV、TXT、XLSX、DOCX、ZIP 格式文件！', 'danger')
+            return redirect(url_for('admin_backups'))
+
+        # 保存到 data/attachments 目录
+        attachments_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'attachments')
+        os.makedirs(attachments_dir, exist_ok=True)
+        filename = file.filename
+        save_path = os.path.join(attachments_dir, filename)
+        try:
+            file.save(save_path)
+            safe_log('上传附件文件', f"文件: {filename}")
+            flash(f'附件文件「{filename}」已成功上传！', 'success')
+        except Exception as e:
+            flash(f'上传附件文件失败: {e}', 'danger')
 
         return redirect(url_for('admin_backups'))
 
@@ -3313,17 +3419,19 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
         success, msg = restore_webdav_backup(config, target_filename, db_path)
         if success:
+            db.engine.dispose()  # 释放连接池，强制重新连接恢复后的数据库
             safe_log('恢复WebDAV备份', f"文件名: {target_filename}")
             try:
                 trigger_webhook_event(
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
-                    f'恢复WebDAV备份',
-                    f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{target_filename}',
-                    page_key='admin_backups', user_name=current_user.username
+                f'恢复WebDAV备份',
+                f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{target_filename}',
+                page_key='admin_backups', user_name=current_user.username,
+                operator_id=current_user.id
                 )
             except Exception:
                 pass
-            flash('备份已成功恢复！', 'success')
+            flash('备份已成功恢复，请刷新页面确认数据更新。', 'success')
         else:
             flash(f'恢复失败: {msg}', 'danger')
         return redirect(url_for('admin_backups'))
@@ -3343,6 +3451,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         username = (data.get('webdav_username') or data.get('username') or '').strip() or config.webdav_username
         password = (data.get('webdav_password') or data.get('password') or '').strip() or config.password
         ok, msg = test_webdav_connection(server_url, username, password)
+        safe_log('测试WebDAV连接', f"结果: {'成功' if ok else '失败'}, 消息: {msg}")
         return jsonify({'success': ok, 'message': msg})
 
     # ===================== 定时备份任务管理 =====================
@@ -3355,9 +3464,15 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return jsonify({'success': False, 'message': '权限不足'}), 403
 
         task_id = request.form.get('task_id', '').strip()
-        name = request.form.get('task_name', '').strip() or '定时备份'
+        name = request.form.get('task_name', '').strip() or '定时任务'
         cron_expr = request.form.get('cron_expr', '').strip() or '0 2 * * *'
         is_enabled = request.form.get('is_enabled', '') == 'on'
+        task_type = request.form.get('task_type', 'db_backup').strip()
+        target_files = request.form.get('target_files', '').strip()
+        custom_script = request.form.get('custom_script', '').strip()
+
+        if task_type not in ('db_backup', 'file_backup', 'custom'):
+            task_type = 'db_backup'
 
         if task_id:
             task = db.session.get(ScheduledBackupTask, int(task_id))
@@ -3367,11 +3482,17 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             task.name = name
             task.cron_expr = cron_expr
             task.is_enabled = is_enabled
+            task.task_type = task_type
+            task.target_files = target_files if task_type == 'file_backup' else None
+            task.custom_script = custom_script if task_type == 'custom' else None
         else:
             task = ScheduledBackupTask(
                 name=name,
                 cron_expr=cron_expr,
-                is_enabled=is_enabled
+                is_enabled=is_enabled,
+                task_type=task_type,
+                target_files=target_files if task_type == 'file_backup' else None,
+                custom_script=custom_script if task_type == 'custom' else None
             )
             db.session.add(task)
 
@@ -3440,7 +3561,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 'status_change',
                 f'用户 {user.username} 的备份权限已{"授权" if user.backup_authorized else "撤销"}',
                 page_key='admin_backups',
-                user_name=current_user.username
+                user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -3543,7 +3665,17 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             tickets = query.order_by(PermissionTicket.created_at.desc()).all()
         else:
             tickets = PermissionTicket.query.filter_by(user_id=current_user.id).order_by(PermissionTicket.created_at.desc()).all()
-        return render_template('permission_tickets.html', tickets=tickets, menu_options=TICKET_MENU_OPTIONS)
+        # 收集当前用户已申请(pending)和已拥有的菜单，用于前端禁用重复勾选
+        already_requested = set()
+        if not current_user.is_admin:
+            pending_tickets = PermissionTicket.query.filter_by(user_id=current_user.id, status='pending').all()
+            for t in pending_tickets:
+                if t.requested_menus:
+                    already_requested.update(t.requested_menus.split(','))
+            # 已拥有的菜单权限也要标记
+            if current_user.allowed_menus:
+                already_requested.update(current_user.allowed_menus.split(','))
+        return render_template('permission_tickets.html', tickets=tickets, menu_options=TICKET_MENU_OPTIONS, already_requested=already_requested)
 
     @app.route('/permission_tickets/create', methods=['POST'])
     @login_required
@@ -3571,6 +3703,18 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('您已有一个待审批的工单，请等待管理员处理后再提交新工单。', 'info')
             return redirect(url_for('permission_tickets_view'))
 
+        # 检查提交的菜单是否已有权限或已在 pending 工单中
+        already_set = set()
+        if current_user.allowed_menus:
+            already_set.update(current_user.allowed_menus.split(','))
+        for t in PermissionTicket.query.filter_by(user_id=current_user.id, status='pending').all():
+            if t.requested_menus:
+                already_set.update(t.requested_menus.split(','))
+        dup_menus = [m for m in requested_menus if m in already_set]
+        if dup_menus:
+            flash(f'以下菜单已申请或已有权限，无需重复申请：{", ".join(dup_menus)}', 'warning')
+            return redirect(url_for('permission_tickets_view'))
+
         ticket = PermissionTicket(
             user_id=current_user.id,
             requested_menus=','.join(requested_menus),
@@ -3588,7 +3732,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 'system',
                 f'用户 {current_user.username} 提交了权限申请工单#{ticket.id}，申请菜单: {", ".join(requested_menus)}',
                 page_key='permission_tickets',
-                user_name=current_user.username
+                user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -3645,7 +3790,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 'status_change',
                 f'管理员 {current_user.username} 批准了工单#{ticket.id}，用户 {user.username if user else "?"} 获得菜单权限: {ticket.granted_menus}',
                 page_key='permission_tickets',
-                user_name=current_user.username
+                user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -3687,7 +3833,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 'status_change',
                 f'管理员 {current_user.username} 驳回了工单#{ticket.id}，用户 {user.username if user else "?"} 的权限申请',
                 page_key='permission_tickets',
-                user_name=current_user.username
+                user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass

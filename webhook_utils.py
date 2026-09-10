@@ -104,17 +104,18 @@ def _resolve_db_file():
             return c
     return candidates[0] if os.path.isdir(os.path.join(base, 'data')) else candidates[1]
 
-def record_webhook_log(user_id, webhook_id, event_type, payload, status_code, response_body, is_success):
+def record_webhook_log(user_id, webhook_id, event_type, payload, status_code, response_body, is_success, operator_id=None):
     """线程安全写入 Webhook 推送日志表"""
     try:
         conn = sqlite3.connect(_resolve_db_file(), timeout=10)
         c = conn.cursor()
         c.execute(
             """INSERT INTO webhook_logs 
-               (user_id, webhook_id, event_type, payload, status_code, response_body, is_success, created_at) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (user_id, operator_id, webhook_id, event_type, payload, status_code, response_body, is_success, created_at) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 user_id or 1,
+                operator_id,
                 webhook_id,
                 event_type or "notify",
                 json.dumps(_sanitize_log_data(payload), ensure_ascii=False)[:2000] if isinstance(payload, (dict, list)) else str(_sanitize_log_data(payload))[:2000],
@@ -541,7 +542,7 @@ def _sanitize_details(page_key, event_type, user_name, details):
     return details
 
 
-def trigger_webhook_event(webhooks, event_type, record_title, details=None, force_channels=False, page_key=None, user_name=None):
+def trigger_webhook_event(webhooks, event_type, record_title, details=None, force_channels=False, page_key=None, user_name=None, operator_id=None):
     """异步多线程触发 Webhook 与长连接机器人通知
     
     参数:
@@ -552,6 +553,7 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
         force_channels: 是否强制推送（跳过开关过滤）
         page_key: 来源页面标识（ledger/banquets/reminders 等），用于页面级过滤
         user_name: 操作人用户名，用于消息内容
+        operator_id: 操作发起人ID，用于推送日志记录
     """
     if not webhooks:
         return
@@ -605,7 +607,7 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                     c_id = extract_chatid_from_url(item.get("url", "")) or _cached_chatids.get(b_id)
                     if b_id and b_sec:
                         s, c, b = send_wecom_long_connection_message(b_id, b_sec, title, msg_details, now_str, event_type, chatid=c_id)
-                        record_webhook_log(item.get("user_id"), item.get("id"), event_type, {"title": title, "bot_id": b_id, "chatid": c_id, "details": msg_details}, c, b, s)
+                        record_webhook_log(item.get("user_id"), item.get("id"), event_type, {"title": title, "bot_id": b_id, "chatid": c_id, "details": msg_details}, c, b, s, operator_id=operator_id)
                     continue
 
                 url = item.get("url", "")
@@ -674,7 +676,7 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                     headers["Authorization"] = f"Bearer {item.get('secret')}"
 
                 s, c, b = _send_payload(url, payload, headers, timeout=12)
-                record_webhook_log(item.get("user_id"), item.get("id"), event_type, payload, c, b, s)
+                record_webhook_log(item.get("user_id"), item.get("id"), event_type, payload, c, b, s, operator_id=operator_id)
             except Exception:
                 pass
 

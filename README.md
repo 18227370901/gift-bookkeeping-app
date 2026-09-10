@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '4eec7c6a-b7d2-44dd-8624-448bec378424'
-  PropagateID: '4eec7c6a-b7d2-44dd-8624-448bec378424'
-  ReservedCode1: '2b64d083-7e21-4f31-8450-2423d9c062e9'
-  ReservedCode2: '2b64d083-7e21-4f31-8450-2423d9c062e9'
+  ProduceID: '461f8eba-242a-4592-98fe-4b95ac86d1ef'
+  PropagateID: '461f8eba-242a-4592-98fe-4b95ac86d1ef'
+  ReservedCode1: 'e8c274e9-7d5c-4b0a-a1dc-772241042b8d'
+  ReservedCode2: 'e8c274e9-7d5c-4b0a-a1dc-772241042b8d'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -171,6 +171,29 @@ AIGC:
   均在底层使用 **AES-256-GCM** 算法进行对称强加密后持久化存储于数据库中，彻底杜绝数据库明文落盘隐患。
 - **ORM 透明加解密**：上层业务通过 Python ORM `@property` 自动透明解密与加密，对业务逻辑零入侵，并内置旧版本明文数据的平滑回退兼容。
 - **日志全自动递归脱敏**：写入系统数据库 `webhook_logs` 与 `operation_logs` 的请求载荷（Payload）与响应体（Response）均经过全自动递归脱敏扫描，所有涉及 `secret`、`token`、`pass`、`key`、`credential`、`auth` 的字段值均强制替换为 `***MASKED***`，保障运维审计日志绝对安全。
+
+### V2 修复与优化（2026-09-10）
+
+#### Webhook 通知
+- 修复新增通道 Modal 缺少保存按钮的问题
+- 修复编辑按钮无响应问题
+- 推送日志新增"发起用户"列，记录操作发起人
+- Webhook CRUD 操作全部写入审计日志
+
+#### 权限管理
+- 权限申请页已申请/已有权限的菜单自动禁用勾选，防止重复申请
+
+#### WebDAV 备份
+- WebDAV 配置对普通用户隐藏敏感信息（仅管理员可编辑）
+- 授权用户可查看定时任务列表（只读）
+- 修复 WebDAV 上传到根目录 404 问题（递归创建子目录）
+- 新增"备份存储子目录"配置项，默认 gift_backups
+- 恢复数据库后自动释放连接池，确保数据即时生效
+- 本地上传分拆为"数据库恢复"和"附件恢复"两个独立功能
+
+#### 定时任务
+- 定时任务从仅支持数据库备份扩展为三种类型：数据库备份/文件备份/自定义脚本
+- 任务 Modal 新增类型选择下拉框，按类型动态显示配置区域
 
 ## 📂 项目文件结构
 
