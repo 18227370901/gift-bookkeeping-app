@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'c67086d6-a8ed-4fb7-b077-f90d55f40b29'
-  PropagateID: 'c67086d6-a8ed-4fb7-b077-f90d55f40b29'
-  ReservedCode1: '4ec16e61-be1e-4321-8218-f29d37693307'
-  ReservedCode2: '4ec16e61-be1e-4321-8218-f29d37693307'
+  ProduceID: 'ccf8a2fb-1666-41b0-a602-5895977e9a1d'
+  PropagateID: 'ccf8a2fb-1666-41b0-a602-5895977e9a1d'
+  ReservedCode1: '739bce11-79e0-4e22-ba0d-9f001090a97a'
+  ReservedCode2: '739bce11-79e0-4e22-ba0d-9f001090a97a'
 ---
 
 # AI 助手模块技术设计方案
@@ -661,5 +661,55 @@ Response: {
 - ScheduledBackupTask 新增 custom_script (Text, nullable)
 - WebhookLog 新增 operator_id (Integer, FK users.id, nullable)
 - 迁移 SQL 已追加到 app.py migration_sqls 列表
+
+---
+
+## 第十章 V4 修复记录 — WebDAV 安全恢复与缺陷修复
+
+### 10.1 恢复备份导致全站 500 Internal Server Error（核心修复）
+
+**根因分析**：恢复备份时直接覆盖正在使用的数据库文件，未释放 SQLAlchemy 连接池，未清理 WAL/SHM 文件，导致 `malformed database schema (sqlite_autoindex_security_risks_1) - orphan index` 错误。此外旧备份缺少 V2/V3 新增的表和字段，恢复后应用访问报 500。
+
+**安全恢复流程**（admin_restore_webdav_backup + admin_upload_local_backup）：
+1. `db.engine.dispose()` 释放连接池，防止覆盖正在使用的文件
+2. 下载/上传到临时文件（tempfile.mkdtemp），不直接覆盖目标文件
+3. `PRAGMA integrity_check` 校验临时文件完整性，校验失败则中止恢复
+4. 备份当前数据库（shutil.copy2 到 .bak_时间戳）
+5. 用校验通过的临时文件替换目标数据库文件
+6. 清理 WAL/SHM 文件（-wal、-shm 后缀），防止旧 WAL 日志导致 schema 损坏
+7. 调用 `init_database()` 重新执行迁移 SQL，补建缺失的表/字段
+8. Webhook 通知 + flash 提示用户刷新页面
+
+**init_database 延迟导入**：`routes_ext.py` 中通过 `from app import init_database` 在函数内部延迟导入，避免 `app.py` 与 `routes_ext.py` 之间的循环导入问题。
+
+### 10.2 加密 zip 恢复报错 quote_from_bytes() expected bytes
+
+**根因**：`webdav_utils.py` 的 `download_backup` 函数参数重映射条件写反（`remote_filename is not None` 应为 `is None`），导致 `remote_filename` 保持 None。
+
+**修复**：
+- `download_backup` 参数映射修正为 `if remote_filename is None and username is not None`
+- 新增 `decrypt_encrypted_zip()` 函数（AES-256 解密，基于 pyzipper）
+- 新增 `download_and_decrypt_backup()` 函数（下载+解密一体化）
+- 前端 `admin_backups.html` 中 .zip 文件恢复按钮改为调用 `restoreEncryptedBackup()` 弹窗输入密码
+
+### 10.3 删除 WebDAV 文件失败（远端文件不存在）
+
+**根因**：`delete_webdav_backup` 和 `download_backup` 使用 `_normalize_url` 而非 `_resolve_target_dir_url`，导致 URL 缺少 `backup_subdir` 子目录路径。
+
+**修复**：两个函数都改为使用 `_resolve_target_dir_url`，确保 URL 包含 backup_subdir 子目录路径。
+
+### 10.4 附件上传 WebDAV 409 错误
+
+**根因**：附件上传到 `attachments/` 子目录，但远端该子目录不存在，WebDAV 服务器返回 409 Conflict。
+
+**修复**：
+- `routes_ext.py` 中 `admin_upload_attachment` 路由将 `remote_name` 从 `f"attachments/{filename}"` 改为直接 `filename`（放到备份根目录）
+- `webdav_utils.py` 中 `upload_file_to_webdav` 增加自动创建远端子目录逻辑（MKCOL）
+
+### 10.5 数据库路径说明
+
+- `app.py` 第 68-71 行：如果 `data/` 目录存在，优先使用 `data/gift_bookkeeping.db`；否则使用根目录的 `gift_bookkeeping.db`
+- V3 开发过程中创建了 `data/` 目录，导致数据库路径切换，曾出现数据丢失问题
+- 已用根目录完整数据库覆盖 `data/gift_bookkeeping.db`，integrity_check=ok，数据完整恢复
 
 > AI生成

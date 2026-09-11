@@ -19,7 +19,8 @@ from webdav_utils import (
     test_connection as test_webdav_connection,
     upload_backup as upload_backup_webdav,
     list_backups as list_webdav_backups,
-    download_backup as restore_webdav_backup,
+    download_backup as download_webdav_backup,
+    download_and_decrypt_backup,
     upload_encrypted_backup,
     upload_file_to_webdav,
     delete_webdav_backup,
@@ -3473,11 +3474,54 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
         try:
+            # 修复：先释放数据库连接池，防止覆盖正在使用的文件导致损坏
+            db.engine.dispose()
+            
+            # 保存上传文件到临时路径，验证完整性后再替换
+            import tempfile
+            tmp_dir = tempfile.mkdtemp(prefix='gift_upload_')
+            tmp_db_path = os.path.join(tmp_dir, 'uploaded.db')
+            file.save(tmp_db_path)
+            
+            # 验证上传的数据库文件完整性
+            import sqlite3 as _sqlite3
+            try:
+                test_conn = _sqlite3.connect(tmp_db_path)
+                integrity = test_conn.execute('PRAGMA integrity_check').fetchone()[0]
+                test_conn.close()
+                if integrity != 'ok':
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    flash(f'恢复失败：上传的数据库文件完整性检查未通过 ({integrity})，可能文件已损坏', 'danger')
+                    return redirect(url_for('admin_backups'))
+            except Exception as ie:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                flash(f'恢复失败：无法读取上传的数据库文件 ({str(ie)})', 'danger')
+                return redirect(url_for('admin_backups'))
+            
             # 备份现有数据库防止损坏
             if os.path.exists(db_path):
                 shutil.copy2(db_path, db_path + f".bak_{int(time.time())}")
-            file.save(db_path)
-            db.engine.dispose()  # 释放连接池，强制下次访问重新连接新数据库
+            
+            # 替换数据库文件
+            shutil.copy2(tmp_db_path, db_path)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            
+            # 清理 WAL/SHM 文件，防止旧 WAL 日志导致数据库损坏
+            for suffix in ('-wal', '-shm'):
+                wal_path = db_path + suffix
+                if os.path.exists(wal_path):
+                    try:
+                        os.remove(wal_path)
+                    except Exception:
+                        pass
+            
+            # 重新执行数据库初始化（补建缺失的表/字段）
+            try:
+                from app import init_database
+                init_database()
+            except Exception as e:
+                safe_log('数据库迁移', f"init_database 执行失败: {e}")
+            
             safe_log('上传恢复本地备份', f"成功恢复了上传的数据库文件: {file.filename}")
             flash('本地数据库已成功恢复，请刷新页面确认数据更新。', 'success')
         except Exception as e:
@@ -3516,7 +3560,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             try:
                 config = BackupConfig.get_config(None if current_user.is_admin else current_user.id)
                 if config.server_url and config.username:
-                    remote_name = f"attachments/{filename}"
+                    # 修复：附件直接放到备份根目录下，不嵌套子目录，避免 409 错误
+                    remote_name = filename
                     ok_wd, msg_wd = upload_file_to_webdav(config, local_file_path=save_path, remote_filename=remote_name)
                     if ok_wd:
                         flash(f'附件文件「{filename}」已成功上传至本地和 WebDAV！', 'success')
@@ -3558,10 +3603,72 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         # V3: 按用户获取配置
         config = BackupConfig.get_config(None if current_user.is_admin else current_user.id)
         db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
+        
+        # 判断是否是加密 zip 文件
+        is_encrypted_zip = target_filename.lower().endswith('.zip')
+        decrypt_password = request.form.get('decrypt_password', '').strip() if is_encrypted_zip else None
+        
+        if is_encrypted_zip and not decrypt_password:
+            # 加密文件但未提供密码，重定向回页面并提示需要密码
+            flash(f'备份文件「{target_filename}」是加密文件，请输入加密密码后恢复。', 'warning')
+            return redirect(url_for('admin_backups'))
+        
         try:
-            success, msg = restore_webdav_backup(config, target_filename, db_path)
+            # 修复：先释放数据库连接池，防止覆盖正在使用的文件导致损坏
+            db.engine.dispose()
+            
+            # 下载到临时文件，验证完整性后再替换
+            import tempfile
+            tmp_dir = tempfile.mkdtemp(prefix='gift_restore_')
+            tmp_db_path = os.path.join(tmp_dir, 'restored.db')
+            
+            if is_encrypted_zip:
+                # 加密 zip：下载并解密到临时文件
+                success, msg = download_and_decrypt_backup(config, remote_filename=target_filename, save_path=tmp_db_path, decrypt_password=decrypt_password)
+            else:
+                # 普通 .db：直接下载到临时文件
+                success, msg = download_webdav_backup(config, remote_filename=target_filename, save_path=tmp_db_path)
+            
             if success:
-                db.engine.dispose()  # 释放连接池，强制重新连接恢复后的数据库
+                # 验证下载数据库的完整性
+                import sqlite3 as _sqlite3
+                try:
+                    test_conn = _sqlite3.connect(tmp_db_path)
+                    integrity = test_conn.execute('PRAGMA integrity_check').fetchone()[0]
+                    test_conn.close()
+                    if integrity != 'ok':
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                        flash(f'恢复失败：下载数据库文件完整性检查未通过 ({integrity})，可能文件已损坏', 'danger')
+                        return redirect(url_for('admin_backups'))
+                except Exception as ie:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    flash(f'恢复失败：无法读取下载数据库文件 ({str(ie)})', 'danger')
+                    return redirect(url_for('admin_backups'))
+                
+                # 备份当前数据库防止恢复失败
+                if os.path.exists(db_path):
+                    shutil.copy2(db_path, db_path + f".bak_{int(time.time())}")
+                
+                # 替换数据库文件
+                shutil.copy2(tmp_db_path, db_path)
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                
+                # 清理 WAL/SHM 文件，防止旧 WAL 日志导致数据库损坏
+                for suffix in ('-wal', '-shm'):
+                    wal_path = db_path + suffix
+                    if os.path.exists(wal_path):
+                        try:
+                            os.remove(wal_path)
+                        except Exception:
+                            pass
+                
+                # 重新执行数据库初始化（补建缺失的表/字段）
+                try:
+                    from app import init_database
+                    init_database()
+                except Exception as e:
+                    safe_log('数据库迁移', f"init_database 执行失败: {e}")
+                
                 safe_log('恢复WebDAV备份', f"文件名: {target_filename}")
                 try:
                     trigger_webhook_event(
@@ -3575,6 +3682,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     pass
                 flash('备份已成功恢复，请刷新页面确认数据更新。', 'success')
             else:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
                 flash(f'恢复失败: {msg}', 'danger')
         except Exception as e:
             flash(f'恢复备份时发生异常: {str(e)}', 'danger')

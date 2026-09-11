@@ -585,8 +585,16 @@ function loadWebdavBackups() {
           const canDelete = file.can_delete !== false;
           const restoreDisabled = canRestore ? '' : 'disabled';
           const restoreStyle = canRestore ? '' : 'opacity-0.5';
-          const restoreTitle = canRestore ? '恢复此版本' : '仅可恢复自己创建的备份';
+          const restoreTitle = canRestore ? (isZip ? '输入密码恢复加密备份' : '恢复此版本') : '仅可恢复自己创建的备份';
+          const restoreIcon = isZip ? 'unlock' : 'rotate-left';
           const deleteBtn = canDelete ? `<button type="button" class="btn btn-sm btn-outline-danger ms-1" onclick="deleteBackup('${file.name}')" title="删除"><i class="fa-solid fa-trash"></i></button>` : '';
+          const restoreBtn = isZip
+            ? `<button type="button" class="btn btn-sm btn-outline-warning" ${restoreDisabled} title="${restoreTitle}" style="${restoreStyle}" onclick="restoreEncryptedBackup('${file.name}')"><i class="fa-solid fa-${restoreIcon} me-1"></i>恢复</button>`
+            : `<form action="/admin/backup/restore" method="POST" class="d-inline" onsubmit="return confirm('警告：恢复备份将覆盖当前数据库，确定继续吗？');" style="${restoreStyle}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="filename" value="${file.name}">
+                <button type="submit" class="btn btn-sm btn-outline-danger" ${restoreDisabled} title="${restoreTitle}"><i class="fa-solid fa-${restoreIcon} me-1"></i>恢复</button>
+              </form>`;
           rowsHtml += `<tr>
             <td><input type="checkbox" class="backup-checkbox" value="${file.name}" onchange="updateBatchDeleteBtn()"></td>
             <td class="ps-1 fw-bold"><i class="fa-solid fa-${isZip ? 'lock' : 'database'} text-${isZip ? 'warning' : 'secondary'} me-2"></i>${file.name}</td>
@@ -594,11 +602,7 @@ function loadWebdavBackups() {
             <td><small class="text-muted">${timeStr}</small></td>
             <td><span class="badge bg-info-subtle text-info">${createdBy}</span></td>
             <td class="text-end pe-4">
-              <form action="/admin/backup/restore" method="POST" class="d-inline" onsubmit="return confirm('警告：恢复备份将覆盖当前数据库，确定继续吗？');" style="${restoreStyle}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="filename" value="${file.name}">
-                <button type="submit" class="btn btn-sm btn-outline-danger" ${restoreDisabled} title="${restoreTitle}"><i class="fa-solid fa-rotate-left me-1"></i>恢复</button>
-              </form>
+              ${restoreBtn}
               ${deleteBtn}
             </td>
           </tr>`;
@@ -657,6 +661,50 @@ function deleteBackup(filename) {
     }
   })
   .catch(() => alert('网络请求异常'));
+}
+
+// 恢复加密 zip 备份（弹窗输入密码）
+function restoreEncryptedBackup(filename) {
+  const html = `
+  <div class="modal fade" id="restoreEncryptModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <form id="restoreEncryptForm" action="/admin/backup/restore" method="POST">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="filename" value="${filename}">
+          <div class="modal-header">
+            <h5 class="modal-title text-warning"><i class="fa-solid fa-unlock me-2"></i>恢复加密备份</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body">
+            <p class="mb-2">备份文件：<code class="text-warning">${filename}</code></p>
+            <p class="small text-muted mb-3">该备份是加密文件，请输入加密密码以解密恢复。密码错误将无法恢复。</p>
+            <div class="mb-3">
+              <label class="form-label fw-bold">加密密码</label>
+              <div class="input-group">
+                <input type="password" name="decrypt_password" id="decryptPwdInput" class="form-control" placeholder="请输入加密密码" required>
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('decryptPwdInput', this)"><i class="fa-regular fa-eye"></i></button>
+              </div>
+            </div>
+            <div class="alert alert-warning small mb-0"><i class="fa-solid fa-triangle-exclamation me-1"></i>恢复将覆盖当前数据库，系统会自动创建历史回滚副本。</div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+            <button type="submit" class="btn btn-warning btn-sm"><i class="fa-solid fa-unlock me-1"></i>输入密码并恢复</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>`;
+  const old = document.getElementById('restoreEncryptModal');
+  if (old) old.remove();
+  document.body.insertAdjacentHTML('beforeend', html);
+  document.getElementById('restoreEncryptForm').onsubmit = function() {
+    const pwd = document.getElementById('decryptPwdInput').value.trim();
+    if (!pwd) { alert('请输入加密密码'); return false; }
+    return confirm('警告：恢复加密备份将覆盖当前数据库，确定继续吗？');
+  };
+  new bootstrap.Modal(document.getElementById('restoreEncryptModal')).show();
 }
 
 // 批量删除备份

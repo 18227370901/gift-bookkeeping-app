@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'ffab0f6b-cb6c-4a7c-aee1-a96d6cbea523'
-  PropagateID: 'ffab0f6b-cb6c-4a7c-aee1-a96d6cbea523'
-  ReservedCode1: 'd1806d23-92ef-4dc8-aed6-7540bef46699'
-  ReservedCode2: 'd1806d23-92ef-4dc8-aed6-7540bef46699'
+  ProduceID: '4c8bbee2-58d4-46ed-938e-be3f690fded6'
+  PropagateID: '4c8bbee2-58d4-46ed-938e-be3f690fded6'
+  ReservedCode1: '80b58c95-45f8-4f0c-b3f3-551bdfe68625'
+  ReservedCode2: '80b58c95-45f8-4f0c-b3f3-551bdfe68625'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -218,6 +218,25 @@ AIGC:
 
 #### 附件备份
 - 附件上传后自动同步到 WebDAV `attachments/` 子目录（失败不阻断本地保存）
+
+### V4 修复与优化（2026-09-11）
+
+#### WebDAV 安全恢复机制（核心修复）
+- 修复恢复备份后全站 500 Internal Server Error 的严重问题
+- 恢复流程改为安全替换：先释放连接池 → 下载到临时文件 → 完整性校验 → 替换数据库 → 清理 WAL/SHM → 重新执行迁移 SQL
+- `init_database()` 通过延迟导入调用，避免循环导入问题
+
+#### 加密 zip 恢复修复
+- 修复 `download_backup` 函数参数映射条件写反导致 `quote_from_bytes() expected bytes` 错误
+- 新增 `decrypt_encrypted_zip()` 和 `download_and_decrypt_backup()` 函数支持 AES-256 加密 zip 解密
+- 前端 .zip 文件恢复时弹窗输入加密密码
+
+#### WebDAV 文件删除/下载修复
+- `delete_webdav_backup` 和 `download_backup` 改用 `_resolve_target_dir_url`，修复 URL 缺少 `backup_subdir` 子目录路径导致"远端文件不存在"
+
+#### 附件上传修复
+- 附件上传直接放到 WebDAV 备份根目录，去掉 `attachments/` 子目录前缀，修复 409 Conflict 错误
+- `upload_file_to_webdav` 增加自动创建远端子目录逻辑（MKCOL）
 
 ## 📂 项目文件结构
 
