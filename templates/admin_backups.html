@@ -58,7 +58,10 @@
           <div class="mb-2">
             <label class="form-label small text-muted">为自动定时备份预设加密密码，留空则不加密</label>
             <div class="input-group">
-              <input type="password" name="backup_encrypt_password" id="cfg_encrypt_pwd" class="form-control rounded-start-3" placeholder="预设加密密码（留空不加密）" autocomplete="new-password">
+              <!-- V7 修复：不回显明文密码，避免安全隐患 -->
+              <input type="password" name="backup_encrypt_password" id="cfg_encrypt_pwd" class="form-control rounded-start-3"
+                {% if has_encrypt_password %}placeholder="已设置，留空保持不变"{% else %}placeholder="预设加密密码（留空不加密）"{% endif %}
+                autocomplete="new-password">
               <button class="btn btn-outline-secondary rounded-end-3" type="button" onclick="togglePasswordVisibility('cfg_encrypt_pwd', this)" title="查看/隐藏密码">
                 <i class="fa-regular fa-eye"></i>
               </button>
@@ -70,8 +73,8 @@
             {% endif %}
           </div>
           <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" name="backup_encrypt_password_clear" value="1" id="clearEncryptPwd">
-            <label class="form-check-label small text-muted" for="clearEncryptPwd">勾选此项清除已保存的加密密码</label>
+            <input class="form-check-input" type="checkbox" name="backup_encrypt_password_clear" value="1" id="clearEncryptPwd" onchange="toggleClearEncryptPwd()" {% if not has_encrypt_password %}disabled{% endif %}>
+            <label class="form-check-label small text-muted" for="clearEncryptPwd">{% if has_encrypt_password %}勾选此项清除已保存的加密密码（勾选后无需填写新密码）{% else %}尚未设置加密密码，无可清除{% endif %}</label>
           </div>
           {% if current_user.is_admin %}
           <div class="form-check mb-2">
@@ -98,6 +101,11 @@
         <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置（个人）</h5>
       </div>
       <div class="card-body">
+        <!-- V7: 提示用户需自行配置 WebDAV，不再自动继承管理员配置 -->
+        <div class="alert alert-info border-0 rounded-3 mb-3 py-2">
+          <i class="fa-solid fa-circle-info me-1 text-info"></i>
+          <span class="small">请填写您自己的 WebDAV 服务器信息，配置仅对您个人生效，与管理员配置相互独立。</span>
+        </div>
         <form action="{{ url_for('admin_save_webdav_config') }}" method="POST" id="webdavConfigFormUser">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <div class="mb-3">
@@ -127,16 +135,77 @@
     </div>
     {% endif %}
 
-    <!-- 定时任务管理：管理员 CRUD / 授权用户只读 -->
-    {% if current_user.is_admin or current_user.can_use_backup() %}
+    <!-- 备份授权管理：仅管理员 -->
+    {% if current_user.is_admin %}
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-white py-3 border-light">
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-user-shield text-warning me-2"></i>备份功能授权</h5>
+        <div class="form-text small text-muted mt-1"><i class="fa-solid fa-arrows-rotate me-1"></i>授权状态与「用户管理」页面实时同步，无需重复操作</div>
+      </div>
+      <div class="card-body p-0">
+        {% if all_users %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th class="ps-3">用户名</th>
+                <th style="width:90px">备份授权</th>
+                <th style="width:90px">定时任务授权</th>
+                <th style="width:160px">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for u in all_users %}
+              <tr>
+                <td class="ps-3"><i class="fa-solid fa-user text-secondary me-1"></i>{{ u.username }}</td>
+                <td>
+                  <span class="badge bg-{{ 'success' if u.backup_authorized else 'secondary' }}" id="backupBadge_{{ u.id }}">
+                    {{ '已授权' if u.backup_authorized else '未授权' }}
+                  </span>
+                </td>
+                <td>
+                  <span class="badge bg-{{ 'success' if u.scheduled_task_authorized else 'secondary' }}" id="taskBadge_{{ u.id }}">
+                    {{ '已授权' if u.scheduled_task_authorized else '未授权' }}
+                  </span>
+                </td>
+                <td>
+                  <!-- V7: 按钮图标+文字化，撤销操作加确认弹窗 -->
+                  <button class="btn btn-sm btn-outline-{{ 'danger' if u.backup_authorized else 'success' }} py-0 px-2 me-1"
+                    onclick="{% if u.backup_authorized %}if(confirm('确定撤销 {{ u.username }} 的备份授权？撤销后该用户将无法使用 WebDAV 备份功能。')){% endif %}toggleBackupAuth({{ u.id }})">
+                    <i class="fa-solid fa-cloud{{ '-slash' if u.backup_authorized }} me-1"></i>{{ '撤销备份' if u.backup_authorized else '授权备份' }}
+                  </button>
+                  <button class="btn btn-sm btn-outline-{{ 'danger' if u.scheduled_task_authorized else 'success' }} py-0 px-2"
+                    onclick="{% if u.scheduled_task_authorized %}if(confirm('确定撤销 {{ u.username }} 的定时任务授权？撤销后该用户将无法管理定时任务。')){% endif %}toggleTaskAuth({{ u.id }})">
+                    <i class="fa-solid fa-clock{{ '-slash' if u.scheduled_task_authorized }} me-1"></i>{{ '撤销任务' if u.scheduled_task_authorized else '授权任务' }}
+                  </button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-4 text-muted">
+          <i class="fa-solid fa-users fa-2x opacity-25 mb-2 d-block"></i>
+          <p class="mb-0 small">暂无普通用户</p>
+    </div>
+    {% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- 右侧：定时任务 + 备份与恢复操作 -->
+  <div class="col-lg-7">
+
+    <!-- V7: 定时任务管理（从左栏移到右栏顶部，表格 8列→6列瘦身） -->
+    {% if current_user.is_admin or can_use_scheduled_tasks %}
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
         <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-clock text-success me-2"></i>定时任务</h5>
-        {% if current_user.is_admin %}
         <button type="button" class="btn btn-sm btn-outline-success rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#scheduledTaskModal">
           <i class="fa-solid fa-plus me-1"></i>新增
         </button>
-        {% endif %}
       </div>
       <div class="card-body p-0">
         {% if scheduled_tasks %}
@@ -144,44 +213,41 @@
           <table class="table table-hover align-middle mb-0">
             <thead class="table-light">
               <tr>
-                <th class="ps-3">名称</th>
-                <th>类型</th>
-                <th>Cron 表达式</th>
-                <th style="width:70px">状态</th>
-                <th>上次执行</th>
-                <th>创建人</th>
-                <th style="width:70px">历史</th>
-                {% if current_user.is_admin or current_user.can_use_backup() %}
-                <th style="width:100px">操作</th>
-                {% endif %}
+                <th class="ps-3">任务名称</th>
+                <th>类型 / Cron</th>
+                <th>上次执行 / 创建人</th>
+                <th class="text-end pe-3" style="width:140px">操作</th>
               </tr>
             </thead>
             <tbody>
               {% for t in scheduled_tasks %}
               <tr>
-                <td class="ps-3 fw-bold">{{ t.name }}</td>
+                <!-- V7: 名称+状态合并 -->
+                <td class="ps-3">
+                  <span class="fw-bold">{{ t.name }}</span>
+                  <span class="badge bg-{{ 'success-subtle' if t.is_enabled else 'secondary-subtle' }} text-{{ 'success' if t.is_enabled else 'secondary' }} ms-2">{{ '启用' if t.is_enabled else '禁用' }}</span>
+                </td>
+                <!-- V7: 类型+Cron合并 -->
                 <td>
                   {% if t.task_type == 'file_backup' %}
-                    <span class="badge bg-info-subtle text-info">文件备份</span>
+                    <span class="badge bg-info-subtle text-info">文件</span>
                   {% elif t.task_type == 'custom' %}
-                    <span class="badge bg-warning-subtle text-warning">自定义脚本</span>
+                    <span class="badge bg-warning-subtle text-warning">脚本</span>
                   {% else %}
-                    <span class="badge bg-primary-subtle text-primary">数据库备份</span>
+                    <span class="badge bg-primary-subtle text-primary">数据库</span>
                   {% endif %}
+                  <code class="small text-muted ms-1">{{ t.cron_expr }}</code>
                 </td>
-                <td><code class="small">{{ t.cron_expr }}</code></td>
-                <td>
-                  <span class="badge bg-{{ 'success' if t.is_enabled else 'secondary' }}">{{ '启用' if t.is_enabled else '禁用' }}</span>
+                <!-- V7: 上次执行+创建人合并 -->
+                <td class="small text-muted">
+                  {{ t.last_run_time.strftime('%m-%d %H:%M') if t.last_run_time else '—' }}
+                  <br><span class="text-secondary">{% if t.creator %}{{ t.creator.username }}{% else %}—{% endif %}</span>
                 </td>
-                <td class="small text-muted">{{ t.last_run_time.strftime('%m-%d %H:%M') if t.last_run_time else '—' }}</td>
-                <td class="small">{% if t.creator %}{{ t.creator.username }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
-                <td>
+                <!-- V7: 操作+历史合并 -->
+                <td class="text-end pe-3">
                   <button class="btn btn-sm btn-outline-info py-0 px-1" onclick="showExecutionLogs({{ t.id }})" title="执行历史">
                     <i class="fa-solid fa-clock-rotate-left"></i>
                   </button>
-                </td>
-                {% if current_user.is_admin or current_user.can_use_backup() %}
-                <td>
                   <button class="btn btn-sm btn-outline-{{ 'secondary' if t.is_enabled else 'success' }} py-0 px-1" onclick="toggleScheduledTask({{ t.id }})" title="{{ '禁用' if t.is_enabled else '启用' }}">
                     <i class="fa-solid fa-{{ 'pause' if t.is_enabled else 'play' }}"></i>
                   </button>
@@ -195,7 +261,6 @@
                     </button>
                   </form>
                 </td>
-                {% endif %}
               </tr>
               {% endfor %}
             </tbody>
@@ -210,57 +275,6 @@
       </div>
     </div>
     {% endif %}
-
-    <!-- 备份授权管理：仅管理员 -->
-    {% if current_user.is_admin %}
-    <div class="card border-0 shadow-sm rounded-4 mb-4">
-      <div class="card-header bg-white py-3 border-light">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-user-shield text-warning me-2"></i>备份功能授权</h5>
-      </div>
-      <div class="card-body p-0">
-        {% if all_users %}
-        <div class="table-responsive">
-          <table class="table table-hover align-middle mb-0">
-            <thead class="table-light">
-              <tr>
-                <th class="ps-3">用户名</th>
-                <th style="width:80px">授权状态</th>
-                <th style="width:80px">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for u in all_users %}
-              <tr>
-                <td class="ps-3"><i class="fa-solid fa-user text-secondary me-1"></i>{{ u.username }}</td>
-                <td>
-                  <span class="badge bg-{{ 'success' if u.backup_authorized else 'secondary' }}" id="backupBadge_{{ u.id }}">
-                    {{ '已授权' if u.backup_authorized else '未授权' }}
-                  </span>
-                </td>
-                <td>
-                  <button class="btn btn-sm btn-outline-{{ 'danger' if u.backup_authorized else 'success' }} py-0 px-1"
-                    onclick="toggleBackupAuth({{ u.id }})" title="{{ '撤销' if u.backup_authorized else '授权' }}">
-                    <i class="fa-solid fa-{{ 'xmark' if u.backup_authorized else 'check' }}"></i>
-                  </button>
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="text-center py-4 text-muted">
-          <i class="fa-solid fa-users fa-2x opacity-25 mb-2 d-block"></i>
-          <p class="mb-0 small">暂无普通用户</p>
-        </div>
-        {% endif %}
-      </div>
-    </div>
-    {% endif %}
-  </div>
-
-  <!-- 右侧：备份与恢复操作 -->
-  <div class="col-lg-7">
 
     <!-- WebDAV 云端备份与恢复 -->
     <div class="card border-0 shadow-sm rounded-4 mb-4">
@@ -466,6 +480,20 @@ function toggleWebdavPasswordVisibility() {
   }
 }
 
+// V7: 勾选「清除加密密码」时，清空并禁用密码输入框，避免语义歧义
+toggleClearEncryptPwd();
+function toggleClearEncryptPwd() {
+  const cb = document.getElementById('clearEncryptPwd');
+  const pwd = document.getElementById('cfg_encrypt_pwd');
+  if (!cb || !pwd) return;
+  if (cb.checked) {
+    pwd.value = '';
+    pwd.disabled = true;
+  } else {
+    pwd.disabled = false;
+  }
+}
+
 // 加密选项切换
 function toggleEncryptSection() {
   const cb = document.getElementById('useEncrypt');
@@ -543,11 +571,26 @@ function toggleBackupAuth(userId) {
   .then(res => res.json())
   .then(data => {
     if (data.success) {
-      const badge = document.getElementById('backupBadge_' + userId);
-      if (badge) {
-        badge.className = 'badge bg-' + (data.backup_authorized ? 'success' : 'secondary');
-        badge.textContent = data.backup_authorized ? '已授权' : '未授权';
-      }
+      location.reload();
+    } else {
+      alert(data.message || '操作失败');
+    }
+  })
+  .catch(() => alert('网络请求异常'));
+}
+
+function toggleTaskAuth(userId) {
+  fetch(`/admin/backups/authorize_task/${userId}`, {
+    method: 'POST',
+    headers: {
+      'X-CSRFToken': '{{ csrf_token }}',
+      'X-CSRF-Token': '{{ csrf_token }}',
+      'X-Requested-With': 'XMLHttpRequest'
+    }
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
       location.reload();
     } else {
       alert(data.message || '操作失败');
@@ -578,7 +621,17 @@ function loadWebdavBackups() {
         let rowsHtml = '';
         data.backups.forEach(file => {
           const sizeStr = file.size_human || ((file.size / 1024).toFixed(1) + ' KB');
-          const timeStr = file.modified_time || file.last_modified || '-';
+          // V7: GMT 时间转本地时间显示（WebDAV 返回如 "Sat, 01 Jan 2025 12:00:00 GMT"）
+          const rawTime = file.modified_time || file.last_modified || '';
+          let timeStr = '-';
+          if (rawTime) {
+            const d = new Date(rawTime);
+            if (!isNaN(d.getTime())) {
+              timeStr = d.toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+            } else {
+              timeStr = rawTime;
+            }
+          }
           const isZip = file.name.toLowerCase().endsWith('.zip');
           const createdBy = file.created_by || 'admin';
           const canRestore = file.can_restore !== false;
@@ -587,7 +640,11 @@ function loadWebdavBackups() {
           const restoreStyle = canRestore ? '' : 'opacity-0.5';
           const restoreTitle = canRestore ? (isZip ? '输入密码恢复加密备份' : '恢复此版本') : '仅可恢复自己创建的备份';
           const restoreIcon = isZip ? 'unlock' : 'rotate-left';
-          const deleteBtn = canDelete ? `<button type="button" class="btn btn-sm btn-outline-danger ms-1" onclick="deleteBackup('${file.name}')" title="删除"><i class="fa-solid fa-trash"></i></button>` : '';
+          const deleteBtn = canDelete ? `<button type="button" class="btn btn-sm btn-outline-danger ms-1" onclick="deleteBackup('${file.name}')" title="删除"><i class="fa-solid fa-trash"></i></button>` : '<span class="text-muted small" title="仅可操作自己创建的备份"><i class="fa-solid fa-lock"></i></span>';
+          // V7 修复：无删除权限的行不渲染勾选框（仅显示占位），防止普通用户勾选后批量删除他人备份
+          const checkboxCell = canDelete
+            ? `<input type="checkbox" class="backup-checkbox" value="${file.name}" onchange="updateBatchDeleteBtn()">`
+            : '<i class="fa-solid fa-minus text-muted opacity-50"></i>';
           const restoreBtn = isZip
             ? `<button type="button" class="btn btn-sm btn-outline-warning" ${restoreDisabled} title="${restoreTitle}" style="${restoreStyle}" onclick="restoreEncryptedBackup('${file.name}')"><i class="fa-solid fa-${restoreIcon} me-1"></i>恢复</button>`
             : `<form action="/admin/backup/restore" method="POST" class="d-inline" onsubmit="return confirm('警告：恢复备份将覆盖当前数据库，确定继续吗？');" style="${restoreStyle}">
@@ -596,9 +653,9 @@ function loadWebdavBackups() {
                 <button type="submit" class="btn btn-sm btn-outline-danger" ${restoreDisabled} title="${restoreTitle}"><i class="fa-solid fa-${restoreIcon} me-1"></i>恢复</button>
               </form>`;
           rowsHtml += `<tr>
-            <td><input type="checkbox" class="backup-checkbox" value="${file.name}" onchange="updateBatchDeleteBtn()"></td>
+            <td>${checkboxCell}</td>
             <td class="ps-1 fw-bold"><i class="fa-solid fa-${isZip ? 'lock' : 'database'} text-${isZip ? 'warning' : 'secondary'} me-2"></i>${file.name}</td>
-            <td>${sizeStr}</td>
+            <td class="text-end pe-3">${sizeStr}</td>
             <td><small class="text-muted">${timeStr}</small></td>
             <td><span class="badge bg-info-subtle text-info">${createdBy}</span></td>
             <td class="text-end pe-4">

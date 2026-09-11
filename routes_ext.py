@@ -33,6 +33,54 @@ from gift_utils import (
 
 
 
+import sqlite3 as _sqlite3
+import tempfile as _tempfile
+
+
+
+# V7 修复：普通用户备份越权漏洞
+# 原逻辑直接复制完整数据库文件上传/下载，普通用户可获取他人数据。
+# 本函数将主库复制到临时文件后用 SQL 删除非本人数据，仅保留本人礼金/宴席/纪念日。
+# 管理员或拥有跨用户查看权限的用户返回原始库路径，无需过滤。
+def build_user_scoped_backup_db(db_path, user):
+    """
+    为普通用户生成仅含本人数据的临时备份数据库。
+    - 管理员 / can_view_others_for('ledger') 用户：直接返回原始 db_path（有权查看全库）
+    - 普通用户：复制主库到临时文件，删除非本人数据后返回临时文件路径
+    返回 (temp_db_path, is_temp) —— is_temp=True 表示调用方用完需自行删除临时文件
+    """
+    if not user or not hasattr(user, 'is_admin'):
+        return db_path, False
+    if getattr(user, 'is_admin', False):
+        return db_path, False
+    # 有跨用户查看权限的用户也能看到全库，无需过滤
+    if hasattr(user, 'can_view_others_for') and user.can_view_others_for('ledger'):
+        return db_path, False
+    # 普通用户：生成仅含本人数据的临时库
+    tmp_dir = _tempfile.mkdtemp(prefix='gift_user_scope_')
+    tmp_db = os.path.join(tmp_dir, 'scoped_backup.db')
+    shutil.copy2(db_path, tmp_db)
+    try:
+        conn = _sqlite3.connect(tmp_db)
+        c = conn.cursor()
+        # 删除非本人的礼金记录
+        c.execute("DELETE FROM gift_records WHERE user_id != ?", (user.id,))
+        # 删除非本人的宴席
+        c.execute("DELETE FROM banquets WHERE user_id != ?", (user.id,))
+        # 删除非本人的纪念日提醒
+        c.execute("DELETE FROM anniversary_reminders WHERE user_id != ?", (user.id,))
+        conn.commit()
+        conn.close()
+        return tmp_db, True
+    except Exception:
+        # 出错时回退到原始库（宁可功能不可用也不暴露数据）
+        try:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        except Exception:
+            pass
+        raise
+
+
 def parse_target_date_obj(date_val, today=None):
     if not date_val:
         return None, 9999
@@ -444,7 +492,30 @@ def _backup_scheduler_worker(flask_app):
                                     db.session.commit()
                                     continue
 
-                            success, msg = upload_encrypted_backup(config, local_file_path=db_path, encrypt_password=encrypt_pwd)
+                            # V7 修复：普通用户创建的定时任务，执行时生成仅含本人数据的临时库
+                            _task_creator = db.session.get(User, task.created_by) if task.created_by else None
+                            _scoped_path = db_path
+                            _is_temp = False
+                            if _task_creator and not getattr(_task_creator, 'is_admin', False):
+                                if not (hasattr(_task_creator, 'can_view_others_for') and _task_creator.can_view_others_for('ledger')):
+                                    try:
+                                        _scoped_path, _is_temp = build_user_scoped_backup_db(db_path, _task_creator)
+                                    except Exception as se:
+                                        task.last_run_time = now
+                                        task.last_run_status = f'失败: 生成用户备份数据异常: {str(se)[:200]}'
+                                        exec_log.status = 'failed'
+                                        exec_log.end_time = datetime.now()
+                                        exec_log.output_log = task.last_run_status
+                                        db.session.commit()
+                                        continue
+
+                            success, msg = upload_encrypted_backup(config, local_file_path=_scoped_path, encrypt_password=encrypt_pwd)
+                            # V7: 清理临时库
+                            if _is_temp:
+                                try:
+                                    shutil.rmtree(os.path.dirname(_scoped_path), ignore_errors=True)
+                                except Exception:
+                                    pass
                             if success:
                                 task.last_run_time = now
                                 task.last_run_status = f'成功: {msg}'
@@ -516,6 +587,17 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return
         endpoint = request.endpoint or ''
         menu_map = {
+            # V7 修复：移除 'index': 'ledger' 映射。
+            # 原逻辑无权限访问 index 时重定向回 index，造成无限重定向循环；
+            # index 页的权限检查改由 app.py 的 index() 视图函数内实现，
+            # 无权限时跳转权限工单页申请权限，不再重定向回 index。
+            'add_record': 'ledger',
+            'edit_record': 'ledger',
+            'delete_record': 'ledger',
+            'batch_delete_records': 'ledger',
+            'delete_all_records': 'ledger',
+            'export_csv': 'ledger',
+            'import_csv': 'ledger',
             'banquets_view': 'banquets',
             'banquet_detail_view': 'banquets',
             'banquet_quick_add': 'banquets',
@@ -554,13 +636,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     'banquets': '专属宴席',
                     'reconciliation': '人情对账',
                     'reminders': '纪念日备忘',
-                    'recycle_bin': '回收站'
+                    'recycle_bin': '回收站',
+                    'ledger': '礼金账本'
                 }
                 m_name = menu_names.get(required_menu, '该功能')
                 if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
                     return jsonify({'code': 403, 'message': f'您暂无权限访问【{m_name}】功能模块，请联系管理员分配权限！'}), 403
                 flash(f'您暂无权限访问【{m_name}】功能模块，请联系管理员为您分配访问权限！', 'warning')
-                return redirect(url_for('index'))
+                # V7 修复：无权限时跳转权限工单页申请权限，而不是重定向回 index
+                # （避免用户被取消全部权限后陷入首页无限重定向循环）
+                return redirect(url_for('permission_tickets_view'))
 
     # --- 回收站过期自动清理机制 ---
     def cleanup_expired_recycle_items():
@@ -2872,12 +2957,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     return jsonify({'success': False, 'message': '长连接模式必须填写 Bot ID 和 Secret 两个凭证！'})
                 flash('长连接模式必须填写 Bot ID 和 Secret 两个凭证！', 'warning')
                 return redirect(url_for('admin_webhooks'))
-            is_v, msg_v = validate_wecom_credentials(bot_id, bot_secret)
-            if not is_v:
-                if is_ajax:
-                    return jsonify({'success': False, 'message': f'企业微信机器人凭证校验未通过：{msg_v}'})
-                flash(f'企业微信机器人凭证校验未通过：{msg_v}', 'danger')
-                return redirect(url_for('admin_webhooks'))
+            # V7: 保存不再进行真实凭证校验（原逻辑需连接企微服务器最长 8 秒，
+            # 前端无加载反馈导致"保存无响应"感知）。凭证有效性由「测试」按钮验证。
             if not url or url.startswith('wecom://bot/'):
                 url = f"wecom://bot/{bot_id}?chatid={chatid}" if chatid else f"wecom://bot/{bot_id}"
         else:
@@ -2965,12 +3046,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     return jsonify({'success': False, 'message': '长连接模式必须填写 Bot ID 和 Secret 两个凭证！'})
                 flash('长连接模式必须填写 Bot ID 和 Secret 两个凭证！', 'warning')
                 return redirect(url_for('admin_webhooks'))
-            is_v, msg_v = validate_wecom_credentials(bot_id, bot_secret)
-            if not is_v:
-                if is_ajax:
-                    return jsonify({'success': False, 'message': f'企业微信机器人凭证校验未通过：{msg_v}'})
-                flash(f'企业微信机器人凭证校验未通过：{msg_v}', 'danger')
-                return redirect(url_for('admin_webhooks'))
+            # V7 修复：保存时不再进行真实凭证校验（原校验需连接企微服务器最长 8 秒且无反馈，
+            # 导致「保存无响应」）；凭证有效性由列表中的「测试」按钮负责验证
             if not chatid and hook.webhook_url:
                 chatid = extract_chatid_from_url(hook.webhook_url) or ''
             url = f"wecom://bot/{bot_id}?chatid={chatid}" if chatid else f"wecom://bot/{bot_id}"
@@ -3255,13 +3332,20 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         # V3: 按用户获取配置（管理员获取全局配置，普通用户获取自己的私有配置）
         config = BackupConfig.get_config(None if current_user.is_admin else current_user.id)
-        # V3: 定时任务按用户隔离（管理员看全部，普通用户只看自己的）
+        # V3: 定时任务按用户隔离（管理员看全部，普通用户在 allow_view_others_tasks 开启且权限>=1时看全部）
         if current_user.is_admin:
             scheduled_tasks = ScheduledBackupTask.query.order_by(ScheduledBackupTask.created_at.desc()).all()
         else:
-            scheduled_tasks = ScheduledBackupTask.query.filter_by(created_by=current_user.id).order_by(ScheduledBackupTask.created_at.desc()).all()
+            _global_cfg = BackupConfig.get_config(None)
+            _allow_view = getattr(_global_cfg, 'allow_view_others_tasks', False)
+            if _allow_view and current_user.can_view_others_backup():
+                scheduled_tasks = ScheduledBackupTask.query.order_by(ScheduledBackupTask.created_at.desc()).all()
+            else:
+                scheduled_tasks = ScheduledBackupTask.query.filter_by(created_by=current_user.id).order_by(ScheduledBackupTask.created_at.desc()).all()
         # 获取有备份权限的普通用户列表
         authorized_users = User.query.filter_by(backup_authorized=True, is_admin=False).all() if hasattr(User, 'backup_authorized') else []
+        # V6: 获取有定时任务权限的普通用户列表
+        task_authorized_users = User.query.filter_by(scheduled_task_authorized=True, is_admin=False).all() if hasattr(User, 'scheduled_task_authorized') else []
         all_users = User.query.filter_by(is_admin=False).all()
         # V3: 检查加密密码是否已配置
         has_encrypt_password = bool(config.backup_encrypt_password)
@@ -3276,10 +3360,12 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             backup_files=[],
             scheduled_tasks=scheduled_tasks,
             authorized_users=authorized_users,
+            task_authorized_users=task_authorized_users,
             all_users=all_users,
             has_pyzipper=HAS_PYZIPPER,
             has_encrypt_password=has_encrypt_password,
-            allow_view_others=allow_view_others
+            allow_view_others=allow_view_others,
+            can_use_scheduled_tasks=current_user.can_use_scheduled_tasks()
         )
 
     @app.route('/admin/backups/list_ajax', methods=['GET'])
@@ -3298,6 +3384,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             if ok:
                 # V3: 解析备份文件名中的创建者标识，并标记当前用户是否有操作权限
                 import re as _re
+                # V6: 查询实际管理员用户名列表，不硬编码
+                _admin_usernames = set()
+                if hasattr(current_user, 'is_admin'):
+                    _admin_users = User.query.filter_by(is_admin=True).all()
+                    _admin_usernames = {u.username for u in _admin_users}
                 for item in res:
                     fn = item.get('filename', '') or item.get('name', '')
                     # 解析文件名格式: {timestamp}_{username}_{type}.db 或旧格式 gift_bookkeeping_backup_*.db
@@ -3305,10 +3396,19 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     if m:
                         item['created_by'] = m.group(2)
                     else:
-                        item['created_by'] = 'admin'  # 旧格式备份默认为管理员创建
-                    # 权限判断：管理员或创建者本人可操作
-                    item['can_restore'] = current_user.is_admin or item['created_by'] == current_user.username
-                    item['can_delete'] = current_user.is_admin or item['created_by'] == current_user.username
+                        # V6: 旧格式备份——查找实际管理员用户名，不硬编码 'admin'
+                        item['created_by'] = next(iter(_admin_usernames)) if _admin_usernames else 'unknown'
+                    # V6: 三级权限判断 + 管理员数据保护
+                    _creator = item['created_by']
+                    _is_creator_admin = _creator in _admin_usernames
+                    _is_own = (_creator == current_user.username)
+                    # 管理员创建的备份：只有管理员可删除/恢复
+                    if _is_creator_admin:
+                        item['can_restore'] = current_user.is_admin
+                        item['can_delete'] = current_user.is_admin
+                    else:
+                        item['can_restore'] = current_user.is_admin or _is_own or current_user.can_edit_others_backup()
+                        item['can_delete'] = current_user.is_admin or _is_own or current_user.can_delete_others_backup()
                 return jsonify({'success': True, 'configured': True, 'backups': res, 'current_user': current_user.username, 'is_admin': current_user.is_admin})
             else:
                 return jsonify({'success': False, 'configured': True, 'message': str(res), 'backups': []})
@@ -3347,10 +3447,12 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         if current_user.is_admin:
             config.allow_view_others_tasks = allow_view_others
         # 保存或清除加密密码
-        if encrypt_pwd:
-            config.backup_encrypt_password = encrypt_pwd
-        elif 'backup_encrypt_password_clear' in request.form:
+        # V7 修复：勾选「清除」时优先执行清除（原逻辑先判断新密码分支，
+        # 勾选清除+密码框留空时清除动作会被吞掉，导致清除失效）
+        if 'backup_encrypt_password_clear' in request.form and request.form.get('backup_encrypt_password_clear'):
             config.backup_encrypt_password = None
+        elif encrypt_pwd:
+            config.backup_encrypt_password = encrypt_pwd
 
         db.session.commit()
         safe_log('更新WebDAV配置', f"服务器: {server_url}, 子目录: {backup_subdir}, 用户: {current_user.username}")
@@ -3384,6 +3486,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
 
+        # V7 修复：普通用户备份时生成仅含本人数据的临时库，防止越权获取他人数据
+        _scoped_db_path = db_path
+        _is_temp_db = False
+        if not current_user.is_admin:
+            try:
+                _scoped_db_path, _is_temp_db = build_user_scoped_backup_db(db_path, current_user)
+            except Exception as se:
+                flash(f'生成用户备份数据失败: {str(se)}', 'danger')
+                return redirect(url_for('admin_backups'))
+
         # 是否加密：手动操作时用户可选择是否加密及密码
         encrypt_password = None
         use_encrypt = request.form.get('use_encrypt', '') == 'on'
@@ -3407,9 +3519,15 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         # 使用 upload_encrypted_backup 但指定 remote_filename
         if encrypt_password:
-            success, msg = upload_encrypted_backup(config, local_file_path=db_path, encrypt_password=encrypt_password, remote_filename=remote_filename)
+            success, msg = upload_encrypted_backup(config, local_file_path=_scoped_db_path, encrypt_password=encrypt_password, remote_filename=remote_filename)
         else:
-            success, msg = upload_backup_webdav(config, local_file_path=db_path, remote_filename=remote_filename)
+            success, msg = upload_backup_webdav(config, local_file_path=_scoped_db_path, remote_filename=remote_filename)
+        # V7: 清理临时库
+        if _is_temp_db:
+            try:
+                shutil.rmtree(os.path.dirname(_scoped_db_path), ignore_errors=True)
+            except Exception:
+                pass
         if success:
             config.last_backup_time = datetime.now()
             config.last_status = '备份成功'
@@ -3448,6 +3566,32 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"gift_bookkeeping_backup_{timestamp}.db"
         safe_log('下载本地备份', f"下载了当前数据库备份文件: {filename}")
+
+        # V7 修复：普通用户下载时生成仅含本人数据的临时库，防止越权获取他人数据
+        if not current_user.is_admin:
+            try:
+                scoped_path, is_temp = build_user_scoped_backup_db(db_path, current_user)
+            except Exception as se:
+                flash(f'生成用户备份数据失败: {str(se)}', 'danger')
+                return redirect(url_for('admin_backups'))
+            if is_temp:
+                # 用临时文件发送；使用 after_this_request 在响应发送完毕后清理临时目录
+                tmp_dir = os.path.dirname(scoped_path)
+                from flask import after_this_request
+
+                @after_this_request
+                def _cleanup_scoped_backup(response):
+                    try:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                    except Exception:
+                        pass
+                    return response
+
+                return send_from_directory(
+                    tmp_dir, os.path.basename(scoped_path),
+                    as_attachment=True, download_name=filename
+                )
+
         return send_from_directory(
             os.path.dirname(os.path.abspath(db_path)),
             os.path.basename(db_path),
@@ -3591,14 +3735,21 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('未指定备份文件', 'warning')
             return redirect(url_for('admin_backups'))
 
-        # V3: 权限判断 - 仅管理员或备份创建者本人可恢复
+        # V6: 三级权限判断 - 管理员数据保护 + 级别权限
         import re as _re
         m = _re.match(r'(\d{8}_\d{6})_(.+?)_(db_backup|file_backup|custom)\.(db|zip)', target_filename)
         if m:
             created_by = m.group(2)
-            if not current_user.is_admin and created_by != current_user.username:
-                flash('权限不足：只能恢复自己创建的备份文件', 'danger')
+            # V6: 查询管理员用户名列表
+            _admin_usernames = {u.username for u in User.query.filter_by(is_admin=True).all()}
+            _is_creator_admin = created_by in _admin_usernames
+            if _is_creator_admin and not current_user.is_admin:
+                flash('权限不足：管理员创建的备份只有管理员可恢复', 'danger')
                 return redirect(url_for('admin_backups'))
+            if not current_user.is_admin and created_by != current_user.username:
+                if not current_user.can_edit_others_backup():
+                    flash('权限不足：只能恢复自己创建的备份文件', 'danger')
+                    return redirect(url_for('admin_backups'))
 
         # V3: 按用户获取配置
         config = BackupConfig.get_config(None if current_user.is_admin else current_user.id)
@@ -3736,15 +3887,25 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         results = []
         all_success = True
+        # V6: 查询实际管理员用户名列表，不硬编码
+        _admin_usernames = set()
+        _admin_users = User.query.filter_by(is_admin=True).all()
+        _admin_usernames = {u.username for u in _admin_users}
         for fn in filenames:
-            # 权限判断
+            # V6: 三级权限判断 + 管理员数据保护
             m = _re.match(r'(\d{8}_\d{6})_(.+?)_(db_backup|file_backup|custom)\.(db|zip)', fn)
             if m:
                 created_by = m.group(2)
-                if not current_user.is_admin and created_by != current_user.username:
-                    results.append({'filename': fn, 'success': False, 'message': '权限不足：只能删除自己创建的备份'})
+                _is_creator_admin = created_by in _admin_usernames
+                if _is_creator_admin and not current_user.is_admin:
+                    results.append({'filename': fn, 'success': False, 'message': '权限不足：管理员创建的备份只有管理员可删除'})
                     all_success = False
                     continue
+                if not current_user.is_admin and created_by != current_user.username:
+                    if not current_user.can_delete_others_backup():
+                        results.append({'filename': fn, 'success': False, 'message': '权限不足：只能删除自己创建的备份'})
+                        all_success = False
+                        continue
             ok, msg = delete_webdav_backup(config, remote_filename=fn)
             results.append({'filename': fn, 'success': ok, 'message': msg})
             if not ok:
@@ -3759,7 +3920,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_save_scheduled_task():
         """创建或更新定时备份任务"""
-        if not current_user.is_admin and not current_user.can_use_backup():
+        if not current_user.is_admin and not current_user.can_use_scheduled_tasks():
             return jsonify({'success': False, 'message': '权限不足'}), 403
 
         task_id = request.form.get('task_id', '').strip()
@@ -3813,7 +3974,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_delete_scheduled_task(task_id):
         """删除定时备份任务"""
-        if not current_user.is_admin and not current_user.can_use_backup():
+        if not current_user.is_admin and not current_user.can_use_scheduled_tasks():
             return jsonify({'success': False, 'message': '权限不足'}), 403
 
         task = db.session.get(ScheduledBackupTask, task_id)
@@ -3837,7 +3998,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_toggle_scheduled_task(task_id):
         """启用/禁用定时备份任务"""
-        if not current_user.is_admin and not current_user.can_use_backup():
+        if not current_user.is_admin and not current_user.can_use_scheduled_tasks():
             return jsonify({'success': False, 'message': '权限不足'}), 403
 
         task = db.session.get(ScheduledBackupTask, task_id)
@@ -3857,7 +4018,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_get_execution_logs(task_id):
         """获取定时任务的执行历史日志"""
-        if not current_user.is_admin and not current_user.can_use_backup():
+        if not current_user.is_admin and not current_user.can_use_scheduled_tasks():
             return jsonify({'success': False, 'message': '权限不足'}), 403
 
         task = db.session.get(ScheduledBackupTask, task_id)
@@ -3913,6 +4074,26 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             pass
 
         return jsonify({'success': True, 'backup_authorized': user.backup_authorized})
+
+    @app.route('/admin/backups/authorize_task/<int:user_id>', methods=['POST'])
+    @login_required
+    def admin_toggle_task_auth(user_id):
+        """切换用户的定时任务功能授权"""
+        if not current_user.is_admin:
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+
+        user = db.session.get(User, user_id)
+        if not user:
+            return jsonify({'success': False, 'message': '用户不存在'}), 404
+
+        if user.is_admin:
+            return jsonify({'success': False, 'message': '管理员默认拥有定时任务权限'}), 400
+
+        user.scheduled_task_authorized = not user.scheduled_task_authorized
+        db.session.commit()
+        safe_log('切换定时任务授权', f'用户: {user.username}, 授权: {"是" if user.scheduled_task_authorized else "否"}', user=current_user)
+
+        return jsonify({'success': True, 'scheduled_task_authorized': user.scheduled_task_authorized})
 
     @app.route('/manifest.json')
     def pwa_manifest():

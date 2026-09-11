@@ -671,6 +671,7 @@ def init_database():
             "ALTER TABLE webhook_configs ADD COLUMN message_templates TEXT DEFAULT '{}'",
             # --- 备份加密与授权字段 ---
             "ALTER TABLE users ADD COLUMN backup_authorized BOOLEAN DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN scheduled_task_authorized BOOLEAN DEFAULT 0",
             "ALTER TABLE backup_configs ADD COLUMN backup_encrypt_password VARCHAR(512)",
             # --- 新模型建表 ---
             """CREATE TABLE IF NOT EXISTS scheduled_backup_tasks (
@@ -806,6 +807,12 @@ except Exception as _e:
 @app.route('/')
 @login_required
 def index():
+    # V7 修复：无礼金账本权限的用户直接访问首页（/）时，
+    # 跳转权限工单页引导申请权限，避免在无权限状态下渲染账本页面
+    if not getattr(current_user, 'is_admin', False) and hasattr(current_user, 'can_access_menu'):
+        if not current_user.can_access_menu('ledger'):
+            flash('您暂无权限访问【礼金账本】功能模块，请在下方提交权限申请工单，待管理员审批通过后即可使用。', 'warning')
+            return redirect(url_for('permission_tickets_view'))
     query_str = request.args.get('search', '').strip() or request.args.get('q', '').strip()
     reason_filter = request.args.get('reason', '').strip()
     sort_by = request.args.get('sort', 'created_at_desc').strip()
@@ -2063,11 +2070,9 @@ def admin_batch_user_permissions():
         return redirect(url_for('admin_users'))
 
     menus_list = request.form.getlist('allowed_menus') or request.form.getlist('allowed_menus[]')
-    if 'ledger' not in menus_list:
-        menus_list.insert(0, 'ledger')
     allowed_menus_str = ",".join(menus_list)
 
-    ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin']
+    ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
     menu_perms = {}
     for m in ALL_MENUS:
         val = request.form.get(f'menu_perm_{m}')
@@ -2083,6 +2088,10 @@ def admin_batch_user_permissions():
     ai_auth = request.form.get('ai_authorized', '')
     ai_auth_val = (ai_auth == '1' or ai_auth == 'on')
 
+    # V6: 批量定时任务授权
+    task_auth = request.form.get('scheduled_task_authorized', '')
+    task_auth_val = (task_auth == '1' or task_auth == 'on')
+
     count = 0
     for uid_str in user_ids:
         try:
@@ -2097,6 +2106,8 @@ def admin_batch_user_permissions():
                 u.can_delete_others = (ledger_p >= 3)
                 # V3: 批量 AI 授权
                 u.ai_authorized = ai_auth_val
+                # V6: 批量定时任务授权
+                u.scheduled_task_authorized = task_auth_val
                 count += 1
         except Exception:
             continue
@@ -2127,18 +2138,17 @@ def admin_update_user_permissions(user_id):
     if not menus_list:
         menus_raw = request.form.get('allowed_menus', '').strip()
         menus_list = [m.strip() for m in menus_raw.split(',') if m.strip()]
-    if 'ledger' not in menus_list:
-        menus_list.insert(0, 'ledger')
     user.allowed_menus = ",".join(menus_list)
 
     # 2. 各菜单独立数据权限更新
-    ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin']
+    ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
     MENU_NAMES = {
         'ledger': '礼金账本',
         'banquets': '专属宴席',
         'reconciliation': '人情对账',
         'reminders': '纪念日备忘',
-        'recycle_bin': '回收站'
+        'recycle_bin': '回收站',
+        'backups': 'WebDAV备份'
     }
     PERM_LABELS = {
         0: '仅自身',
@@ -2170,6 +2180,10 @@ def admin_update_user_permissions(user_id):
     # 3. 备份功能授权
     backup_auth = request.form.get('backup_authorized', '')
     user.backup_authorized = (backup_auth == '1' or backup_auth == 'on')
+
+    # V6: 定时任务功能授权
+    task_auth = request.form.get('scheduled_task_authorized', '')
+    user.scheduled_task_authorized = (task_auth == '1' or task_auth == 'on')
 
     # V3: AI 助手授权
     ai_auth = request.form.get('ai_authorized', '')

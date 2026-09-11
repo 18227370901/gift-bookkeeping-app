@@ -116,7 +116,9 @@ class User(UserMixin, db.Model):
     ai_authorized = db.Column(db.Boolean, default=False)
     # 备份授权标记（管理员可授权普通用户使用备份功能）
     backup_authorized = db.Column(db.Boolean, default=False)
-    menu_permissions = db.Column(db.Text, default='{}')  # 各菜单独立数据权限配置 JSON (如 {'ledger':0,'banquets':1})
+    # 定时任务授权标记（管理员可授权普通用户使用定时任务功能）
+    scheduled_task_authorized = db.Column(db.Boolean, default=False)
+    menu_permissions = db.Column(db.Text, default='{}')  # 各菜单独立数据权限配置 JSON (如 {'ledger':0,'banquets':1,'backups':0})
     created_at = db.Column(db.DateTime, default=datetime.now)
     
     records = db.relationship('GiftRecord', backref='owner', lazy=True, cascade='all, delete-orphan')
@@ -150,7 +152,7 @@ class User(UserMixin, db.Model):
                 res = json.loads(raw)
             except Exception:
                 res = {}
-        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin']
+        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
         final_perms = {}
         for m in ALL_MENUS:
             val = res.get(m)
@@ -176,7 +178,7 @@ class User(UserMixin, db.Model):
     def set_menu_permissions(self, perms_dict):
         """设置各菜单独立数据权限配置"""
         clean_perms = {}
-        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin']
+        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
         for m in ALL_MENUS:
             val = perms_dict.get(m, 0) if isinstance(perms_dict, dict) else 0
             try:
@@ -350,6 +352,30 @@ class User(UserMixin, db.Model):
         if getattr(self, 'is_admin', False):
             return True
         return bool(getattr(self, 'backup_authorized', False))
+
+    def can_use_scheduled_tasks(self):
+        """检查用户是否有权使用定时任务功能"""
+        if getattr(self, 'is_admin', False):
+            return True
+        return bool(getattr(self, 'scheduled_task_authorized', False))
+
+    def can_view_others_backup(self):
+        """检查用户是否可查看其他用户的备份数据（menu_permissions['backups'] >= 1）"""
+        if getattr(self, 'is_admin', False):
+            return True
+        return self.get_menu_perm('backups') >= 1
+
+    def can_edit_others_backup(self):
+        """检查用户是否可修改/恢复其他用户的备份数据（menu_permissions['backups'] >= 2）"""
+        if getattr(self, 'is_admin', False):
+            return True
+        return self.get_menu_perm('backups') >= 2
+
+    def can_delete_others_backup(self):
+        """检查用户是否可删除其他用户的备份数据（menu_permissions['backups'] >= 3）"""
+        if getattr(self, 'is_admin', False):
+            return True
+        return self.get_menu_perm('backups') >= 3
 
 
 class ChatSession(db.Model):
@@ -894,7 +920,8 @@ class BackupConfig(db.Model):
 
     @classmethod
     def get_config(cls, user_id=None):
-        """获取配置：user_id=None 返回管理员全局配置，否则返回用户私有配置"""
+        """获取配置：user_id=None 返回管理员全局配置，否则返回用户私有配置
+        V7 修复：普通用户首次访问创建空白配置，不再自动复制管理员全局配置（越权风险）"""
         if user_id is None:
             # 管理员全局配置（user_id 为 NULL 的记录）
             cfg = cls.query.filter(cls.user_id.is_(None)).first()
@@ -904,18 +931,10 @@ class BackupConfig(db.Model):
                 db.session.commit()
             return cfg
         else:
-            # 用户私有配置
+            # 用户私有配置（V7: 空白配置，不继承管理员凭证）
             cfg = cls.query.filter(cls.user_id == user_id).first()
             if not cfg:
-                # 复制管理员全局配置作为用户私有副本
-                global_cfg = cls.query.filter(cls.user_id.is_(None)).first()
                 cfg = cls(user_id=user_id)
-                if global_cfg:
-                    cfg.webdav_url = global_cfg.webdav_url
-                    cfg.webdav_username = global_cfg.webdav_username
-                    cfg.webdav_password = global_cfg.webdav_password
-                    cfg.backup_path = global_cfg.backup_path
-                    cfg.backup_subdir = global_cfg.backup_subdir
                 db.session.add(cfg)
                 db.session.commit()
             return cfg

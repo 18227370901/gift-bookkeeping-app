@@ -330,7 +330,7 @@
         <h5 class="modal-title fw-bold"><i class="fa-solid fa-satellite-dish text-primary me-2"></i>添加通知通道</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <form id="newWebhookForm" action="{{ url_for('admin_create_webhook') }}" method="POST">
+      <form id="newWebhookForm" action="{{ url_for('admin_create_webhook') }}" method="POST" novalidate>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="notify_pages" id="newNotifyPagesHidden" value="{}">
         <div class="modal-body p-4">
@@ -338,7 +338,7 @@
           <!-- 渠道名称 -->
           <div class="mb-3">
             <label class="form-label fw-bold">渠道名称 <span class="text-danger">*</span></label>
-            <input type="text" name="name" class="form-control rounded-3" placeholder="例如：企业微信长连接机器人 / 财务钉钉群" required>
+            <input type="text" name="name" id="newName" class="form-control rounded-3" placeholder="例如：企业微信长连接机器人 / 财务钉钉群" required>
           </div>
 
           <!-- 连接方式选择 -->
@@ -504,7 +504,7 @@
         </div>
         <div class="modal-footer border-light">
           <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
-          <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">保存配置</button>
+          <button type="submit" id="newWebhookSubmitBtn" class="btn btn-primary rounded-pill px-4 shadow-sm">保存配置</button>
         </div>
       </form>
     </div>
@@ -519,7 +519,7 @@
         <h5 class="modal-title fw-bold"><i class="fa-solid fa-pen-to-square text-primary me-2"></i>编辑通知通道</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <form id="editWebhookForm" action="" method="POST">
+      <form id="editWebhookForm" action="" method="POST" novalidate>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="notify_pages" id="editNotifyPagesHidden" value="{}">
         <div class="modal-body p-4">
@@ -688,7 +688,7 @@
         </div>
         <div class="modal-footer border-light">
           <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
-          <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">保存修改</button>
+          <button type="submit" id="editWebhookSubmitBtn" class="btn btn-primary rounded-pill px-4 shadow-sm">保存修改</button>
         </div>
       </form>
     </div>
@@ -765,37 +765,52 @@ function assembleNotifyPages(prefix) {
   return JSON.stringify(pagesObj);
 }
 
-// 初始化新增模态框字段状态
-document.addEventListener('DOMContentLoaded', function() {
-  toggleConnTypeFields('new');
-  onLogFilterChange();
-
-
-  // 提交前组装 notify_pages JSON - V3: 改为 AJAX 提交
-  const newForm = document.getElementById('newWebhookForm');
-  if (newForm) {
-    newForm.addEventListener('submit', function(e) {
-      e.preventDefault();
-      document.getElementById('newNotifyPagesHidden').value = assembleNotifyPages('new');
-      submitWebhookFormAjax(newForm, 'newWebhookModal', 'newWebhookError');
-    });
+// V7: 在 Modal 顶部显示错误提示横幅（替代浏览器原生气泡）
+function showWebhookFormError(errorDivId, message) {
+  const errorDiv = document.getElementById(errorDivId);
+  const html = `<div class="alert alert-danger alert-dismissible rounded-3 py-2 mb-0"><i class="fa-solid fa-circle-exclamation me-1"></i>${message}<button type="button" class="btn-close ms-2" onclick="this.parentElement.remove()"></button></div>`;
+  if (errorDiv) {
+    errorDiv.innerHTML = html;
+    errorDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } else {
+    alert(message);
   }
-  const editForm = document.getElementById('editWebhookForm');
-  if (editForm) {
-    editForm.addEventListener('submit', function(e) {
-      e.preventDefault();
-      document.getElementById('editNotifyPagesHidden').value = assembleNotifyPages('edit');
-      submitWebhookFormAjax(editForm, 'editWebhookModal', 'editWebhookError');
-    });
-  }
+}
 
-  // 编辑模态框填充
-  document.querySelectorAll('.btn-edit-webhook').forEach(btn => {
+// V7: 保存前显式必填校验（保存只保存、不校验凭证真实性，但必填项必须齐全）
+function validateWebhookForm(form, prefix) {
+  const missing = [];
+  const nameInput = form.querySelector('input[name="name"]');
+  if (!nameInput || !nameInput.value.trim()) missing.push('渠道名称');
+
+  const isLong = document.getElementById(prefix === 'new' ? 'connTypeLong' : 'editConnTypeLong').checked;
+  if (isLong) {
+    const botId = document.getElementById(prefix === 'new' ? 'newBotId' : 'editBotId');
+    const botSecret = document.getElementById(prefix === 'new' ? 'newBotSecret' : 'editBotSecret');
+    if (!botId || !botId.value.trim()) missing.push('Bot ID');
+    if (!botSecret || !botSecret.value.trim()) missing.push('Secret 凭证');
+  } else {
+    const urlInput = document.getElementById(prefix === 'new' ? 'newWebhookUrl' : 'editWebhookUrl');
+    if (!urlInput || !urlInput.value.trim()) missing.push('目标 URL');
+  }
+  return missing;
+}
 
 // V3: AJAX 提交 Webhook 表单，校验失败时在 Modal 内就地显示错误
-function submitWebhookFormAjax(form, modalId, errorDivId) {
+// V7 新增：
+//  - 保存按钮 loading 状态（禁用+转圈）防重复提交；
+//  - 保存成功后提示用户用「测试」按钮验证凭证（保存不再校验凭证）
+function submitWebhookFormAjax(form, modalId, errorDivId, submitBtn, successTip) {
   const errorDiv = document.getElementById(errorDivId);
   if (errorDiv) errorDiv.innerHTML = '';
+
+  // V7: 按钮置为 loading，防止重复提交
+  let origBtnHtml = null;
+  if (submitBtn) {
+    origBtnHtml = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>正在保存...';
+  }
 
   const formData = new FormData(form);
   fetch(form.action, {
@@ -811,25 +826,115 @@ function submitWebhookFormAjax(form, modalId, errorDivId) {
         const bsModal = bootstrap.Modal.getInstance(modalEl);
         if (bsModal) bsModal.hide();
       }
-      alert(data.message || '操作成功');
+      // V7: 保存只保存、不校验凭证，提示用「测试」按钮验证连通性
+      alert(successTip || data.message || '操作成功');
       location.reload();
     } else {
-      if (errorDiv) {
-        errorDiv.innerHTML = `<div class="alert alert-danger alert-dismissible rounded-3 py-2 mb-0"><i class="fa-solid fa-circle-exclamation me-1"></i>${data.message || '操作失败'}<button type="button" class="btn-close ms-2" onclick="this.parentElement.remove()"></button></div>`;
-      } else {
-        alert(data.message || '操作失败');
-      }
+      showWebhookFormError(errorDivId, data.message || '操作失败');
     }
   })
   .catch(() => {
-    if (errorDiv) {
-      errorDiv.innerHTML = '<div class="alert alert-danger rounded-3 py-2 mb-0"><i class="fa-solid fa-circle-exclamation me-1"></i>网络请求异常</div>';
-    } else {
-      alert('网络请求异常');
+    showWebhookFormError(errorDivId, '网络请求异常，请稍后重试');
+  })
+  .finally(() => {
+    if (submitBtn && origBtnHtml !== null) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = origBtnHtml;
     }
   });
 }
 
+  const formData = new FormData(form);
+  fetch(form.action, {
+    method: 'POST',
+    body: formData,
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  })
+  .then(res => res.json().catch(() => ({ success: false, message: '服务器返回非 JSON 响应' })))
+  .then(data => {
+    if (data.success) {
+      const modalEl = document.getElementById(modalId);
+      if (modalEl) {
+        const bsModal = bootstrap.Modal.getInstance(modalEl);
+        if (bsModal) bsModal.hide();
+      }
+      // V7: 保存操作不再校验凭证，提示用户用「测试」按钮验证连通性
+      alert(successTip || data.message || '操作成功');
+      location.reload();
+    } else {
+      showWebhookFormError(errorDivId, data.message || '操作失败');
+    }
+  })
+  .catch(() => {
+    showWebhookFormError(errorDivId, '网络请求异常，请稍后重试');
+  })
+  .finally(() => {
+    if (submitBtn && origBtnHtml !== null) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = origBtnHtml;
+    }
+  });
+}
+
+// 初始化新增模态框字段状态
+document.addEventListener('DOMContentLoaded', function() {
+  toggleConnTypeFields('new');
+  onLogFilterChange();
+
+
+  // 提交前组装 notify_pages JSON - V3: 改为 AJAX 提交
+  const newForm = document.getElementById('newWebhookForm');
+  if (newForm) {
+    newForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      document.getElementById('newNotifyPagesHidden').value = assembleNotifyPages('new');
+      // V7: 显式必填校验，缺项时在 Modal 顶部明确提示
+      const missing = validateWebhookForm(newForm, 'new');
+      if (missing.length) {
+        showWebhookFormError('newWebhookError', '以下必填项未填写：' + missing.join('、'));
+        return;
+      }
+      submitWebhookFormAjax(newForm, 'newWebhookModal', 'newWebhookError', document.getElementById('newWebhookSubmitBtn'),
+        'Webhook 通道已保存。\n\n保存操作不会校验凭证有效性，请点击列表中的「测试」按钮验证连通性。');
+    });
+  }
+  const editForm = document.getElementById('editWebhookForm');
+  if (editForm) {
+    editForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      document.getElementById('editNotifyPagesHidden').value = assembleNotifyPages('edit');
+      // V7: 显式必填校验，缺项时在 Modal 顶部明确提示
+      const missing = validateWebhookForm(editForm, 'edit');
+      if (missing.length) {
+        showWebhookFormError('editWebhookError', '以下必填项未填写：' + missing.join('、'));
+        return;
+      }
+      submitWebhookFormAjax(editForm, 'editWebhookModal', 'editWebhookError', document.getElementById('editWebhookSubmitBtn'),
+      '修改已保存。\n\n如修改了凭证或地址，请点击列表中的「测试」按钮验证连通性。');
+    });
+  }
+      submitWebhookFormAjax(newForm, 'newWebhookModal', 'newWebhookError', document.getElementById('newWebhookSubmitBtn'),
+        'Webhook 通道已保存。\n\n保存操作不会校验凭证有效性，请点击列表中的「测试」按钮验证连通性。');
+    });
+  }
+  const editForm = document.getElementById('editWebhookForm');
+  if (editForm) {
+    editForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      document.getElementById('editNotifyPagesHidden').value = assembleNotifyPages('edit');
+      // V7: 显式必填校验，缺项时在 Modal 顶部明确提示
+      const missing = validateWebhookForm(editForm, 'edit');
+      if (missing.length) {
+        showWebhookFormError('editWebhookError', '以下必填项未填写：' + missing.join('、'));
+        return;
+      }
+      submitWebhookFormAjax(editForm, 'editWebhookModal', 'editWebhookError', document.getElementById('editWebhookSubmitBtn'),
+        '修改已保存。\n\n如修改了凭证或地址，请点击列表中的「测试」按钮验证连通性。');
+    });
+  }
+
+  // 编辑模态框填充
+  document.querySelectorAll('.btn-edit-webhook').forEach(btn => {
 
     btn.addEventListener('click', function() {
       const data = this.dataset;

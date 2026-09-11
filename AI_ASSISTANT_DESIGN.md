@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'ccf8a2fb-1666-41b0-a602-5895977e9a1d'
-  PropagateID: 'ccf8a2fb-1666-41b0-a602-5895977e9a1d'
-  ReservedCode1: '739bce11-79e0-4e22-ba0d-9f001090a97a'
-  ReservedCode2: '739bce11-79e0-4e22-ba0d-9f001090a97a'
+  ProduceID: '85343445-9fb0-4d4e-b6b4-f26b8770a6d5'
+  PropagateID: '85343445-9fb0-4d4e-b6b4-f26b8770a6d5'
+  ReservedCode1: '6ea76062-95cb-49a1-908e-a5149bcb8999'
+  ReservedCode2: '6ea76062-95cb-49a1-908e-a5149bcb8999'
 ---
 
 # AI 助手模块技术设计方案
@@ -711,5 +711,113 @@ Response: {
 - `app.py` 第 68-71 行：如果 `data/` 目录存在，优先使用 `data/gift_bookkeeping.db`；否则使用根目录的 `gift_bookkeeping.db`
 - V3 开发过程中创建了 `data/` 目录，导致数据库路径切换，曾出现数据丢失问题
 - 已用根目录完整数据库覆盖 `data/gift_bookkeeping.db`，integrity_check=ok，数据完整恢复
+
+> AI生成
+
+---
+
+## 第十一章 V5/V6/V7 修复与优化（2026-09-11）
+
+### 11.1 V5 — Webhook 重复 JS 清理与前端健壮性（第一批）
+
+**问题**：`admin_webhooks.html` 中 `showWebhookFormError` 和 `validateWebhookForm` 两个函数存在重复定义（768-797 行与 799-829 行），导致 JS 引擎使用后者覆盖前者，虽不影响功能但增加维护混乱。
+
+**修复**：
+- 删除 768-797 行的第一组重复定义，保留 799-829 行的第二组（更完整的实现）
+- 清理冗余代码，提高可维护性
+
+### 11.2 V6 — 用户管理与权限体系增强（第一批）
+
+**涉及文件**：`admin_users.html`、`admin_webhooks.html`、`admin_backups.html`、`models.py`、`app.py`、`routes_ext.py`
+
+**主要改进**：
+- 用户管理页面权限配置 Modal 交互优化
+- Webhook 管理页面前端体验改进
+- 备份管理页面布局初步调整
+- 数据模型字段补充与迁移 SQL 追加
+
+### 11.3 V7 — 六项核心问题修复（第二批）
+
+#### 问题 1：Webhook 保存按钮无响应
+
+**根因**：`admin_create_webhook` 和 `admin_edit_webhook` 路由在保存时调用 `validate_wecom_credentials` 进行凭证校验，校验失败导致保存中断，前端表现为点击保存无反应。
+
+**修复**：
+- `routes_ext.py` 中移除 `admin_create_webhook`（~2883 行）和 `admin_edit_webhook`（~2966 行）的 `validate_wecom_credentials` 调用
+- 保存按钮只负责保存配置，凭证校验由独立的"测试连接"按钮承担
+- `admin_webhooks.html` 前端增加 loading 状态 + 显式必填字段校验 + 成功提示
+
+#### 问题 2：加密密码明文回显
+
+**根因**：WebDAV 备份加密密码框在编辑时直接回显已保存的密码明文，存在安全风险。
+
+**修复**：
+- 密码框改为动态 placeholder（"已设置，留空保持不变"），不回显明文
+- 密码框旁增加"已设置/未设置"状态徽章
+- 新增"清除加密密码"checkbox，勾选后无需填写新密码即可清除
+- `routes_ext.py` 的 `admin_save_webdav_config`（~3428 行）改为 clear 优先逻辑：先检查 clear 标志，再处理新密码
+
+#### 问题 3：无菜单权限用户首页循环跳转
+
+**根因**：`routes_ext.py` 的 `menu_map` 中 `'index': 'ledger'` 映射导致无权限用户访问首页 `/` 时被重定向到礼金账本，但礼金账本也需要权限，形成循环跳转。
+
+**修复**：
+- `routes_ext.py` 的 `menu_map`（~518 行）移除 `'index': 'ledger'` 映射
+- `app.py` 的 `index()` 路由（~810 行）增加 `can_access_menu('ledger')` 权限检查，无权限用户看到友好的权限申请引导卡片而非循环跳转
+
+#### 问题 4：普通用户备份越权
+
+**根因**：普通用户执行 WebDAV 备份/下载/定时任务时直接使用全局数据库文件，可能访问到其他用户的数据。
+
+**修复**：
+- `routes_ext.py` 新增 `build_user_scoped_backup_db()` 工具函数（~41-80 行）：创建仅包含当前用户数据的临时 SQLite 数据库
+- `admin_trigger_webdav_backup`（~3482 行）、`admin_download_local_backup`（~3560 行）、`_backup_scheduler_worker`（~495 行）均改为使用临时库进行备份/下载
+- `admin_backups.html` 备份列表 checkbox 增加权限控制：普通用户只能操作自己创建的备份文件
+
+#### 问题 5：WebDAV 配置自动复制导致越权
+
+**根因**：`models.py` 的 `BackupConfig.get_config()`（~922-947 行）在普通用户首次访问时自动复制管理员的 WebDAV 配置（含服务器地址、用户名、密码），导致普通用户可以访问管理员的 WebDAV 存储空间。
+
+**修复**：
+- `get_config()` 移除自动复制逻辑，普通用户首次访问创建空白私有配置
+- 所有调用 `get_config()` 的地方已有空配置保护（检查 `config.server_url` 和 `config.username`），移除自动复制不会导致异常
+- `admin_backups.html` 普通用户 WebDAV 配置区增加提示横幅："请填写您自己的 WebDAV 服务器信息"
+
+#### 问题 6：备份页面布局优化
+
+**改进内容**：
+- **定时任务卡片移至右栏顶部**：从左栏（`col-lg-5`）移到右栏（`col-lg-7`）顶部，与 WebDAV 备份列表同栏，逻辑更紧凑
+- **定时任务表格瘦身**：从 8 列精简为 4 列（任务名称+状态、类型+Cron、上次执行+创建人、操作+历史）
+- **授权按钮文字化**：从纯图标改为"图标+文字"（"授权备份"/"撤销备份"、"授权任务"/"撤销任务"），撤销操作增加 `confirm()` 确认弹窗
+- **授权同步说明**：授权卡片标题下增加"授权状态与「用户管理」页面实时同步，无需重复操作"说明文字
+- **备份时间本地化**：WebDAV 备份列表时间列从 GMT 转为本地时间显示（JS `new Date(rawTime).toLocaleString('zh-CN', ...)`）
+- **Jinja2 模板标签修复**：移动卡片过程中意外破坏了 `admin_backups.html` 的 Jinja 标签结构（`</div></div>{% endif %}` 闭合标签），经两次修复后标签平衡，服务编译无报错
+
+### 11.4 涉及文件（V5/V6/V7 合计）
+
+| 文件 | 改动内容 |
+|------|----------|
+| `routes_ext.py` | 移除 Webhook 校验、clear 优先逻辑、临时库备份、menu_map 修复 |
+| `templates/admin_webhooks.html` | 重复 JS 清理、loading+校验+提示 |
+| `templates/admin_backups.html` | 密码不回显、提示横幅、布局优化、授权按钮文字化、时间本地化 |
+| `templates/admin_users.html` | 用户管理权限配置交互优化 |
+| `app.py` | index() 权限检查 |
+| `models.py` | get_config() 移除自动复制 |
+
+### 11.5 浏览器验证结果（2026-09-11）
+
+| 验证页面 | 验证项 | 结果 |
+|----------|--------|------|
+| `/`（首页） | 管理员正常加载，无循环跳转 | ✅ 通过 |
+| `/admin/backups` | 无 500 错误，模板编译正常 | ✅ 通过 |
+| `/admin/backups` | 定时任务卡片在右栏顶部 | ✅ 通过 |
+| `/admin/backups` | 授权按钮文字化（授权备份/授权任务） | ✅ 通过 |
+| `/admin/backups` | 授权同步说明文字显示 | ✅ 通过 |
+| `/admin/backups` | 定时任务表格 4 列瘦身 | ✅ 通过 |
+| `/admin/backups` | 加密密码区"已设置"标签+清除 checkbox | ✅ 通过 |
+| `/admin/backups` | 备份时间本地化（2026/09/11 10:13） | ✅ 通过 |
+| `/admin/backups` | WebDAV 备份列表 4 条记录正常 | ✅ 通过 |
+| `/permission_tickets` | 3 条工单正常显示（已驳回/已撤销） | ✅ 通过 |
+| 浏览器控制台 | 无 JS 错误 | ✅ 通过 |
 
 > AI生成

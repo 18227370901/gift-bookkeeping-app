@@ -453,10 +453,9 @@
                             <!-- 1. 礼金账本 -->
                             <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
                               <div class="form-check mb-0 d-flex align-items-center">
-                                <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="ledger" id="menu_ledger_{{ u.id }}" checked disabled>
-                                <input type="hidden" name="allowed_menus" value="ledger">
+                                <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="ledger" id="menu_ledger_{{ u.id }}" {% if u.can_access_menu('ledger') %}checked{% endif %}>
                                 <label class="form-check-label fw-semibold small text-dark" for="menu_ledger_{{ u.id }}">
-                                  <i class="fa-solid fa-list text-success me-1"></i>礼金账本 <span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size:0.7rem;">基础</span>
+                                  <i class="fa-solid fa-list text-success me-1"></i>礼金账本
                                 </label>
                               </div>
                               <div style="min-width: 210px;">
@@ -557,6 +556,30 @@
                             <input class="form-check-input" type="checkbox" name="backup_authorized" value="1" id="backup_auth_{{ u.id }}" {% if u.backup_authorized %}checked{% endif %}>
                             <label class="form-check-label small text-muted" for="backup_auth_{{ u.id }}">
                               授权该用户使用 WebDAV 备份与恢复功能
+                            </label>
+                          </div>
+                          <!-- V6: 备份数据权限级别 -->
+                          {% set p_backups = u.get_menu_perm('backups') %}
+                          <div class="mt-2">
+                            <label class="form-label small text-muted mb-1">备份数据跨用户权限级别：</label>
+                            <select class="form-select form-select-sm" name="menu_perm_backups">
+                              <option value="0" {% if p_backups == 0 %}selected{% endif %}>仅管理自身数据</option>
+                              <option value="1" {% if p_backups == 1 %}selected{% endif %}>仅查看他人数据</option>
+                              <option value="2" {% if p_backups == 2 %}selected{% endif %}>查看+修改他人数据</option>
+                              <option value="3" {% if p_backups == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <!-- V6: 定时任务授权 -->
+                        <div class="mb-3">
+                          <label class="form-label fw-bold small text-dark mb-2">
+                            <i class="fa-solid fa-clock text-success me-1"></i>定时任务授权：
+                          </label>
+                          <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="scheduled_task_authorized" value="1" id="task_auth_{{ u.id }}" {% if u.scheduled_task_authorized %}checked{% endif %}>
+                            <label class="form-check-label small text-muted" for="task_auth_{{ u.id }}">
+                              授权该用户使用定时备份任务功能
                             </label>
                           </div>
                         </div>
@@ -1024,10 +1047,9 @@ function copyCredPassword() {
               <!-- 1. 礼金账本 -->
               <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
                 <div class="form-check mb-0 d-flex align-items-center">
-                  <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="ledger" id="batch_menu_ledger" checked disabled>
-                  <input type="hidden" name="allowed_menus" value="ledger">
+                  <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="ledger" id="batch_menu_ledger" checked>
                   <label class="form-check-label fw-semibold small text-dark" for="batch_menu_ledger">
-                    <i class="fa-solid fa-list text-success me-1"></i>礼金账本 <span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size:0.7rem;">基础</span>
+                    <i class="fa-solid fa-list text-success me-1"></i>礼金账本
                   </label>
                 </div>
                 <div style="min-width: 210px;">
@@ -1111,10 +1133,52 @@ function copyCredPassword() {
                   </select>
                 </div>
               </div>
+
+              <!-- 6. WebDAV备份 -->
+              <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
+                <div class="form-check mb-0 d-flex align-items-center">
+                  <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="backups" id="batch_menu_backups">
+                  <label class="form-check-label fw-semibold small text-dark" for="batch_menu_backups">
+                    <i class="fa-solid fa-cloud-arrow-up text-warning me-1"></i>WebDAV备份
+                  </label>
+                </div>
+                <div style="min-width: 210px;">
+                  <select class="form-select form-select-sm" name="menu_perm_backups">
+                    <option value="0" selected>仅管理自身数据</option>
+                    <option value="1">仅查看他人数据</option>
+                    <option value="2">查看+修改他人数据</option>
+                    <option value="3">查看+修改+删除他人数据</option>
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
 
-          <!-- V3: 批量 AI 助手授权 -->
+          <!-- V6: 批量备份功能授权 -->
+          <div class="mb-3">
+            <label class="form-label fw-bold small text-dark mb-2">
+              <i class="fa-solid fa-cloud-arrow-up text-warning me-1"></i>备份功能授权：
+            </label>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="backup_authorized" value="1" id="batch_backup_auth">
+              <label class="form-check-label small text-muted" for="batch_backup_auth">
+                勾选后批量授权选中用户使用 WebDAV 备份与恢复功能
+              </label>
+            </div>
+          </div>
+
+          <!-- V6: 批量定时任务授权 -->
+          <div class="mb-3">
+            <label class="form-label fw-bold small text-dark mb-2">
+              <i class="fa-solid fa-clock text-success me-1"></i>定时任务授权：
+            </label>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="scheduled_task_authorized" value="1" id="batch_task_auth">
+              <label class="form-check-label small text-muted" for="batch_task_auth">
+                勾选后批量授权选中用户使用定时备份任务功能
+              </label>
+            </div>
+          </div>
           <div class="mb-3">
             <label class="form-label fw-bold small text-dark mb-2">
               <i class="fa-solid fa-robot text-info me-1"></i>AI 助手授权：
