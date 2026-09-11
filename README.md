@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '347efb44-810f-4688-94ad-ae7e43f45178'
-  PropagateID: '347efb44-810f-4688-94ad-ae7e43f45178'
-  ReservedCode1: 'acc6d2c0-d1a1-4a7e-a2c5-719b55604c45'
-  ReservedCode2: 'acc6d2c0-d1a1-4a7e-a2c5-719b55604c45'
+  ProduceID: 'b306824b-337f-40c2-9043-6705f5ae1fb0'
+  PropagateID: 'b306824b-337f-40c2-9043-6705f5ae1fb0'
+  ReservedCode1: '0aa6850a-53d4-4b0a-83e0-8c1ca18fbd40'
+  ReservedCode2: '0aa6850a-53d4-4b0a-83e0-8c1ca18fbd40'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -266,30 +266,6 @@ AIGC:
 
 ### V8 修复与优化（2026-09-11）
 
-#### 工单页面增强
-- 新增列表排序功能（按提交时间/更新时间/状态，支持升降序切换）
-- 筛选功能扩展，补充"已撤销"状态筛选
-- 新增分页功能，默认 10 条/页，支持自定义每页条数（5/10/20/50/100）
-- 新增工单删除功能（仅管理员可删除，带二次确认）
-- 页面排版优化：增加"共 N 条 / 当前页"统计信息
-- 修复每页条数切换 404 bug（缺少 `?` 前缀）
-
-#### Webhook 测试优化
-- 后端测试超时从 12s 缩短至 5s，避免长时间无反应
-- 前端新增 AbortController 10s 超时保护
-- 测试结果改为 toast 提示（成功绿色/失败红色），替代原生 alert
-- 修复 admin_webhooks.html 两处重复 JS 代码块导致的语法错误
-
-#### WebDAV 备份页面增强
-- **加密密码回显**：未勾选"清除加密密码"时回显已保存密码明文，勾选时置空
-- **定时任务按钮置灰**：普通用户对管理员创建的定时任务，编辑/删除/启停按钮 disabled
-- **备份范围隔离（方案 B）**：普通用户备份文件仅含 3 张业务表（gift_records/banquets/anniversary_reminders），DROP 19 张全局敏感表（users/backup_configs/webhook_configs 等），恢复时 init_database() 自动补建
-- **一键引用管理员配置**：普通用户可一键复制管理员的 WebDAV 服务器地址/账号/子目录（密码不返回），支持一键更新获取最新配置
-- **本地备份/附件卡片不隐藏**：普通用户可备份/恢复自己创建的数据和配置，备份文件仅含本人数据
-- **WebDAV 备份列表权限隔离**：普通用户只能操作自己创建的备份文件（admin 的备份恢复按钮 disabled）
-
-### V8 修复与优化（2026-09-11）
-
 #### 权限工单页面增强
 - 新增列表排序功能：支持按"提交时间"等字段升序/降序排序，表头可点击切换
 - 筛选功能扩展：补充"已撤销"状态筛选选项
@@ -349,7 +325,7 @@ gift_bookkeeping_app/
 ├── nginx_ssl.conf              # Nginx 自定义 HTTPS 端口反向代理配置文件
 ├── generate_ssl_certs.py       # 自签名 SSL 证书快速生成脚本
 ├── AI_ASSISTANT_DESIGN.md      # [新增] AI 助手与综合增强功能技术设计文档
-├── Project_Survey.md           # 系统架构设计规范与 35 项架构决策记录 (ADR-01 ~ ADR-35)
+├── Project_Survey.md           # 系统架构设计规范与 38 项架构决策记录 (ADR-01 ~ ADR-38)
 ├── README.md                   # 系统使用说明与运维开发手册
 ├── static/                     # 静态资源目录 (Bootstrap, FontAwesome, Chart.js, 自定义脚本)
 └── templates/                  # Jinja2 HTML 模板目录
