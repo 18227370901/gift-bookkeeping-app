@@ -407,7 +407,7 @@ def test_single_webhook(wh, sender_name="admin"):
             "group": "礼金记账"
         }
 
-    success, code, body = _send_payload(url, payload, headers, timeout=12)
+    success, code, body = _send_payload(url, payload, headers, timeout=5)
     record_webhook_log(wh.user_id, wh.id, "test", payload, code, body, success)
     return success, code, body
 

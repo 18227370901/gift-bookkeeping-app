@@ -844,38 +844,6 @@ function submitWebhookFormAjax(form, modalId, errorDivId, submitBtn, successTip)
   });
 }
 
-  const formData = new FormData(form);
-  fetch(form.action, {
-    method: 'POST',
-    body: formData,
-    headers: { 'X-Requested-With': 'XMLHttpRequest' }
-  })
-  .then(res => res.json().catch(() => ({ success: false, message: '服务器返回非 JSON 响应' })))
-  .then(data => {
-    if (data.success) {
-      const modalEl = document.getElementById(modalId);
-      if (modalEl) {
-        const bsModal = bootstrap.Modal.getInstance(modalEl);
-        if (bsModal) bsModal.hide();
-      }
-      // V7: 保存操作不再校验凭证，提示用户用「测试」按钮验证连通性
-      alert(successTip || data.message || '操作成功');
-      location.reload();
-    } else {
-      showWebhookFormError(errorDivId, data.message || '操作失败');
-    }
-  })
-  .catch(() => {
-    showWebhookFormError(errorDivId, '网络请求异常，请稍后重试');
-  })
-  .finally(() => {
-    if (submitBtn && origBtnHtml !== null) {
-      submitBtn.disabled = false;
-      submitBtn.innerHTML = origBtnHtml;
-    }
-  });
-}
-
 // 初始化新增模态框字段状态
 document.addEventListener('DOMContentLoaded', function() {
   toggleConnTypeFields('new');
@@ -911,25 +879,6 @@ document.addEventListener('DOMContentLoaded', function() {
       }
       submitWebhookFormAjax(editForm, 'editWebhookModal', 'editWebhookError', document.getElementById('editWebhookSubmitBtn'),
       '修改已保存。\n\n如修改了凭证或地址，请点击列表中的「测试」按钮验证连通性。');
-    });
-  }
-      submitWebhookFormAjax(newForm, 'newWebhookModal', 'newWebhookError', document.getElementById('newWebhookSubmitBtn'),
-        'Webhook 通道已保存。\n\n保存操作不会校验凭证有效性，请点击列表中的「测试」按钮验证连通性。');
-    });
-  }
-  const editForm = document.getElementById('editWebhookForm');
-  if (editForm) {
-    editForm.addEventListener('submit', function(e) {
-      e.preventDefault();
-      document.getElementById('editNotifyPagesHidden').value = assembleNotifyPages('edit');
-      // V7: 显式必填校验，缺项时在 Modal 顶部明确提示
-      const missing = validateWebhookForm(editForm, 'edit');
-      if (missing.length) {
-        showWebhookFormError('editWebhookError', '以下必填项未填写：' + missing.join('、'));
-        return;
-      }
-      submitWebhookFormAjax(editForm, 'editWebhookModal', 'editWebhookError', document.getElementById('editWebhookSubmitBtn'),
-        '修改已保存。\n\n如修改了凭证或地址，请点击列表中的「测试」按钮验证连通性。');
     });
   }
 
@@ -1001,37 +950,55 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
-  // 测试 Webhook 发送
+  // 测试 Webhook 发送（V8: 增加超时保护 + toast 提示替换 alert）
   document.querySelectorAll('.btn-test-webhook').forEach(btn => {
     btn.addEventListener('click', function() {
       const id = this.dataset.id;
       const origHtml = this.innerHTML;
-      this.disabled = true;
-      this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>测试中...';
+      const btnEl = this;
+      btnEl.disabled = true;
+      btnEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>测试中...';
+
+      // V8: AbortController 前端超时保护（后端已优化为 5s 超时）
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      // 2 秒内未返回时追加提示，避免"看起来像无反应"
+      let slowTimer = null;
+      slowTimer = setTimeout(() => {
+        showToast('正在等待目标服务器响应，请稍候...', 'info');
+      }, 2000);
 
       fetch('/admin/webhook/test/' + id, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-CSRFToken': '{{ csrf_token }}'
-        }
+        },
+        signal: controller.signal
       })
       .then(res => res.json())
       .then(data => {
         if (data.success && (data.code === 200 || data.status_code === 200)) {
-          alert('【测试成功】\n' + (data.message || 'Webhook / 机器人通道测试响应正常！'));
+          showToast('【测试成功】' + (data.message || 'Webhook / 机器人通道测试响应正常！') + '（状态码 ' + (data.status_code || data.code || 200) + '）', 'success');
           // 局部刷新推送日志表格
           window.location.reload();
         } else {
-          alert('【测试失败】\n' + (data.message || '连接失败，请检查企业微信机器人凭证或目标地址'));
+          showToast('【测试失败】' + (data.message || '连接失败，请检查企业微信机器人凭证或目标地址') + '（状态码 ' + (data.status_code || data.code || '?') + '）', 'danger');
         }
       })
       .catch(err => {
-        alert('请求异常: ' + err);
+        if (err && err.name === 'AbortError') {
+          showToast('测试超时：目标服务器响应超过 10 秒未返回，请检查 Webhook 地址与网络后重试', 'danger');
+        } else {
+          showToast('请求异常: ' + err, 'danger');
+        }
       })
       .finally(() => {
-        this.disabled = false;
-        this.innerHTML = origHtml;
+        clearTimeout(timeoutId);
+        if (slowTimer) clearTimeout(slowTimer);
+        btnEl.disabled = false;
+        btnEl.innerHTML = origHtml;
       });
     });
   });
@@ -1306,6 +1273,33 @@ function submitClearAllLogs() {
     }
   })
   .catch(err => alert('网络异常: ' + err));
+}
+
+// V8: 通用 toast 提示容器 + 函数（全局可用，替换原生 alert 提升反馈体验）
+function ensureToastContainer() {
+  let container = document.getElementById('toastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+    container.style.zIndex = '1080';
+    document.body.appendChild(container);
+  }
+  return container;
+}
+
+function showToast(message, type) {
+  const cls = type === 'success' ? 'text-bg-success' : (type === 'warning' ? 'text-bg-warning' : 'text-bg-danger');
+  const container = ensureToastContainer();
+  const toastEl = document.createElement('div');
+  toastEl.className = 'toast align-items-center border-0 ' + cls;
+  toastEl.setAttribute('role', 'alert');
+  toastEl.innerHTML = '<div class="d-flex"><div class="toast-body">' + message + '</div>' +
+    '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>';
+  container.appendChild(toastEl);
+  const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
+  toast.show();
+  toastEl.addEventListener('hidden.bs.toast', function() { toastEl.remove(); });
 }
 
 </script>

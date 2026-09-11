@@ -42,11 +42,13 @@ import tempfile as _tempfile
 # 原逻辑直接复制完整数据库文件上传/下载，普通用户可获取他人数据。
 # 本函数将主库复制到临时文件后用 SQL 删除非本人数据，仅保留本人礼金/宴席/纪念日。
 # 管理员或拥有跨用户查看权限的用户返回原始库路径，无需过滤。
+# V8 增强：普通用户备份时额外 DROP 所有系统全局表（users、WebDAV 配置、定时任务、
+# Webhook、AI 配置、日志等），仅保留本人业务数据，杜绝全局配置泄露。
 def build_user_scoped_backup_db(db_path, user):
     """
     为普通用户生成仅含本人数据的临时备份数据库。
     - 管理员 / can_view_others_for('ledger') 用户：直接返回原始 db_path（有权查看全库）
-    - 普通用户：复制主库到临时文件，删除非本人数据后返回临时文件路径
+    - 普通用户：复制主库到临时文件，删除非本人数据 + 删除系统全局表后返回临时文件路径
     返回 (temp_db_path, is_temp) —— is_temp=True 表示调用方用完需自行删除临时文件
     """
     if not user or not hasattr(user, 'is_admin'):
@@ -63,12 +65,26 @@ def build_user_scoped_backup_db(db_path, user):
     try:
         conn = _sqlite3.connect(tmp_db)
         c = conn.cursor()
-        # 删除非本人的礼金记录
+        # 1) 用户业务数据按 user_id 过滤：仅保留本人礼金/宴席/纪念日
         c.execute("DELETE FROM gift_records WHERE user_id != ?", (user.id,))
-        # 删除非本人的宴席
         c.execute("DELETE FROM banquets WHERE user_id != ?", (user.id,))
-        # 删除非本人的纪念日提醒
         c.execute("DELETE FROM anniversary_reminders WHERE user_id != ?", (user.id,))
+        conn.commit()
+        # 2) 系统全局敏感表：直接 DROP，杜绝普通用户备份中携带其他用户/全局配置数据
+        #    （含用户表、WebDAV 配置、定时任务、Webhook、AI 会话、操作日志、广播等）
+        _global_tables = [
+            'users', 'backup_configs', 'scheduled_backup_tasks',
+            'scheduled_task_execution_logs', 'webhook_configs', 'webhook_logs',
+            'operation_logs', 'login_risks', 'security_risks', 'system_settings',
+            'registration_tokens', 'broadcasts', 'broadcast_reads',
+            'shared_ledger_links', 'backup_attachments', 'permission_tickets',
+            'chat_sessions', 'chat_messages', 'ai_query_logs',
+        ]
+        for tbl in _global_tables:
+            try:
+                c.execute(f'DROP TABLE IF EXISTS "{tbl}"')
+            except Exception:
+                pass
         conn.commit()
         conn.close()
         return tmp_db, True
@@ -3349,6 +3365,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         all_users = User.query.filter_by(is_admin=False).all()
         # V3: 检查加密密码是否已配置
         has_encrypt_password = bool(config.backup_encrypt_password)
+        # V8: 加密密码明文回显（用户要求：未勾选"清除"时回显已输入密码）
+        config_encrypt_pwd_plain = config.backup_encrypt_password or ''
         # V3: 获取管理员全局配置中的 allow_view_others_tasks
         global_config = BackupConfig.get_config(None)
         allow_view_others = getattr(global_config, 'allow_view_others_tasks', False)
@@ -3364,9 +3382,33 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             all_users=all_users,
             has_pyzipper=HAS_PYZIPPER,
             has_encrypt_password=has_encrypt_password,
+            config_encrypt_pwd_plain=config_encrypt_pwd_plain,
             allow_view_others=allow_view_others,
             can_use_scheduled_tasks=current_user.can_use_scheduled_tasks()
         )
+
+    @app.route('/admin/backups/reference_admin_config', methods=['GET'])
+    @login_required
+    def admin_reference_admin_config():
+        """V8 新增：普通用户一键引用管理员 WebDAV 配置（去敏，不含密码）
+        返回管理员全局配置的服务器地址/账号/子目录；密码字段不返回"""
+        if current_user.is_admin:
+            return jsonify({'success': False, 'message': '管理员无需引用自己的配置'}), 403
+
+        global_config = BackupConfig.get_config(None)
+        data = {
+            'success': True,
+            'webdav_url': global_config.webdav_url or '',
+            'webdav_username': global_config.webdav_username or '',
+            'backup_subdir': global_config.backup_subdir or 'gift_backups',
+            'backup_path': global_config.backup_path or '',
+            'has_password': bool(global_config.webdav_password),
+        }
+        # 管理员完全未配置时提示
+        if not (global_config.webdav_url or global_config.webdav_username):
+            data['success'] = False
+            data['message'] = '管理员尚未配置 WebDAV，请等待管理员配置后重试'
+        return jsonify(data)
 
     @app.route('/admin/backups/list_ajax', methods=['GET'])
     @login_required
@@ -4182,15 +4224,51 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @app.route('/permission_tickets')
     @login_required
     def permission_tickets_view():
-        """工单管理页面：普通用户看自己的工单，管理员看全部工单"""
+        """工单管理页面：普通用户看自己的工单，管理员看全部工单
+        V8 增强：排序（sort/order）、筛选（含 revoked）、分页（page/per_page，默认10条/页）"""
+        # ---- V8 排序参数 ----
+        sort_map = {
+            'created_at': PermissionTicket.created_at,
+            'updated_at': PermissionTicket.updated_at,
+            'status': PermissionTicket.status,
+            'id': PermissionTicket.id,
+        }
+        sort_key = request.args.get('sort', 'created_at').strip()
+        if sort_key not in sort_map:
+            sort_key = 'created_at'
+        order = request.args.get('order', 'desc').strip().lower()
+        if order not in ('asc', 'desc'):
+            order = 'desc'
+        sort_col = sort_map[sort_key]
+
+        # ---- V8 分页参数 ----
+        try:
+            page = max(1, int(request.args.get('page', 1)))
+        except (TypeError, ValueError):
+            page = 1
+        try:
+            per_page = int(request.args.get('per_page', 10))
+            if per_page not in (5, 10, 20, 50, 100):
+                per_page = 10
+        except (TypeError, ValueError):
+            per_page = 10
+
+        query = PermissionTicket.query
         if current_user.is_admin:
             status_filter = request.args.get('status', '').strip()
-            query = PermissionTicket.query
             if status_filter in ('pending', 'approved', 'rejected', 'revoked'):
                 query = query.filter(PermissionTicket.status == status_filter)
-            tickets = query.order_by(PermissionTicket.created_at.desc()).all()
         else:
-            tickets = PermissionTicket.query.filter_by(user_id=current_user.id).order_by(PermissionTicket.created_at.desc()).all()
+            query = query.filter(PermissionTicket.user_id == current_user.id)
+
+        # 排序 + 分页
+        if order == 'asc':
+            query = query.order_by(sort_col.asc())
+        else:
+            query = query.order_by(sort_col.desc())
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        tickets = pagination.items
+
         # 收集当前用户已申请(pending)和已拥有的菜单，用于前端禁用重复勾选
         already_requested = set()
         if not current_user.is_admin:
@@ -4201,7 +4279,17 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             # 已拥有的菜单权限也要标记
             if current_user.allowed_menus:
                 already_requested.update(current_user.allowed_menus.split(','))
-        return render_template('permission_tickets.html', tickets=tickets, menu_options=TICKET_MENU_OPTIONS, already_requested=already_requested)
+        return render_template(
+            'permission_tickets.html',
+            tickets=tickets,
+            menu_options=TICKET_MENU_OPTIONS,
+            already_requested=already_requested,
+            pagination=pagination,
+            sort_key=sort_key,
+            order=order,
+            per_page=per_page,
+            status_filter=request.args.get('status', '') if current_user.is_admin else ''
+        )
 
     @app.route('/permission_tickets/create', methods=['POST'])
     @login_required
@@ -4416,6 +4504,40 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             pass
 
         flash(f'工单#{ticket_id} 已撤销，用户权限已更新。', 'warning')
+        return redirect(url_for('permission_tickets_view'))
+
+    @app.route('/permission_tickets/<int:ticket_id>/delete', methods=['POST'])
+    @login_required
+    def permission_ticket_delete(ticket_id):
+        """V8 新增：管理员删除工单（普通用户无权限）"""
+        if not current_user.is_admin:
+            flash('无权限执行此操作。', 'danger')
+            return redirect(url_for('index'))
+
+        ticket = db.session.get(PermissionTicket, ticket_id)
+        if not ticket:
+            flash('工单不存在。', 'danger')
+            return redirect(url_for('permission_tickets_view'))
+
+        applicant = ticket.user.username if ticket.user else '已删除用户'
+        ticket_id_val = ticket.id
+        db.session.delete(ticket)
+        db.session.commit()
+
+        safe_log('删除权限工单', f'工单#{ticket_id_val}，申请人: {applicant}', user=current_user)
+
+        try:
+            trigger_webhook_event(
+                'status_change',
+                f'管理员 {current_user.username} 删除了工单#{ticket_id_val}（申请人: {applicant}）',
+                page_key='permission_tickets',
+                user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
+
+        flash(f'工单#{ticket_id_val} 已删除。', 'info')
         return redirect(url_for('permission_tickets_view'))
 
     # 启动企业微信智能机器人长连接后台监听守护线程与亲友纪念日自动提醒后台调度器

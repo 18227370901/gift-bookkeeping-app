@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '85343445-9fb0-4d4e-b6b4-f26b8770a6d5'
-  PropagateID: '85343445-9fb0-4d4e-b6b4-f26b8770a6d5'
-  ReservedCode1: '6ea76062-95cb-49a1-908e-a5149bcb8999'
-  ReservedCode2: '6ea76062-95cb-49a1-908e-a5149bcb8999'
+  ProduceID: '8d3fb7bb-03a8-4adb-985d-17f82cf324a9'
+  PropagateID: '8d3fb7bb-03a8-4adb-985d-17f82cf324a9'
+  ReservedCode1: 'f3065f7e-778c-497b-a1ad-f588192d91f0'
+  ReservedCode2: 'f3065f7e-778c-497b-a1ad-f588192d91f0'
 ---
 
 # AI 助手模块技术设计方案
@@ -819,5 +819,146 @@ Response: {
 | `/admin/backups` | WebDAV 备份列表 4 条记录正常 | ✅ 通过 |
 | `/permission_tickets` | 3 条工单正常显示（已驳回/已撤销） | ✅ 通过 |
 | 浏览器控制台 | 无 JS 错误 | ✅ 通过 |
+
+---
+
+## 第十二章 V8 修复与优化（2026-09-11）
+
+### 12.1 需求总览
+
+V8 批次共 12 项需求，覆盖三大模块：
+
+| 编号 | 模块 | 类型 | 需求 |
+|------|------|------|------|
+| 1 | 工单页面 | 新增 | 列表排序功能 |
+| 2 | 工单页面 | 新增 | 筛选功能扩展（补充"已撤销"状态） |
+| 3 | 工单页面 | 新增 | 仅管理员可删除工单 |
+| 4 | 工单页面 | 新增 | 分页，默认 10 条/页，可自定义每页条数 |
+| 5 | 工单页面 | 优化 | 页面排版布局优化 |
+| 6 | webhook 页面 | 修复 | 测试按钮无反应（超时过长） |
+| 7 | webhook 页面 | 优化 | 测试过程 loading + 结果 toast 提示 |
+| 8 | webdav 页面 | 修复 | 加密密码回显逻辑（未勾清除时保留） |
+| 9 | webdav 页面 | 修复 | 普通用户不可编辑/删除管理员定时任务 → 按钮置灰 |
+| 10 | webdav 页面 | 修复 | 手动备份只备份当前用户有权限数据（DROP 全局表） |
+| 11 | webdav 页面 | 新增 | 一键引用管理员配置（去敏 + 一键更新） |
+| 12 | webdav 页面 | 权限 | 本地备份卡片不隐藏，普通用户可备份/恢复自己的数据 |
+
+### 12.2 工单页面（需求 1-5）
+
+#### 后端改动（`routes_ext.py` `permission_tickets_view`）
+
+- **排序**：新增 URL 参数 `sort`（`created_at`/`updated_at`/`status`）、`order`（`asc`/`desc`，默认 desc），表头可点击切换升降序
+- **筛选**：保留原有 `status` 筛选，补充"已撤销"（`status=revoked`）选项
+- **分页**：新增 `page`（默认 1）、`per_page`（默认 10，可选 5/10/20/50/100），使用 `query.paginate()` 实现分页
+- **删除**：新增 `POST /permission_tickets/<id>/delete` 路由，仅管理员可调用，删除后 `safe_log` 审计 + 尝试 webhook 推送
+- **排版**：列表卡片顶部增加"共 N 条 / 当前第 X 页"统计信息，操作列间距统一
+
+#### 前端改动（`templates/permission_tickets.html`）
+
+- 表头"提交时间"列可点击排序，显示升降序箭头
+- 筛选栏补充"已撤销"状态链接
+- 表格下方新增分页条（上一页/页码/下一页 + 每页条数下拉选择器）
+- 管理员操作列（非 pending 状态）增加"删除"按钮（带 `confirm()` 二次确认）
+- 普通用户不显示删除按钮
+
+#### Bug 修复
+
+- **每页条数切换 404**：第 54 行 `onchange="window.location.href = updatePerPage(this.value)"` 缺少 `?` 前缀，修复为 `'?' + updatePerPage(this.value)`
+
+### 12.3 Webhook 测试优化（需求 6-7）
+
+#### 根因
+
+`webhook_utils.py` `test_single_webhook` 的 `_send_payload` 调用超时为 12 秒，前端 JS 无超时控制，目标 URL 响应慢时按钮长时间停在"测试中..."状态，看起来像"无反应"。
+
+#### 修复
+
+- **后端超时缩短**：`webhook_utils.py` `test_single_webhook` 的 `_send_payload` 超时从 12 秒降至 **5 秒**
+- **前端超时保护**：fetch 请求加 `AbortController` 10 秒超时，超时中断并提示
+- **交互增强**：
+  - 点击后按钮立即 loading（禁用 + 转圈 + "测试中..."）
+  - 结果用 **toast 替换原生 `alert()`**：成功绿色 toast（含状态码），失败红色 toast（含错误信息与状态码）
+  - toast 5 秒后自动移除
+
+#### Bug 修复
+
+- `admin_webhooks.html` 两处重复代码块（重复 fetch 调用 + 重复 form 处理）导致 JS 语法错误 `Unexpected token '}'`，全部删除后 `node --check` 通过
+
+### 12.4 WebDAV 备份页面（需求 8-12）
+
+#### 需求 8：加密密码回显
+
+- **规则**：仅当未勾选「清除已保存的加密密码」时回显明文密码；勾选则置空
+- `admin_backups()` 路由将 `config.backup_encrypt_password` 传入模板变量
+- 模板密码框 `value` 回显明文，placeholder 提示"已设置，修改请直接输入新密码"
+- 标题旁显示"已设置/未设置"状态徽章
+- 勾选清除 checkbox 时 JS 清空输入框并禁用
+
+#### 需求 9：定时任务按钮置灰
+
+- 模板中计算 `can_operate = current_user.is_admin or t.created_by == current_user.id`
+- 非创建者且非管理员：编辑/删除/启停按钮加 `disabled` 属性 + `title` 提示
+- 执行历史按钮保留可点击（查看不影响数据）
+
+#### 需求 10：备份范围限定（方案 B，用户已确认）
+
+- `build_user_scoped_backup_db` 函数（`routes_ext.py` ~41-81 行）逻辑：
+  1. 复制主库到临时文件
+  2. `DELETE FROM gift_records WHERE user_id != ?`（仅保留本人数据）
+  3. `DELETE FROM banquets WHERE user_id != ?`
+  4. `DELETE FROM anniversary_reminders WHERE user_id != ?`
+  5. DROP 19 张全局敏感表：`users, backup_configs, scheduled_backup_tasks, scheduled_task_execution_logs, webhook_configs, webhook_logs, operation_logs, login_risks, security_risks, system_settings, registration_tokens, broadcasts, broadcast_reads, shared_ledger_links, backup_attachments, permission_tickets, chat_sessions, chat_messages, ai_query_logs`
+- 恢复侧：`admin_upload_local_backup` / `admin_restore_webdav_backup` 恢复后调用 `init_database()` 自动补建缺失表
+- 普通用户 `download_local` 路由调用 `build_user_scoped_backup_db` 返回过滤后的临时文件
+
+#### 需求 11：一键引用管理员配置
+
+- 新增后端接口 `GET /admin/backups/reference_admin_config`（仅普通用户可调用）
+- 返回管理员配置的去敏字段：`webdav_url`、`webdav_username`、`backup_subdir`（密码不返回）
+- 前端两个按钮：
+  - **一键引用管理员配置**：点击 → fetch 获取 → 自动填充服务器地址/账号/子目录 → toast 提示"已引用管理员配置（服务器地址/账号/子目录）。密码涉及敏感信息不自动填充"
+  - **一键更新**：同样调用接口重新拉取管理员最新配置并覆盖填入
+
+#### 需求 12：本地备份卡片不隐藏
+
+- 前端不隐藏：本地数据库备份/附件恢复卡片对所有有备份权限的用户可见
+- 普通用户执行下载本地备份时走 `build_user_scoped_backup_db` 过滤，备份文件仅含本人数据
+- 普通用户可恢复自己的备份文件（恢复后 `init_database()` 补建全局表）
+
+### 12.5 涉及文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `routes_ext.py` | 工单排序/分页/删除路由；`build_user_scoped_backup_db` DROP 全局表；本地下载走过滤库；`reference_admin_config` 去敏接口 |
+| `webhook_utils.py` | `test_single_webhook` 超时 12s→5s |
+| `templates/permission_tickets.html` | 排序/筛选（含已撤销）/分页/删除按钮/排版优化；修复每页条数 `?` 前缀 bug |
+| `templates/admin_webhooks.html` | 测试交互增强（toast 替代 alert、前端超时、loading）；删除两处重复代码块 |
+| `templates/admin_backups.html` | 加密密码回显（未勾清除时）；定时任务按钮置灰；一键引用+一键更新按钮；卡片不隐藏 |
+
+### 12.6 浏览器验证结果（2026-09-11）
+
+| 验证项 | 结果 |
+|--------|------|
+| 工单删除：工单 #3 删除成功，列表从 3 条变 2 条 | ✅ 通过 |
+| 工单排序：点击"提交时间"表头，URL `order=asc`，箭头切换 | ✅ 通过 |
+| 工单筛选：点击"已撤销"，URL `status=revoked`，显示 2 条 | ✅ 通过 |
+| 工单每页条数：修复后 URL `?per_page=5&page=1`，下拉框选中"5 条" | ✅ 通过 |
+| Webhook 测试 toast：console 0 错误，红色 danger toast 显示错误信息 | ✅ 通过 |
+| 管理员加密密码回显：密码框 `value="258369"`，"已设置"标签显示 | ✅ 通过 |
+| 普通用户一键引用管理员配置：URL/账号/子目录自动填充，密码框为空 | ✅ 通过 |
+| 普通用户定时任务按钮置灰：admin 任务的暂停/编辑/删除按钮 disabled | ✅ 通过 |
+| 普通用户本地备份/附件卡片可见：下载和上传按钮均可点击 | ✅ 通过 |
+| 普通用户 WebDAV 备份列表权限隔离：admin 备份恢复按钮 disabled | ✅ 通过 |
+| 备份范围隔离：普通用户备份仅含 3 张业务表（gift_records/banquets/anniversary_reminders），19 张全局敏感表不存在 | ✅ 通过 |
+
+### 12.7 用户确认事项
+
+| # | 问题 | 结论 |
+|---|------|------|
+| 1 | 备份范围方案 | 方案 B：删全局表 + 恢复时 `init_database()` 自动建表 |
+| 2 | 一键引用实现方式 | 一键复制 + 一键更新（避免管理员更新后用户无法获取最新数据） |
+| 3 | 本地备份卡片是否隐藏 | 不隐藏：普通用户可备份/恢复自己创建的数据和配置 |
+| 4 | 加密密码回显规则 | 仅当未勾选「清除已保存的加密密码」时回显 |
+| 5 | webhook 测试无反应根因 | 后端超时 12s 过长 + 前端无超时提示，优化为后端 5s + 前端 10s + toast |
 
 > AI生成

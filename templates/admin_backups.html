@@ -58,9 +58,10 @@
           <div class="mb-2">
             <label class="form-label small text-muted">为自动定时备份预设加密密码，留空则不加密</label>
             <div class="input-group">
-              <!-- V7 修复：不回显明文密码，避免安全隐患 -->
+              <!-- V8 修复：未勾选"清除"时回显已保存的加密密码（用户要求） -->
               <input type="password" name="backup_encrypt_password" id="cfg_encrypt_pwd" class="form-control rounded-start-3"
-                {% if has_encrypt_password %}placeholder="已设置，留空保持不变"{% else %}placeholder="预设加密密码（留空不加密）"{% endif %}
+                value="{{ config_encrypt_pwd_plain or '' }}"
+                {% if has_encrypt_password %}placeholder="已设置，修改请直接输入新密码"{% else %}placeholder="预设加密密码（留空不加密）"{% endif %}
                 autocomplete="new-password">
               <button class="btn btn-outline-secondary rounded-end-3" type="button" onclick="togglePasswordVisibility('cfg_encrypt_pwd', this)" title="查看/隐藏密码">
                 <i class="fa-regular fa-eye"></i>
@@ -105,6 +106,15 @@
         <div class="alert alert-info border-0 rounded-3 mb-3 py-2">
           <i class="fa-solid fa-circle-info me-1 text-info"></i>
           <span class="small">请填写您自己的 WebDAV 服务器信息，配置仅对您个人生效，与管理员配置相互独立。</span>
+        </div>
+        <!-- V8: 一键引用/一键更新管理员配置（去敏，不含密码） -->
+        <div class="d-flex gap-2 mb-3">
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3" onclick="referenceAdminConfig(false)">
+            <i class="fa-solid fa-copy me-1"></i>一键引用管理员配置
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="referenceAdminConfig(true)" title="管理员更新配置后，可一键拉取最新配置覆盖">
+            <i class="fa-solid fa-rotate me-1"></i>一键更新
+          </button>
         </div>
         <form action="{{ url_for('admin_save_webdav_config') }}" method="POST" id="webdavConfigFormUser">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -243,11 +253,13 @@
                   {{ t.last_run_time.strftime('%m-%d %H:%M') if t.last_run_time else '—' }}
                   <br><span class="text-secondary">{% if t.creator %}{{ t.creator.username }}{% else %}—{% endif %}</span>
                 </td>
-                <!-- V7: 操作+历史合并 -->
+                <!-- V7: 操作+历史合并；V8: 非本人/非管理员按钮置灰 -->
                 <td class="text-end pe-3">
                   <button class="btn btn-sm btn-outline-info py-0 px-1" onclick="showExecutionLogs({{ t.id }})" title="执行历史">
                     <i class="fa-solid fa-clock-rotate-left"></i>
                   </button>
+                  {% set can_operate = current_user.is_admin or t.created_by == current_user.id %}
+                  {% if can_operate %}
                   <button class="btn btn-sm btn-outline-{{ 'secondary' if t.is_enabled else 'success' }} py-0 px-1" onclick="toggleScheduledTask({{ t.id }})" title="{{ '禁用' if t.is_enabled else '启用' }}">
                     <i class="fa-solid fa-{{ 'pause' if t.is_enabled else 'play' }}"></i>
                   </button>
@@ -260,6 +272,17 @@
                       <i class="fa-solid fa-trash"></i>
                     </button>
                   </form>
+                  {% else %}
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" disabled title="仅创建者或管理员可操作">
+                    <i class="fa-solid fa-pause"></i>
+                  </button>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" disabled title="仅创建者或管理员可操作">
+                    <i class="fa-solid fa-pen"></i>
+                  </button>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" disabled title="仅创建者或管理员可操作">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                  {% endif %}
                 </td>
               </tr>
               {% endfor %}
@@ -597,6 +620,33 @@ function toggleTaskAuth(userId) {
     }
   })
   .catch(() => alert('网络请求异常'));
+}
+
+// V8: 一键引用 / 一键更新管理员 WebDAV 配置（去敏，不含密码）
+function referenceAdminConfig(isUpdate) {
+  const actionLabel = isUpdate ? '更新' : '引用';
+  fetch('/admin/backups/reference_admin_config', {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (!data.success) {
+      alert(data.message || '获取管理员配置失败');
+      return;
+    }
+    const urlInput = document.getElementById('cfg_webdav_url_user');
+    const userInput = document.getElementById('cfg_webdav_username_user');
+    const subdirInput = document.querySelector('#webdavConfigFormUser input[name="backup_subdir"]');
+    if (urlInput) urlInput.value = data.webdav_url || '';
+    if (userInput) userInput.value = data.webdav_username || '';
+    if (subdirInput) subdirInput.value = data.backup_subdir || 'gift_backups';
+    if (data.has_password) {
+      alert('已' + actionLabel + '管理员配置（服务器地址/账号/子目录）。\n密码涉及敏感信息不自动填充，请自行填写您的密码或应用授权码。');
+    } else {
+      alert('已' + actionLabel + '管理员配置。管理员未设置 WebDAV 密码，请自行填写密码。');
+    }
+  })
+  .catch(() => alert('获取管理员配置失败，请稍后重试'));
 }
 
 // 异步安全拉取 WebDAV 备份列表
