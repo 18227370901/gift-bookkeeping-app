@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '8d3fb7bb-03a8-4adb-985d-17f82cf324a9'
-  PropagateID: '8d3fb7bb-03a8-4adb-985d-17f82cf324a9'
-  ReservedCode1: 'f3065f7e-778c-497b-a1ad-f588192d91f0'
-  ReservedCode2: 'f3065f7e-778c-497b-a1ad-f588192d91f0'
+  ProduceID: 'c6304472-e508-4eac-86c4-da9a9a38e00a'
+  PropagateID: 'c6304472-e508-4eac-86c4-da9a9a38e00a'
+  ReservedCode1: '3e1ce82f-0f8c-4feb-ab23-03b85bbcace8'
+  ReservedCode2: '3e1ce82f-0f8c-4feb-ab23-03b85bbcace8'
 ---
 
 # AI 助手模块技术设计方案
@@ -960,5 +960,82 @@ V8 批次共 12 项需求，覆盖三大模块：
 | 3 | 本地备份卡片是否隐藏 | 不隐藏：普通用户可备份/恢复自己创建的数据和配置 |
 | 4 | 加密密码回显规则 | 仅当未勾选「清除已保存的加密密码」时回显 |
 | 5 | webhook 测试无反应根因 | 后端超时 12s 过长 + 前端无超时提示，优化为后端 5s + 前端 10s + toast |
+
+> AI生成
+
+---
+
+## 第十三章 V9 修复与优化（2026-09-11）
+
+### 13.1 V9-A — 普通用户恢复 .db 备份导致系统崩溃（核心 Bug 修复）
+
+**问题现象**：普通用户在备份页执行 .db 备份恢复后，全站 Internal Server Error。
+
+**根因链**：
+1. V7/V8 的安全机制：普通用户备份是「过滤库」——19 张全局表（users 等）被 DROP，仅含本人 3 张业务表
+2. 但恢复流程却是「文件级替换」：直接用该过滤库覆盖整个主库
+3. 主库 users 表等核心表全部丢失 → 任何页面查询 users 表即 500 → 全站崩溃
+
+**修复方案**：按身份分流恢复策略
+- **普通用户（无跨用户查看权限）**：改走「数据级合并」——`merge_user_scoped_backup()` 用 `ATTACH DATABASE` 在同一 sqlite3 连接内，删除主库中本人旧数据，再把备份中本人数据（防御性校验 user_id）列对齐插入，不触碰全局表与其他用户数据
+- **管理员 / can_view_others_for('ledger')**：保持原文件级替换 + WAL 清理 + init_database 重建
+- 覆盖两个恢复入口：`admin_upload_local_backup`（本地 .db 上传恢复）与 `admin_restore_webdav_backup`（云端恢复），均含 `PRAGMA integrity_check` 预校验
+
+### 13.2 V9-B — 数据级合并的 database is locked 坑
+
+**复现**：合并时 DELETE 成功但最终报 `database main_db is locked`。
+
+**根因**：`merge_user_scoped_backup()` 原顺序为 `DETACH → commit`。SQLite 不允许 DETACH 一个存在未提交事务的数据库，必然报 locked。
+
+**修复**：调整为 `commit → DETACH`，同时：
+- 合并连接加 `PRAGMA busy_timeout = 8000`（瞬时锁冲突时重试而非立即失败）
+- 两个恢复路由在调用合并前先 `db.session.commit()`（落盘请求内未提交事务，如操作日志）+ `db.engine.dispose()`（释放连接池）
+- 函数内兜底：尝试提交 Flask-SQLAlchemy session 中的未提交事务
+
+### 13.3 V9-C — WAL 模式下备份丢数据（隐藏 Bug，测试时发现）
+
+**现象**：`build_user_scoped_backup_db()` 用 `shutil.copy2` 复制主库，但主库为 WAL 模式，最新数据在 `-wal` 文件中未落盘（主文件 LastWriteTime 停留在 09-10 17:13，-wal 已积累 168KB），复制的库是过时快照——**用户最新记账数据会从备份中丢失**。
+
+**修复**：改用 SQLite 在线备份 API（`Connection.backup()`），获得包含 WAL 数据的一致性快照。
+
+**验证**：为李文伟新增 2 条礼金记录后生成过滤库，旧逻辑 gift_records=0 条，新逻辑正确包含 2 条。
+
+### 13.4 V9-D — 普通用户一键引用改为「别称 + 服务端密文复制」（安全增强）
+
+**原问题**（V8 遗留）：一键引用把管理员 WebDAV URL/账号填充到普通用户页面表单，密码虽留空但账号地址可见，不满足「敏感信息一律不可见」要求。
+
+**方案**：
+- `BackupConfig` 新增 `config_alias`（别称，String(100)）与 `adopted_from_admin`（Boolean，引用标记）字段；`app.py` migration_sqls 追加两条 ALTER TABLE
+- 管理员配置表单新增「配置别称」输入框（推荐填写）
+- 一键引用改造为两步：
+  1. `GET /admin/backups/reference_admin_config`：只返回 `config_alias`/`has_password`/`adopted`，**地址/账号/子目录/密码一概不返回**
+  2. `POST /admin/backups/adopt_admin_config`：服务端直读管理员配置，密文直传 `webdav_password`（不经前端），复制 URL/账号/子目录，标记 `adopted_from_admin=True`
+- 普通用户页面双状态：已引用 → 只显示绿色状态卡片（别称 + 安全说明）+「一键更新」/「停用引用，自行配置」；未引用 → 原表单 +「一键采用管理员配置」
+- 普通用户手动保存自己配置时自动清除 `adopted_from_admin`（视为脱离引用）
+- 停用引用：提交空表单触发后端清除 + confirm 提示备份操作将不可用
+
+### 13.5 浏览器验证结果（2026-09-11）
+
+| 验证项 | 结果 |
+|--------|------|
+| 管理员保存别称「坚果云家庭备份盘」成功，表单回显 | ✅ 通过 |
+| 普通用户确认弹窗仅显示别称，无地址/账号/密码泄露 | ✅ 通过 |
+| 一键采用后页面仅显示别称状态卡片，敏感表单完全消失 | ✅ 通过 |
+| 引用后 WebDAV 列表正常加载（服务端密文复制生效，连接真正可用） | ✅ 通过 |
+| 普通用户上传过滤库 .db 恢复：数据级合并成功恢复 2 条，不崩溃 | ✅ 通过 |
+| 恢复后主库 integrity ok、users 6 条、全局数据完好 | ✅ 通过 |
+| 普通用户 WebDAV 恢复自己创建的备份：数据级合并 0 条（空备份），不崩溃 | ✅ 通过 |
+| 一键更新：成功且只显示别称 | ✅ 通过 |
+| 停用引用：confirm 后回到未引用状态，表单清空，按钮恢复 | ✅ 通过 |
+| admin 备份恢复按钮置灰隔离（V8 回归验证） | ✅ 通过 |
+
+### 13.6 涉及文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `routes_ext.py` | `merge_user_scoped_backup()` 新增；`build_user_scoped_backup_db()` 改用 backup API；两个恢复路由按身份分流；`reference_admin_config` 只返回别称；新增 `adopt_admin_config`；保存配置处理别称与引用标记；`admin_backups` 传 `admin_config_alias` |
+| `models.py` | `BackupConfig` 新增 `config_alias`、`adopted_from_admin` |
+| `app.py` | migration_sqls 追加 `config_alias`、`adopted_from_admin` 两条 ALTER TABLE |
+| `templates/admin_backups.html` | 管理员别称输入框；普通用户双状态 UI（引用卡片/原表单）；`adoptAdminConfig()`/`confirmDetachAdminConfig()` JS |
 
 > AI生成

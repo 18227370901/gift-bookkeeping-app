@@ -61,7 +61,15 @@ def build_user_scoped_backup_db(db_path, user):
     # 普通用户：生成仅含本人数据的临时库
     tmp_dir = _tempfile.mkdtemp(prefix='gift_user_scope_')
     tmp_db = os.path.join(tmp_dir, 'scoped_backup.db')
-    shutil.copy2(db_path, tmp_db)
+    # V9 修复：主库为 WAL 模式时，shutil.copy2 只复制主文件会丢失 -wal 日志中未落盘的最新数据。
+    #       改用 SQLite 在线备份 API（Connection.backup），获得包含 WAL 数据的一致性快照，
+    #       不受主文件 LastWriteTime 滞后影响。
+    _src_conn = _sqlite3.connect(db_path)
+    _dst_conn = _sqlite3.connect(tmp_db)
+    with _dst_conn:
+        _src_conn.backup(_dst_conn)
+    _src_conn.close()
+    _dst_conn.close()
     try:
         conn = _sqlite3.connect(tmp_db)
         c = conn.cursor()
@@ -95,6 +103,81 @@ def build_user_scoped_backup_db(db_path, user):
         except Exception:
             pass
         raise
+
+
+# V9 修复：普通用户恢复 .db 备份导致系统崩溃
+# 根因：普通用户备份是"过滤库"（19 张全局表被 DROP、仅含本人 3 张业务表数据），
+#       但恢复流程却用该文件"文件级替换"整个主库 → users 等核心表丢失 → 全站 500。
+# 方案：普通用户恢复改为"数据级合并"——只把备份中本人三张业务表的数据合回主库，
+#       不触碰主库文件结构与其他用户/全局数据；管理员保持原文件级替换。
+def merge_user_scoped_backup(db_path, backup_db_path, user):
+    """
+    将普通用户的过滤备份（仅含 gift_records/banquets/anniversary_reminders 三表）
+    以数据级合并方式恢复到主库：仅覆盖该用户本人的三张业务表数据。
+    返回 (success: bool, message: str, stats: dict)
+    """
+    if not user or not hasattr(user, 'is_admin'):
+        return False, '无效用户', {}
+    user_id = user.id
+    user_tables = ['gift_records', 'banquets', 'anniversary_reminders']
+    stats = {}
+    try:
+        # 防锁：写主库前先把 Flask 的 SQLAlchemy session 里的未提交事务落盘
+        # （如操作日志等），避免主库写锁冲突
+        try:
+            from flask import has_app_context
+            if has_app_context():
+                from flask_sqlalchemy import SQLAlchemy  # noqa: F401
+                from flask import current_app as _cur_app
+                _ext = _cur_app.extensions.get('sqlalchemy')
+                if _ext is not None:
+                    _ext.session.commit()  # 提交/结束当前请求未提交事务
+        except Exception:
+            pass
+        src = _sqlite3.connect(backup_db_path)
+        src.row_factory = _sqlite3.Row
+        # 防锁：给合并连接设置忙等待，遇主库瞬时写锁时重试而非立即报错
+        src.execute('PRAGMA busy_timeout = 8000')
+        # 校验备份中实际存在的业务表
+        existing = {r[0] for r in src.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        missing = [t for t in user_tables if t not in existing]
+        if missing:
+            src.close()
+            return False, f'备份文件中缺少业务表: {", ".join(missing)}，无法恢复', {}
+
+        # ATTACH 主库，在同一连接内完成数据合并（自动处理跨库约束）
+        src.execute("ATTACH DATABASE ? AS main_db", (db_path,))
+        for tbl in user_tables:
+            # 1) 删除主库中该用户本人的旧数据
+            src.execute(f'DELETE FROM main_db."{tbl}" WHERE user_id = ?', (user_id,))
+            # 2) 从备份导入该用户数据（列对齐，排除 id 由 SQLite 重新分配主键）
+            cols = [r[1] for r in src.execute(f'PRAGMA table_info("{tbl}")').fetchall()]
+            src_cols = [c for c in cols]
+            col_list = ', '.join(f'"{c}"' for c in src_cols)
+            placeholders = ', '.join('?' for _ in src_cols)
+            rows = src.execute(f'SELECT {col_list} FROM "{tbl}"').fetchall()
+            inserted = 0
+            for row in rows:
+                # 备份按 user_id 过滤生成，这里再防御性校验一次
+                d = dict(row)
+                if d.get('user_id') != user_id:
+                    continue
+                src.execute(
+                    f'INSERT INTO main_db."{tbl}" ({col_list}) VALUES ({placeholders})',
+                    tuple(d[c] for c in src_cols)
+                )
+                inserted += 1
+            stats[tbl] = inserted
+        # 修复：必须先 commit 结束写事务，再 DETACH——
+        # SQLite 不允许 DETACH 一个存在未提交事务的数据库（会报 database is locked）
+        src.commit()
+        src.execute('DETACH DATABASE main_db')
+        src.close()
+        total = sum(stats.values())
+        return True, f'数据级合并完成，共恢复 {total} 条本人数据', stats
+    except Exception as e:
+        return False, f'数据级合并失败: {str(e)}', {}
 
 
 def parse_target_date_obj(date_val, today=None):
@@ -3370,6 +3453,10 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         # V3: 获取管理员全局配置中的 allow_view_others_tasks
         global_config = BackupConfig.get_config(None)
         allow_view_others = getattr(global_config, 'allow_view_others_tasks', False)
+        # V9: 普通用户引用管理员配置时，页面展示管理员设置的配置别称（而非用户自己的空别称）
+        admin_config_alias = ''
+        if not current_user.is_admin:
+            admin_config_alias = getattr(global_config, 'config_alias', '') or '管理员配置'
         return render_template(
             'admin_backups.html',
             config=config,
@@ -3384,31 +3471,60 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             has_encrypt_password=has_encrypt_password,
             config_encrypt_pwd_plain=config_encrypt_pwd_plain,
             allow_view_others=allow_view_others,
+            admin_config_alias=admin_config_alias,
             can_use_scheduled_tasks=current_user.can_use_scheduled_tasks()
         )
 
     @app.route('/admin/backups/reference_admin_config', methods=['GET'])
     @login_required
     def admin_reference_admin_config():
-        """V8 新增：普通用户一键引用管理员 WebDAV 配置（去敏，不含密码）
-        返回管理员全局配置的服务器地址/账号/子目录；密码字段不返回"""
+        """V9 优化：一键引用只展示管理员配置别称，不返回地址/账号/密码任何敏感信息。
+        返回：别称、是否已配置、是否设置密码、当前用户引用状态"""
         if current_user.is_admin:
             return jsonify({'success': False, 'message': '管理员无需引用自己的配置'}), 403
 
         global_config = BackupConfig.get_config(None)
+        user_config = BackupConfig.get_config(current_user.id)
+        # 管理员未配置服务器地址时视为未配置
+        if not global_config.webdav_url:
+            return jsonify({'success': False, 'message': '管理员尚未配置 WebDAV，请等待管理员配置后重试'})
         data = {
             'success': True,
-            'webdav_url': global_config.webdav_url or '',
-            'webdav_username': global_config.webdav_username or '',
-            'backup_subdir': global_config.backup_subdir or 'gift_backups',
-            'backup_path': global_config.backup_path or '',
+            # V9: 只返回别称，地址/账号/子目录/密码一概不返回
+            'config_alias': global_config.config_alias or '管理员配置',
             'has_password': bool(global_config.webdav_password),
+            'adopted': bool(getattr(user_config, 'adopted_from_admin', False)),
         }
-        # 管理员完全未配置时提示
-        if not (global_config.webdav_url or global_config.webdav_username):
-            data['success'] = False
-            data['message'] = '管理员尚未配置 WebDAV，请等待管理员配置后重试'
         return jsonify(data)
+
+    @app.route('/admin/backups/adopt_admin_config', methods=['POST'])
+    @login_required
+    def admin_adopt_admin_config():
+        """V9 新增：普通用户"一键采用"管理员 WebDAV 配置（后端加密复制，前端不接触任何凭证）
+        - 服务端直接把管理员的 URL/账号/密码/子目录复制到当前用户私有配置（密码密文直传）
+        - 标记 adopted_from_admin=True，此后页面不再回显地址/账号（防泄露）
+        - 若管理员配置更新后用户再次点"一键更新"，重新拉取最新配置覆盖
+        """
+        if current_user.is_admin:
+            return jsonify({'success': False, 'message': '管理员无需引用自己的配置'}), 403
+
+        global_config = BackupConfig.get_config(None)
+        if not global_config.webdav_url:
+            return jsonify({'success': False, 'message': '管理员尚未配置 WebDAV，请等待管理员配置后重试'})
+
+        user_config = BackupConfig.get_config(current_user.id)
+        # 服务端直传密文，前端全程接触不到明文或密文凭证
+        user_config.webdav_url = global_config.webdav_url
+        user_config.webdav_username = global_config.webdav_username
+        user_config.webdav_password = global_config.webdav_password
+        user_config.backup_path = global_config.backup_path
+        user_config.backup_subdir = global_config.backup_subdir or 'gift_backups'
+        user_config.adopted_from_admin = True
+        db.session.commit()
+
+        alias = global_config.config_alias or '管理员配置'
+        safe_log('引用WebDAV配置', f"用户 {current_user.username} 一键采用管理员配置「{alias}」（凭证服务端加密复制，页面不回显）")
+        return jsonify({'success': True, 'config_alias': alias, 'message': f'已采用管理员配置「{alias}」，可直接执行备份操作'})
 
     @app.route('/admin/backups/list_ajax', methods=['GET'])
     @login_required
@@ -3473,10 +3589,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         password = request.form.get('webdav_password', '').strip() or request.form.get('password', '').strip()
         remote_dir = request.form.get('remote_dir', '').strip() or request.form.get('backup_path', '').strip()
         backup_subdir = request.form.get('backup_subdir', '').strip() or 'gift_backups'
+        # V9 新增：配置别称（仅管理员全局配置保存；供普通用户引用时展示）
+        config_alias = request.form.get('config_alias', '').strip()
         # 加密密码（管理员预设的自动备份加密密码）
         encrypt_pwd = request.form.get('backup_encrypt_password', '').strip()
         # V3: 管理员全局配置项 - 是否允许普通用户查看他人任务
         allow_view_others = request.form.get('allow_view_others_tasks', '') == 'on'
+
+        # V9: 普通用户手动保存自己的配置时，视为脱离管理员引用（地址/账号将正常回显）
+        if not current_user.is_admin:
+            config.adopted_from_admin = False
 
         config.webdav_url = server_url
         config.webdav_username = username
@@ -3485,6 +3607,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         if remote_dir:
             config.backup_path = remote_dir
         config.backup_subdir = backup_subdir
+        # V9: 仅管理员全局配置保存别称
+        if current_user.is_admin:
+            config.config_alias = config_alias or None
         # V3: 仅管理员全局配置才保存 allow_view_others_tasks
         if current_user.is_admin:
             config.allow_view_others_tasks = allow_view_others
@@ -3660,6 +3785,48 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
         try:
+            # V9 修复：普通用户的过滤备份不能文件级替换主库（会导致 users 表丢失、全站 500），
+            # 改为数据级合并：只把备份中本人三张业务表数据合回主库
+            _is_full_restore = current_user.is_admin or (
+                hasattr(current_user, 'can_view_others_for') and current_user.can_view_others_for('ledger'))
+            if not _is_full_restore:
+                import tempfile
+                tmp_dir = tempfile.mkdtemp(prefix='gift_upload_')
+                tmp_db_path = os.path.join(tmp_dir, 'uploaded.db')
+                file.save(tmp_db_path)
+
+                # 校验上传的数据库文件完整性
+                import sqlite3 as _sqlite3
+                try:
+                    test_conn = _sqlite3.connect(tmp_db_path)
+                    integrity = test_conn.execute('PRAGMA integrity_check').fetchone()[0]
+                    test_conn.close()
+                    if integrity != 'ok':
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                        flash(f'恢复失败：上传的数据库文件完整性检查未通过 ({integrity})，可能文件已损坏', 'danger')
+                        return redirect(url_for('admin_backups'))
+                except Exception as ie:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    flash(f'恢复失败：无法读取上传的数据库文件 ({str(ie)})', 'danger')
+                    return redirect(url_for('admin_backups'))
+
+                # 防锁：合并前先提交请求内未提交事务并释放连接池，确保主库写锁可获取
+                try:
+                    db.session.commit()
+                except Exception:
+                    pass
+                db.engine.dispose()
+
+                ok, msg, stats = merge_user_scoped_backup(db_path, tmp_db_path, current_user)
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                if ok:
+                    safe_log('上传恢复本地备份', f"普通用户 {current_user.username} 数据级合并恢复成功: {msg}")
+                    flash(f'已成功恢复您的个人数据（{msg}），系统与其他用户数据不受影响。', 'success')
+                else:
+                    flash(f'恢复失败：{msg}', 'danger')
+                return redirect(url_for('admin_backups'))
+
+            # 管理员：保持原文件级替换逻辑
             # 修复：先释放数据库连接池，防止覆盖正在使用的文件导致损坏
             db.engine.dispose()
             
@@ -3837,7 +4004,29 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     shutil.rmtree(tmp_dir, ignore_errors=True)
                     flash(f'恢复失败：无法读取下载数据库文件 ({str(ie)})', 'danger')
                     return redirect(url_for('admin_backups'))
-                
+
+                # V9 修复：普通用户的过滤备份不能文件级替换主库（users 表丢失 → 全站 500），
+                # 改为数据级合并：只把备份中本人三张业务表数据合回主库
+                _is_full_restore = current_user.is_admin or (
+                    hasattr(current_user, 'can_view_others_for') and current_user.can_view_others_for('ledger'))
+                if not _is_full_restore:
+                    # 防锁：合并前先提交请求内未提交事务并释放连接池，确保主库写锁可获取
+                    try:
+                        db.session.commit()
+                    except Exception:
+                        pass
+                    db.engine.dispose()
+
+                    ok, msg, stats = merge_user_scoped_backup(db_path, tmp_db_path, current_user)
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    if ok:
+                        safe_log('恢复WebDAV备份', f"普通用户 {current_user.username} 数据级合并恢复成功（文件: {target_filename}）: {msg}")
+                        flash(f'已成功恢复您的个人数据（{msg}），系统与其他用户数据不受影响。', 'success')
+                    else:
+                        flash(f'恢复失败：{msg}', 'danger')
+                    return redirect(url_for('admin_backups'))
+
+                # 管理员：保持原文件级替换逻辑
                 # 备份当前数据库防止恢复失败
                 if os.path.exists(db_path):
                     shutil.copy2(db_path, db_path + f".bak_{int(time.time())}")

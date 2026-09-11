@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '4c33efd8-6538-45e7-86fd-cccf36daad5f'
-  PropagateID: '4c33efd8-6538-45e7-86fd-cccf36daad5f'
-  ReservedCode1: '9bc7b914-f847-47da-88ed-276766322728'
-  ReservedCode2: '9bc7b914-f847-47da-88ed-276766322728'
+  ProduceID: '347efb44-810f-4688-94ad-ae7e43f45178'
+  PropagateID: '347efb44-810f-4688-94ad-ae7e43f45178'
+  ReservedCode1: 'acc6d2c0-d1a1-4a7e-a2c5-719b55604c45'
+  ReservedCode2: 'acc6d2c0-d1a1-4a7e-a2c5-719b55604c45'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -311,6 +311,24 @@ AIGC:
 - **一键引用管理员配置**：普通用户可一键复制管理员的 WebDAV 服务器地址/账号/子目录（密码不返回），支持"一键更新"获取最新配置
 - **本地备份/附件卡片不隐藏**：普通用户可备份/恢复自己创建的数据和配置，仅系统全局配置不入库
 - **WebDAV 备份列表权限隔离**：普通用户只能操作自己创建的备份文件，管理员创建的备份恢复按钮 disabled
+
+### V9 修复与优化（2026-09-11）
+
+#### 核心修复：普通用户恢复 .db 备份导致全站崩溃
+- **根因**：普通用户备份是"过滤库"（19 张全局表被 DROP、仅含本人 3 张业务表），但恢复流程却用该文件**文件级替换**整个主库 → `users` 表等核心表丢失 → 全站 500
+- **方案**：普通用户恢复改为**数据级合并**（`merge_user_scoped_backup()`，ATTACH DATABASE 跨库合并，只恢复本人三张业务表数据），管理员保持文件级替换
+- 覆盖两个恢复入口：本地 .db 上传恢复 + WebDAV 云端恢复，均含完整性预校验
+
+#### 连带发现并修复的两个隐藏 Bug
+- **database is locked**：合并函数原顺序 `DETACH → commit`，SQLite 不允许 DETACH 存在未提交事务的数据库；调整为 `commit → DETACH`，并加 busy_timeout 与连接释放
+- **WAL 备份丢数据**：`build_user_scoped_backup_db()` 原用 `shutil.copy2` 复制主库，WAL 模式下最新数据在 `-wal` 文件未落盘，备份是过时快照；改用 SQLite 在线备份 API（`Connection.backup()`）获得一致性快照
+
+#### 一键引用升级为"别称 + 服务端密文复制"
+- `BackupConfig` 新增 `config_alias`（别称）与 `adopted_from_admin`（引用标记）字段
+- 管理员配置 WebDAV 时可设置**配置别称**（推荐填写，如"坚果云家庭备份盘"）
+- 普通用户「一键采用管理员配置」全程只看到**别称**——地址、账号、密码一律不返回前端，密码由服务端密文直传
+- 引用后页面仅显示别称状态卡片 + 「一键更新」/「停用引用，自行配置」按钮；停用引用需二次确认
+- 普通用户手动保存自己的配置时自动脱离引用状态
 
 ## 📂 项目文件结构
 

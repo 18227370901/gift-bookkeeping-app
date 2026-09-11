@@ -871,6 +871,10 @@ class BackupConfig(db.Model):
     last_status = db.Column(db.String(255), nullable=True)
     backup_subdir = db.Column(db.String(100), default='gift_backups')
     updated_at = db.Column(db.DateTime, default=datetime.now)
+    # V9 新增：配置别称（管理员为全局 WebDAV 配置设置，供普通用户引用时展示，不暴露地址/账号/密码）
+    config_alias = db.Column(db.String(100), nullable=True)
+    # V9 新增：该用户配置是否引用自管理员（引用后地址/账号/密码在页面不回显）
+    adopted_from_admin = db.Column(db.Boolean, default=False)
 
     @property
     def server_url(self):

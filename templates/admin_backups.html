@@ -21,6 +21,12 @@
       <div class="card-body">
         <form action="{{ url_for('admin_save_webdav_config') }}" method="POST" id="webdavConfigForm">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <!-- V9 新增：配置别称（普通用户引用时只看到别称，看不到地址/账号/密码） -->
+          <div class="mb-3">
+            <label class="form-label fw-bold">配置别称 <span class="badge bg-primary-subtle text-primary ms-1">推荐填写</span></label>
+            <input type="text" name="config_alias" id="cfg_config_alias" class="form-control rounded-3" value="{{ config_data.config_alias or '' }}" placeholder="例如：坚果云家庭备份盘" maxlength="100">
+            <div class="form-text small text-muted">普通用户「一键采用管理员配置」时仅显示该别称，服务器地址、账号、密码等敏感信息一律不可见</div>
+          </div>
           <div class="mb-3">
             <label class="form-label fw-bold">WebDAV 服务器地址 (URL)</label>
             <input type="url" name="webdav_url" id="cfg_webdav_url" class="form-control rounded-3" value="{{ config_data.webdav_url or '' }}" placeholder="https://dav.jianguoyun.com/dav/" required>
@@ -102,18 +108,30 @@
         <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置（个人）</h5>
       </div>
       <div class="card-body">
-        <!-- V7: 提示用户需自行配置 WebDAV，不再自动继承管理员配置 -->
+        {% if config_data.adopted_from_admin %}
+        <!-- V9: 已引用管理员配置 —— 只显示别称，不回显任何地址/账号/密码 -->
+        <div class="alert alert-success border-0 rounded-3 mb-3 py-2">
+          <i class="fa-solid fa-circle-check me-1"></i>
+          <span class="small fw-bold">当前正在使用管理员提供的 WebDAV 配置：「{{ admin_config_alias or '管理员配置' }}」</span>
+          <div class="small text-muted mt-1"><i class="fa-solid fa-shield-halved me-1"></i>出于安全考虑，服务器地址、账号与密码均不展示。您可直接执行备份/恢复操作。</div>
+        </div>
+        <div class="d-flex gap-2 mb-3">
+          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="adoptAdminConfig(true)" title="管理员更新配置后，可一键拉取最新配置覆盖">
+            <i class="fa-solid fa-rotate me-1"></i>一键更新
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="confirmDetachAdminConfig()" title="停止使用管理员配置，改为自行填写">
+            <i class="fa-solid fa-link-slash me-1"></i>停用引用，自行配置
+          </button>
+        </div>
+        {% else %}
+        <!-- V9: 未引用 —— 可自行配置，或一键采用管理员配置（仅见别称） -->
         <div class="alert alert-info border-0 rounded-3 mb-3 py-2">
           <i class="fa-solid fa-circle-info me-1 text-info"></i>
-          <span class="small">请填写您自己的 WebDAV 服务器信息，配置仅对您个人生效，与管理员配置相互独立。</span>
+          <span class="small">请填写您自己的 WebDAV 服务器信息；或点击下方「一键采用管理员配置」，只需看到配置别称即可使用。</span>
         </div>
-        <!-- V8: 一键引用/一键更新管理员配置（去敏，不含密码） -->
         <div class="d-flex gap-2 mb-3">
-          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3" onclick="referenceAdminConfig(false)">
-            <i class="fa-solid fa-copy me-1"></i>一键引用管理员配置
-          </button>
-          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="referenceAdminConfig(true)" title="管理员更新配置后，可一键拉取最新配置覆盖">
-            <i class="fa-solid fa-rotate me-1"></i>一键更新
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3" onclick="adoptAdminConfig(false)">
+            <i class="fa-solid fa-copy me-1"></i>一键采用管理员配置
           </button>
         </div>
         <form action="{{ url_for('admin_save_webdav_config') }}" method="POST" id="webdavConfigFormUser">
@@ -141,6 +159,7 @@
             <i class="fa-solid fa-floppy-disk me-1"></i>保存我的配置
           </button>
         </form>
+        {% endif %}
       </div>
     </div>
     {% endif %}
@@ -622,9 +641,11 @@ function toggleTaskAuth(userId) {
   .catch(() => alert('网络请求异常'));
 }
 
-// V8: 一键引用 / 一键更新管理员 WebDAV 配置（去敏，不含密码）
-function referenceAdminConfig(isUpdate) {
-  const actionLabel = isUpdate ? '更新' : '引用';
+// V9: 一键采用 / 一键更新管理员 WebDAV 配置
+// 前端全程接触不到地址/账号/密码 —— 凭证在服务端加密复制，页面只显示别称
+function adoptAdminConfig(isUpdate) {
+  const actionLabel = isUpdate ? '更新' : '采用';
+  // 第一步：先查询管理员配置别称（不返回任何敏感字段）
   fetch('/admin/backups/reference_admin_config', {
     headers: { 'X-Requested-With': 'XMLHttpRequest' }
   })
@@ -634,19 +655,55 @@ function referenceAdminConfig(isUpdate) {
       alert(data.message || '获取管理员配置失败');
       return;
     }
-    const urlInput = document.getElementById('cfg_webdav_url_user');
-    const userInput = document.getElementById('cfg_webdav_username_user');
-    const subdirInput = document.querySelector('#webdavConfigFormUser input[name="backup_subdir"]');
-    if (urlInput) urlInput.value = data.webdav_url || '';
-    if (userInput) userInput.value = data.webdav_username || '';
-    if (subdirInput) subdirInput.value = data.backup_subdir || 'gift_backups';
-    if (data.has_password) {
-      alert('已' + actionLabel + '管理员配置（服务器地址/账号/子目录）。\n密码涉及敏感信息不自动填充，请自行填写您的密码或应用授权码。');
+    const alias = data.config_alias || '管理员配置';
+    const pwdNote = data.has_password ? '密码已由系统服务端安全复制' : '注意：管理员尚未设置 WebDAV 密码，采用后可能无法连接';
+    const doAdopt = () => {
+      // 第二步：确认后由服务端加密复制凭证，前端不传任何敏感数据
+      fetch('/admin/backups/adopt_admin_config', {
+        method: 'POST',
+        headers: {
+          'X-CSRFToken': '{{ csrf_token }}',
+          'X-CSRF-Token': '{{ csrf_token }}',
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      })
+      .then(res => res.json())
+      .then(result => {
+        if (result.success) {
+          alert('已' + actionLabel + '管理员配置「' + alias + '」。\n' + pwdNote + '，服务器地址、账号、密码均不在页面展示。');
+          location.reload();
+        } else {
+          alert(result.message || '操作失败');
+        }
+      })
+      .catch(() => alert('操作失败，请稍后重试'));
+    };
+    if (isUpdate) {
+      doAdopt();
     } else {
-      alert('已' + actionLabel + '管理员配置。管理员未设置 WebDAV 密码，请自行填写密码。');
+      if (confirm('即将采用管理员配置「' + alias + '」。\n采用后页面仅显示该别称，您将看不到服务器地址、账号与密码。\n是否确认？')) {
+        doAdopt();
+      }
     }
   })
   .catch(() => alert('获取管理员配置失败，请稍后重试'));
+}
+
+// V9: 停用引用，恢复自行配置表单（提交空表单清除引用标记，地址/账号恢复回显）
+function confirmDetachAdminConfig() {
+  if (!confirm('停用引用后，将清除您当前引用的管理员配置（备份操作将不可用），需重新自行填写服务器信息。是否确认？')) {
+    return;
+  }
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '{{ url_for("admin_save_webdav_config") }}';
+  const csrf = document.createElement('input');
+  csrf.type = 'hidden';
+  csrf.name = 'csrf_token';
+  csrf.value = '{{ csrf_token }}';
+  form.appendChild(csrf);
+  document.body.appendChild(form);
+  form.submit();
 }
 
 // 异步安全拉取 WebDAV 备份列表
