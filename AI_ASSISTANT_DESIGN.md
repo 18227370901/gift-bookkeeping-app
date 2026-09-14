@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'f5d30781-d932-4879-82ad-b9c5ff7940af'
-  PropagateID: 'f5d30781-d932-4879-82ad-b9c5ff7940af'
-  ReservedCode1: '01b5a111-4df9-42a9-bd00-959cbc739f3d'
-  ReservedCode2: '01b5a111-4df9-42a9-bd00-959cbc739f3d'
+  ProduceID: '1f044b72-762f-42e4-a7c9-3c21a024ca2f'
+  PropagateID: '1f044b72-762f-42e4-a7c9-3c21a024ca2f'
+  ReservedCode1: '79ec99c2-cbe2-4bd2-94bc-7f11d46eb5e7'
+  ReservedCode2: '79ec99c2-cbe2-4bd2-94bc-7f11d46eb5e7'
 ---
 
 # AI 助手模块技术设计方案
@@ -1215,5 +1215,135 @@ V10 批次共 5 模块 15 项改动，覆盖 Webhook 推送修复、审计日志
 | 权限工单排序时保留筛选参数 | ✅ 通过 |
 | 审计日志配置面板（13 模块可折叠） | ✅ 通过 |
 | 审计日志列表 303 条正常显示 | ✅ 通过 |
+
+> AI生成
+
+---
+
+## 第十五章 V10.1 Webhook 推送系统全面重构（2026-09-14）
+
+### 15.1 需求总览
+
+V10.1 批次聚焦 Webhook 推送系统的全面重构与修复，共 5 大模块改动：
+
+| 编号 | 模块 | 类型 | 需求 |
+|------|------|------|------|
+| A | 推送配置 UI | 重构 | 三段式（触发事件+扩展事件+页面矩阵）合并为"页面×事件"矩阵 + Tab 内嵌消息模板 |
+| B | 推送覆盖 | 补全 | 宴席同步、批量移出明细、回收站手动清理、定时任务增删改状态变更 |
+| C | 提示词优化 | 新增 | 场景化默认提示词 + 页面×事件自定义模板，敏感数据脱敏 |
+| D | WebDAV 权限 | 修复 | 定时任务查看权限解耦（查看开关与备份数据权限分离） |
+| E | 回显 Bug | 修复 | 编辑 Webhook 时页面矩阵回显硬编码 allPageKeys 缺少 permission_tickets |
+
+### 15.2 模块 A：推送配置 UI 重构为"页面×事件"矩阵
+
+**原设计问题**：
+- 三段式配置（触发通知事件 4 项 + 扩展事件类型 4 项 + 页面推送矩阵 15 项）需要管理员理解两套开关的与关系，不直观
+- 页面矩阵只有"是否推送该页面"一个维度，无法精细化控制"该页面的哪些事件推送"
+
+**新设计**：Tab 内嵌三面板模式
+- **Tab 1 - 基础事件开关**：8 个事件大类开关（新增/删除/修改/提醒/广播/安全/系统/状态变更），作为第一层过滤
+- **Tab 2 - 推送配置矩阵**：15 行（页面）× 12 列（事件类型），每格勾选 = "该页面该事件是否推送"
+  - 列定义（EVENT_COLUMNS）：create/update/delete/batch_delete/clear/sync/restore/status_change/reminder/broadcast/security/system
+  - 矩阵适用性（PAGE_EVENT_MATRIX）：每页面仅显示适用的事件列，不适用列显示"—"
+  - 全选/清空按钮控制矩阵内所有勾选
+- **Tab 3 - 消息模板**：按页面×事件维度，管理员可对每个功能点的推送消息内容自定义
+  - 支持占位符：`{user}` `{page}` `{action}` `{title}` `{detail}` `{time}` `{count}`
+  - 留空则使用系统默认模板（DEFAULT_MESSAGE_TEMPLATES）
+
+**数据存储兼容**：
+- `notify_pages` 字段格式从 `{"事件分类": ["页面列表"]}` 扩展为支持新事件分类（batch_delete/clear/sync/restore 独立）
+- `_page_matches` 兼容旧数据：空配置 = 不过滤（对全部页面放行）
+- `message_templates` 字段格式为 `{"事件:页面": "自定义模板内容"}`
+
+### 15.3 模块 B：推送覆盖补全
+
+补充以下操作的 webhook 推送：
+
+| 操作 | page_key | event_type | 说明 |
+|------|----------|------------|------|
+| 宴席同步 | banquets | sync | 宴席台账自动同步操作 |
+| 宴席批量移出明细 | banquets | update | 从宴席批量移出明细记录 |
+| 回收站手动过期清理 | recycle_bin | clear | 手动清理过期回收站记录 |
+| 定时任务保存 | admin_backups | create | 新建/编辑定时备份任务 |
+| 定时任务删除 | admin_backups | delete | 删除定时备份任务 |
+| 定时任务启用/禁用 | admin_backups | status_change | 启停定时备份任务 |
+
+### 15.4 模块 C：提示词优化 + 自定义模板
+
+#### 场景化默认模板
+
+`webhook_utils.py` 新增 `DEFAULT_MESSAGE_TEMPLATES` 字典，按事件类型场景化：
+
+```
+create:        【{page}·新增】操作人 {user} 在{page}新增了「{title}」
+update:        【{page}·修改】操作人 {user} 更新了「{title}」的信息
+delete:        【{page}·删除】操作人 {user} 删除了「{title}」（已移入回收站）
+batch_delete:  【{page}·批量删除】操作人 {user} 批量删除了 {count} 条记录
+clear:         【{page}·清空】操作人 {user} 清空了{page}数据（共 {count} 条）
+sync:          【{page}·同步】操作人 {user} 执行了同步操作：{detail}
+restore:       【{page}·还原】操作人 {user} 还原了「{title}」
+...
+```
+
+#### 自定义模板渲染逻辑
+
+`_render_message` 函数优先级：
+1. 页面×事件级别自定义模板（`templates["event:page"]`）
+2. 事件级别自定义模板（`templates["event"]`）
+3. 系统默认模板（`DEFAULT_MESSAGE_TEMPLATES[event_category]`）
+4. 兜底格式 `【{page_name}·{action_label}】{default_title}`
+
+#### 敏感页面脱敏
+
+`SENSITIVE_PAGES = {'ai_assistant', 'ai_config', 'security', 'admin_webhooks', 'admin_backups'}`
+
+敏感页面的推送消息详情部分按事件类型细化脱敏描述，不泄露 Token/密钥/密码等敏感信息。
+
+### 15.5 模块 D：WebDAV 定时任务查看权限修复
+
+**根因**：`routes_ext.py` 第 3460 行条件 `_allow_view and current_user.can_view_others_backup()` 把"查看开关"（`allow_view_others_tasks`）与"备份数据权限"（`can_view_others_backup()`）强绑定，导致管理员开启查看开关后普通用户仍看不到他人定时任务。
+
+**修复**：解耦为两个独立维度
+- 查看：仅由 `allow_view_others_tasks` 全局开关控制
+- 编辑/删除：由 `scheduled_task_authorized` + 创建者隔离控制
+
+### 15.6 模块 E：编辑回显 Bug 修复
+
+**根因**：`admin_webhooks.html` 第 923 行 `allPageKeys` 硬编码 14 项，缺少 `permission_tickets`，导致编辑时权限工单页面的矩阵勾选无法正确回填。
+
+**修复**：
+- 新增 Modal 和编辑 Modal 的矩阵改为后端动态注入 `ALL_PAGES`/`EVENT_COLUMNS`/`PAGE_EVENT_MATRIX`，前端不再硬编码
+- 编辑回填逻辑重构为 `fillEditMatrix(notifyPagesJson)` 函数，从 JSON 数据自动回填
+- 新增 `fillEditTemplates(templatesJson)` 回填消息模板自定义内容
+- 编辑按钮新增 `data-message-templates` 属性传值
+
+### 15.7 事件分类体系重构
+
+`webhook_utils.py` 新增以下数据结构：
+
+- `EVENT_COLUMNS`：12 个事件大类及显示名称
+- `PAGE_EVENT_MATRIX`：15 个页面各自适用的事件列（适用才显示勾选框）
+- `EVENT_SWITCH_MAP`：事件类型到 WebhookConfig 开关字段的映射（batch_delete/clear 归 delete 开关；sync 归 system 开关；restore 归 status_change 开关）
+- `DEFAULT_MESSAGE_TEMPLATES`：12 个事件大类的场景化默认提示词
+- `SENSITIVE_PAGES`：需要脱敏的页面集合
+- `_get_event_category()`：将具体事件类型（如 record_create）归入大类（如 create）
+- `_render_message()`：渲染推送消息，支持自定义模板优先 + 默认模板 + 脱敏
+
+### 15.8 后端注入适配
+
+`routes_ext.py` `admin_webhooks()` 路由新增模板变量注入：
+- `ALL_PAGES`：PAGE_NAMES 字典（页面标识 → 显示名称）
+- `EVENT_COLUMNS`：事件类型 → 显示名称
+- `PAGE_EVENT_MATRIX`：页面×事件适用矩阵
+- `DEFAULT_TEMPLATES`：默认提示词模板
+
+### 15.9 涉及文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `webhook_utils.py` | 新增 EVENT_COLUMNS/PAGE_EVENT_MATRIX/EVENT_SWITCH_MAP/DEFAULT_MESSAGE_TEMPLATES/SENSITIVE_PAGES；_get_event_category/_render_message/_sanitize_details 重构；_page_matches 空配置放行 |
+| `routes_ext.py` | WebDAV 定时任务查看权限解耦；推送覆盖补全（宴席同步/批量移出/回收站清理/定时任务增删改）；admin_webhooks 路由注入矩阵数据 |
+| `templates/admin_webhooks.html` | 新增/编辑 Modal 三段式→Tab 三面板（事件开关/矩阵/模板）；JS 函数重构（matrixSelectAll/matrixClearAll/assembleNotifyPages/assembleMessageTemplates/fillEditMatrix/fillEditTemplates）；编辑按钮新增 data-message-templates |
+| `templates/admin_backups.html` | allow_view_others_tasks 复选框补充说明文案 |
 
 > AI生成

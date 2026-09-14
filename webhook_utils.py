@@ -412,7 +412,7 @@ def test_single_webhook(wh, sender_name="admin"):
     return success, code, body
 
 
-# === 页面标识与事件类型映射 ===
+# === 页面标识与事件类型映射 (V10.1 矩阵重构) ===
 
 PAGE_NAMES = {
     'ledger': '礼金账本', 'banquets': '专属宴席', 'reminders': '纪念日备忘',
@@ -424,11 +424,44 @@ PAGE_NAMES = {
 
 ALL_PAGES = list(PAGE_NAMES.keys())
 
+# 矩阵列定义：事件类型 → 显示名称
+EVENT_COLUMNS = {
+    'create': '新增', 'update': '修改/编辑', 'delete': '删除',
+    'batch_delete': '批量删除', 'clear': '清空', 'sync': '同步',
+    'restore': '还原', 'status_change': '状态变更',
+    'reminder': '提醒', 'broadcast': '广播',
+    'security': '安全风控', 'system': '系统配置',
+}
+
+# 页面 × 事件适用矩阵（每页面支持哪些事件列）
+PAGE_EVENT_MATRIX = {
+    'ledger':            ['create', 'update', 'delete', 'batch_delete', 'clear'],
+    'banquets':          ['create', 'update', 'delete', 'batch_delete', 'sync'],
+    'reminders':         ['create', 'update', 'delete', 'batch_delete', 'reminder'],
+    'reconciliation':    ['sync'],
+    'recycle_bin':       ['restore', 'delete', 'batch_delete', 'clear'],
+    'admin_users':       ['create', 'update', 'delete', 'status_change'],
+    'admin_logs':        ['delete', 'clear'],
+    'admin_broadcasts':  ['create', 'broadcast'],
+    'admin_webhooks':    ['create', 'update', 'delete', 'status_change'],
+    'admin_backups':     ['create', 'update', 'delete', 'status_change', 'system'],
+    'ai_assistant':      ['create'],
+    'ai_config':         ['update', 'system'],
+    'security':          ['security'],
+    'invites':           ['create', 'delete', 'status_change'],
+    'permission_tickets': ['create', 'status_change', 'delete'],
+}
+
 # 事件类型 → 开关字段名映射
+# batch_delete/clear 归 delete 组开关；sync 归 system 组开关；restore 归 status_change 组开关
 EVENT_SWITCH_MAP = {
     'create': 'notify_on_add', 'record_create': 'notify_on_add',
     'update': 'notify_on_update', 'record_update': 'notify_on_update',
-    'delete': 'notify_on_delete', 'record_delete': 'notify_on_delete', 'batch_delete': 'notify_on_delete',
+    'delete': 'notify_on_delete', 'record_delete': 'notify_on_delete',
+    'batch_delete': 'notify_on_delete',
+    'clear': 'notify_on_delete',
+    'sync': 'notify_on_system',
+    'restore': 'notify_on_status_change',
     'status_change': 'notify_on_status_change',
     'reminder': 'notify_on_reminder', 'auto_reminder': 'notify_on_reminder',
     'broadcast': 'notify_on_broadcast',
@@ -439,9 +472,25 @@ EVENT_SWITCH_MAP = {
 # 需要脱敏的页面（推送消息中不包含敏感数据详情）
 SENSITIVE_PAGES = {'ai_assistant', 'ai_config', 'security', 'admin_webhooks', 'admin_backups'}
 
+# 场景化默认提示词模板（支持占位符: {user}/{page}/{action}/{title}/{detail}/{time}/{count}）
+DEFAULT_MESSAGE_TEMPLATES = {
+    'create':        '【{page}·新增】操作人 {user} 在{page}新增了「{title}」',
+    'update':        '【{page}·修改】操作人 {user} 更新了「{title}」的信息',
+    'delete':        '【{page}·删除】操作人 {user} 删除了「{title}」（已移入回收站）',
+    'batch_delete':  '【{page}·批量删除】操作人 {user} 批量删除了 {count} 条记录',
+    'clear':         '【{page}·清空】操作人 {user} 清空了{page}数据（共 {count} 条）',
+    'sync':          '【{page}·同步】操作人 {user} 执行了同步操作：{detail}',
+    'restore':       '【{page}·还原】操作人 {user} 还原了「{title}」',
+    'status_change': '【{page}·状态变更】操作人 {user} 变更了「{title}」的状态',
+    'reminder':      '【{page}·提醒】{detail}',
+    'broadcast':     '【{page}·广播】{detail}',
+    'security':      '【{page}·安全】操作人 {user} 触发了安全操作',
+    'system':        '【{page}·系统配置】操作人 {user} 更新了系统配置',
+}
+
 
 def _get_notify_pages(webhook):
-    """获取 Webhook 配置的页面过滤列表，返回 {event_category: [page_keys]} 或 None"""
+    """获取 Webhook 配置的页面过滤列表，返回 {event_category: [page_keys]} 或空 dict"""
     import json as _json
     raw = getattr(webhook, 'notify_pages', None) or '{}'
     try:
@@ -454,29 +503,35 @@ def _get_notify_pages(webhook):
 
 
 def _page_matches(webhook, event_type, page_key):
-    """检查该 Webhook 通道是否配置了当前页面的当前事件类型"""
+    """检查该 Webhook 通道是否配置了当前页面的当前事件类型
+    V10.1: notify_pages 为空时不过滤（对全部页面放行）
+    """
     if not page_key:
-        return True  # 未指定页面，默认放行
+        return True
     notify_pages = _get_notify_pages(webhook)
     if not notify_pages:
-        # 没有配置页面过滤，默认只放行 ledger
-        return page_key == 'ledger'
-    # 事件分类映射
+        return True  # V10.1: 未配置矩阵 = 不过滤，对全部页面放行
     event_category = _get_event_category(event_type)
     pages_for_event = notify_pages.get(event_category, [])
-    if not pages_for_event:
-        return False
     return page_key in pages_for_event
 
 
 def _get_event_category(event_type):
-    """将具体事件类型归入大类"""
+    """将具体事件类型归入大类 — V10.1: batch_delete/clear/sync/restore 独立为大类"""
     if event_type in ('create', 'record_create'):
         return 'create'
     if event_type in ('update', 'record_update'):
         return 'update'
-    if event_type in ('delete', 'record_delete', 'batch_delete'):
+    if event_type in ('delete', 'record_delete'):
         return 'delete'
+    if event_type in ('batch_delete',):
+        return 'batch_delete'
+    if event_type in ('clear',):
+        return 'clear'
+    if event_type in ('sync',):
+        return 'sync'
+    if event_type in ('restore',):
+        return 'restore'
     if event_type in ('status_change',):
         return 'status_change'
     if event_type in ('reminder', 'auto_reminder'):
@@ -491,54 +546,78 @@ def _get_event_category(event_type):
 
 
 def _render_message(webhook, event_type, page_key, default_title, default_details, user_name):
-    """渲染推送消息，支持自定义模板"""
+    """渲染推送消息 — V10.1: 场景化默认提示词 + 页面×事件自定义模板"""
     import json as _json
+    import re as _re
     page_name = PAGE_NAMES.get(page_key, page_key or '系统')
-    # 构建默认消息
-    type_labels = {
-        'create': '新增', 'record_create': '新增', 'update': '修改', 'record_update': '修改',
-        'delete': '删除', 'record_delete': '删除', 'batch_delete': '批量删除',
-        'status_change': '状态变更', 'reminder': '提醒', 'auto_reminder': '提醒',
-        'broadcast': '广播', 'security': '安全风控', 'system': '系统操作',
+    event_cat = _get_event_category(event_type)
+    action_label = EVENT_COLUMNS.get(event_cat, EVENT_COLUMNS.get(event_type, '操作'))
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # 从 default_details 中提取 count（如果有）
+    count = ''
+    count_match = _re.search(r'数量[：:]\s*(\d+)', default_details or '')
+    if count_match:
+        count = count_match.group(1)
+    else:
+        count_match2 = _re.search(r'(\d+)\s*(条|个|笔)', default_details or '')
+        if count_match2:
+            count = count_match2.group(1)
+
+    # 占位符上下文
+    fmt_ctx = {
+        'user': user_name, 'page': page_name, 'action': action_label,
+        'title': default_title or '', 'detail': default_details or '',
+        'time': now_str, 'count': count,
     }
-    action_label = type_labels.get(event_type, '操作')
-    title = f'【{page_name}·{action_label}】{default_title}'
-    details = default_details or ''
-    # 脱敏处理
-    if page_key in SENSITIVE_PAGES:
-        details = _sanitize_details(page_key, event_type, user_name, details)
-        title = f'【{page_name}·{action_label}】{user_name} 执行了{action_label}操作'
-    # 尝试使用自定义模板
+
+    # 先尝试自定义模板（页面×事件级别优先，再事件级别）
     raw_templates = getattr(webhook, 'message_templates', None) or '{}'
     try:
         templates = _json.loads(raw_templates) if isinstance(raw_templates, str) else raw_templates
         if isinstance(templates, dict):
-            template_key = f'{event_type}:{page_key}'
-            tpl = templates.get(template_key) or templates.get(event_type)
-            if tpl and isinstance(tpl, str):
-                title = tpl.format(
-                    user=user_name, page=page_name, action=action_label,
-                    detail=default_details or '', time=datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    count='', title=default_title
-                )
+            template_key = f'{event_cat}:{page_key}'
+            tpl = templates.get(template_key) or templates.get(event_cat) or templates.get(event_type)
+            if tpl and isinstance(tpl, str) and tpl.strip():
+                title = tpl.format(**fmt_ctx)
                 details = ''
+                return title, details
     except Exception:
         pass
+
+    # 使用场景化默认模板
+    default_tpl = DEFAULT_MESSAGE_TEMPLATES.get(event_cat) or DEFAULT_MESSAGE_TEMPLATES.get(event_type)
+    if default_tpl:
+        try:
+            title = default_tpl.format(**fmt_ctx)
+        except Exception:
+            title = f'【{page_name}·{action_label}】{default_title}'
+    else:
+        title = f'【{page_name}·{action_label}】{default_title}'
+
+    details = default_details or ''
+
+    # 敏感页面脱敏
+    if page_key in SENSITIVE_PAGES:
+        details = _sanitize_details(page_key, event_type, user_name, details)
+
     return title, details
 
 
 def _sanitize_details(page_key, event_type, user_name, details):
-    """对敏感页面的推送内容进行脱敏"""
+    """对敏感页面的推送内容进行脱敏 — V10.1: 按事件类型细化描述"""
+    event_cat = _get_event_category(event_type)
+    action_label = EVENT_COLUMNS.get(event_cat, '操作')
     if page_key == 'ai_assistant':
-        return f'{user_name} 在 AI 助手进行了操作（内容已脱敏）'
+        return f'{user_name} 在 AI 助手执行了{action_label}操作（内容已脱敏）'
     if page_key == 'ai_config':
-        return f'{user_name} 更新了 AI 配置（密钥等敏感信息已脱敏）'
+        return f'{user_name} {action_label}了 AI 配置（密钥等敏感信息已脱敏）'
     if page_key == 'security':
-        return f'{user_name} 触发了安全风控（详细信息已脱敏）'
+        return f'{user_name} 触发了安全风控{action_label}操作（详细信息已脱敏）'
     if page_key == 'admin_webhooks':
-        return f'{user_name} 修改了 Webhook 通道配置（Token等敏感信息已脱敏）'
+        return f'{user_name} {action_label}了 Webhook 通道配置（Token等敏感信息已脱敏）'
     if page_key == 'admin_backups':
-        return f'{user_name} 执行了备份操作（密码等敏感信息已脱敏）'
+        return f'{user_name} 执行了备份{action_label}操作（密码等敏感信息已脱敏）'
     return details
 
 

@@ -1248,6 +1248,17 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return redirect(url_for('recycle_bin_view'))
 
         cleanup_expired_recycle_items()
+        safe_log('手动清理过期数据', '手动清理了回收站过期数据', user=current_user)
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'clear',
+                f'手动清理回收站过期数据',
+                f'操作人：{current_user.username} | 页面：回收站 | 操作：手动清理过期数据',
+                page_key='recycle_bin', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash('已执行回收站过期数据清理！', 'success')
         return redirect(url_for('recycle_bin_view'))
 
@@ -1728,6 +1739,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         try:
             created, linked = sync_banquets_from_ledger(current_user, force_restore=True)
             safe_log('同步专属大账本', f"从礼金账本手动拉取数据：自动同步/生成 {created} 个大账本，关联更新 {linked} 条记录")
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'sync',
+                    f'同步宴席大账本',
+                    f'操作人：{current_user.username} | 页面：专属宴席 | 新增/恢复 {created} 个大账本，关联更新 {linked} 条记录',
+                    page_key='banquets', user_name=current_user.username,
+                    operator_id=current_user.id
+                )
+            except Exception:
+                pass
             flash(f'成功从礼金账本拉取数据同步！新增/恢复了 {created} 个专属大账本，关联更新 {linked} 条礼金记录。', 'success')
         except Exception as e:
             db.session.rollback()
@@ -2059,6 +2080,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         db.session.commit()
         safe_log('批量移出宴席明细', f"从专属宴席 [{b.title}] 中批量移出了 {count} 笔记录（保留在主账本中）")
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'update',
+                f'批量移出宴席明细 {count} 笔',
+                f'操作人：{current_user.username} | 页面：专属宴席 | 宴席：{b.title} | 移出数量：{count}',
+                page_key='banquets', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         if is_ajax:
             return jsonify({'code': 200, 'message': f'成功将选中的 {count} 笔明细移出此专属宴席（数据仍保留在主账本）！', 'count': count})
         flash(f'成功将选中的 {count} 笔明细移出此专属宴席（数据仍保留在主账本）！', 'success')
@@ -3029,7 +3060,12 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         webhooks = WebhookConfig.query.order_by(WebhookConfig.created_at.desc()).all()
         logs = WebhookLog.query.order_by(WebhookLog.created_at.desc()).limit(500).all()
-        return render_template('admin_webhooks.html', webhooks=webhooks, logs=logs)
+        # V10.1: 注入矩阵数据到模板
+        from webhook_utils import PAGE_NAMES as _PAGE_NAMES, EVENT_COLUMNS as _EVENT_COLUMNS, PAGE_EVENT_MATRIX as _PAGE_EVENT_MATRIX, DEFAULT_MESSAGE_TEMPLATES as _DEFAULT_TEMPLATES
+        return render_template('admin_webhooks.html', webhooks=webhooks, logs=logs,
+                               ALL_PAGES=_PAGE_NAMES, EVENT_COLUMNS=_EVENT_COLUMNS,
+                               PAGE_EVENT_MATRIX=_PAGE_EVENT_MATRIX,
+                               DEFAULT_TEMPLATES=_DEFAULT_TEMPLATES)
 
     @app.route('/admin/webhooks/create', methods=['POST'])
     @login_required
@@ -3451,13 +3487,14 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         # V3: 按用户获取配置（管理员获取全局配置，普通用户获取自己的私有配置）
         config = BackupConfig.get_config(None if current_user.is_admin else current_user.id)
-        # V3: 定时任务按用户隔离（管理员看全部，普通用户在 allow_view_others_tasks 开启且权限>=1时看全部）
+        # V10.1: 定时任务查看权限解耦——"允许查看他人定时任务"开关仅控制查看，与备份数据权限无关
         if current_user.is_admin:
             scheduled_tasks = ScheduledBackupTask.query.order_by(ScheduledBackupTask.created_at.desc()).all()
         else:
             _global_cfg = BackupConfig.get_config(None)
             _allow_view = getattr(_global_cfg, 'allow_view_others_tasks', False)
-            if _allow_view and current_user.can_view_others_backup():
+            if _allow_view:
+                # 开关开启：普通用户可查看全部定时任务（只读），编辑/删除仍由后端权限隔离
                 scheduled_tasks = ScheduledBackupTask.query.order_by(ScheduledBackupTask.created_at.desc()).all()
             else:
                 scheduled_tasks = ScheduledBackupTask.query.filter_by(created_by=current_user.id).order_by(ScheduledBackupTask.created_at.desc()).all()
@@ -4218,6 +4255,17 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         db.session.commit()
         safe_log('保存定时备份任务', f'任务: {name}, Cron: {cron_expr}, 启用: {is_enabled}, 加密: {encrypt_enabled}', user=current_user)
+        try:
+            _evt = 'create' if not task_id else 'update'
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), _evt,
+                f'定时任务「{name}」',
+                f'操作人：{current_user.username} | 页面：WebDAV备份 | 任务：{name} | Cron：{cron_expr} | 启用：{"是" if is_enabled else "否"}',
+                page_key='admin_backups', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'定时备份任务「{name}」已保存', 'success')
         return redirect(url_for('admin_backups'))
 
@@ -4242,6 +4290,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         db.session.delete(task)
         db.session.commit()
         safe_log('删除定时备份任务', f'任务: {name}', user=current_user)
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'delete',
+                f'删除定时任务「{name}」',
+                f'操作人：{current_user.username} | 页面：WebDAV备份 | 任务：{name}',
+                page_key='admin_backups', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'定时备份任务「{name}」已删除', 'info')
         return redirect(url_for('admin_backups'))
 
@@ -4263,6 +4321,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         task.is_enabled = not task.is_enabled
         db.session.commit()
         safe_log('切换定时备份任务状态', f'任务: {task.name}, 状态: {"启用" if task.is_enabled else "禁用"}', user=current_user)
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
+                f'定时任务状态变更「{task.name}」',
+                f'操作人：{current_user.username} | 页面：WebDAV备份 | 任务：{task.name} | 状态：{"启用" if task.is_enabled else "禁用"}',
+                page_key='admin_backups', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({'success': True, 'is_enabled': task.is_enabled})
 
     @app.route('/admin/backups/scheduled_tasks/<int:task_id>/execution_logs', methods=['GET'])

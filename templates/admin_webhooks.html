@@ -119,6 +119,7 @@
                data-notify-system="{{ 1 if w.notify_on_system else 0 }}"
                data-notify-status="{{ 1 if w.notify_on_status_change else 0 }}"
                data-notify-pages="{{ w.notify_pages or '{}' }}"
+               data-message-templates="{{ w.message_templates or '{}' }}"
                title="编辑配置">
                 <i class="fa-solid fa-pen-to-square"></i>
               </button>
@@ -415,92 +416,94 @@
             </div>
           </div>
 
-           <!-- 触发事件配置 -->
-           <div class="mb-2">
-             <label class="form-label fw-bold">触发通知事件</label>
-             <div class="row g-2">
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_add" id="newNotifyAdd" checked>
-                   <label class="form-check-label small" for="newNotifyAdd">礼金记账新增通知</label>
-                 </div>
+           <!-- V10.1: Tab 内嵌模式 — 基础事件开关 / 推送配置矩阵 / 消息模板 -->
+           <input type="hidden" name="message_templates" id="newMessageTemplatesHidden" value="{}">
+           <ul class="nav nav-tabs mb-3" id="newWebhookTabs" role="tablist">
+             <li class="nav-item" role="presentation">
+               <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#newTabEvents" type="button" role="tab"><i class="fa-solid fa-toggle-on me-1"></i>基础事件开关</button>
+             </li>
+             <li class="nav-item" role="presentation">
+               <button class="nav-link" data-bs-toggle="tab" data-bs-target="#newTabMatrix" type="button" role="tab"><i class="fa-solid fa-table-cells me-1"></i>推送配置矩阵</button>
+             </li>
+             <li class="nav-item" role="presentation">
+               <button class="nav-link" data-bs-toggle="tab" data-bs-target="#newTabTemplates" type="button" role="tab"><i class="fa-solid fa-comment-dots me-1"></i>消息模板</button>
+             </li>
+           </ul>
+           <div class="tab-content">
+             <!-- Tab 1: 基础事件开关 -->
+             <div class="tab-pane fade show active" id="newTabEvents" role="tabpanel">
+               <div class="row g-2">
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_add" id="newNotifyAdd" checked><label class="form-check-label small" for="newNotifyAdd">新增操作</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_delete" id="newNotifyDelete" checked><label class="form-check-label small" for="newNotifyDelete">删除操作（含批量删除/清空）</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_update" id="newNotifyUpdate"><label class="form-check-label small" for="newNotifyUpdate">修改/编辑操作</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_reminder" id="newNotifyReminder" checked><label class="form-check-label small" for="newNotifyReminder">纪念日提醒</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="newNotifyBroadcast" checked><label class="form-check-label small" for="newNotifyBroadcast">站内广播</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_security" id="newNotifySecurity"><label class="form-check-label small" for="newNotifySecurity">安全风控</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_system" id="newNotifySystem" checked><label class="form-check-label small" for="newNotifySystem">系统配置/同步</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_status_change" id="newNotifyStatusChange"><label class="form-check-label small" for="newNotifyStatusChange">状态变更/还原</label></div></div>
                </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_delete" id="newNotifyDelete" checked>
-                   <label class="form-check-label small" for="newNotifyDelete">礼金记录删除预警</label>
-                 </div>
-               </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_reminder" id="newNotifyReminder" checked>
-                   <label class="form-check-label small" for="newNotifyReminder">亲友重要纪念日临期提醒</label>
-                 </div>
-               </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="newNotifyBroadcast" checked>
-                   <label class="form-check-label small" for="newNotifyBroadcast">系统站内重要广播推送</label>
-                 </div>
-               </div>
+               <div class="form-text small text-muted mt-1">勾选大类事件开关后，可在「推送配置矩阵」中精细控制每个页面的推送范围。</div>
              </div>
-           </div>
 
-           <!-- 扩展事件开关 -->
-           <div class="mb-2">
-             <label class="form-label fw-bold small text-muted">扩展事件类型</label>
-             <div class="row g-2">
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_update" id="newNotifyUpdate">
-                   <label class="form-check-label small" for="newNotifyUpdate">修改/更新操作</label>
+             <!-- Tab 2: 推送配置矩阵（页面×事件） -->
+             <div class="tab-pane fade" id="newTabMatrix" role="tabpanel">
+               <div class="d-flex justify-content-between align-items-center mb-2">
+                 <span class="small text-muted">勾选 = 该页面该事件触发推送；全选=全推，不勾=不推</span>
+                 <div class="btn-group btn-group-sm">
+                   <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="matrixSelectAll('new')">全选</button>
+                   <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="matrixClearAll('new')">清空</button>
                  </div>
                </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_security" id="newNotifySecurity">
-                   <label class="form-check-label small" for="newNotifySecurity">安全相关操作</label>
-                 </div>
-               </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_system" id="newNotifySystem" checked>
-                   <label class="form-check-label small" for="newNotifySystem">系统配置变更</label>
-                 </div>
-               </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_status_change" id="newNotifyStatusChange">
-                   <label class="form-check-label small" for="newNotifyStatusChange">状态变更（启用/禁用等）</label>
-                 </div>
+               <div class="border rounded-3 bg-light p-2" style="max-height: 320px; overflow-y: auto;">
+                 <table class="table table-sm table-bordered table-hover mb-0" id="newMatrixTable">
+                   <thead class="table-light sticky-top">
+                     <tr>
+                       <th class="text-center" style="min-width: 100px;">页面</th>
+                       {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                       <th class="text-center text-nowrap small" title="{{ ev_label }}">{{ ev_label }}</th>
+                       {% endfor %}
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {% for page_key, page_label in ALL_PAGES.items() %}
+                     <tr>
+                       <td class="small fw-bold text-nowrap">{{ page_label }}</td>
+                       {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                       <td class="text-center">
+                         {% if ev_key in PAGE_EVENT_MATRIX[page_key] %}
+                         <input class="form-check-input matrix-cb" type="checkbox" data-page="{{ page_key }}" data-event="{{ ev_key }}" id="new_m_{{ page_key }}_{{ ev_key }}" checked>
+                         {% else %}
+                         <span class="text-muted" style="opacity:0.3;">—</span>
+                         {% endif %}
+                       </td>
+                       {% endfor %}
+                     </tr>
+                     {% endfor %}
+                   </tbody>
+                 </table>
                </div>
              </div>
-           </div>
 
-           <!-- 推送页面矩阵 -->
-           <div class="mb-2">
-             <div class="d-flex justify-content-between align-items-center mb-1">
-               <label class="form-label fw-bold small text-muted mb-0">页面推送矩阵（勾选需推送的页面）</label>
-               <div class="btn-group btn-group-sm">
-                 <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="selectAllPages('new')">全选</button>
-                 <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="clearAllPages('new')">清空</button>
+             <!-- Tab 3: 消息模板自定义 -->
+             <div class="tab-pane fade" id="newTabTemplates" role="tabpanel">
+               <div class="form-text small text-muted mb-2">
+                 <i class="fa-solid fa-circle-info me-1"></i>可为每个「页面×事件」自定义推送消息内容。留空则使用系统默认模板。
+                 支持占位符: <code>{user}</code> <code>{page}</code> <code>{action}</code> <code>{title}</code> <code>{detail}</code> <code>{time}</code> <code>{count}</code>
                </div>
-             </div>
-             <div class="border rounded-3 p-2 bg-light" style="max-height: 200px; overflow-y: auto;">
-               <div class="row g-1" id="newPageMatrix">
-                  {% set pages = [('ledger','礼金账本'),('banquets','专属宴席'),('reminders','纪念日备忘'),('reconciliation','人情对账'),('recycle_bin','回收站'),('admin_users','用户管理'),('admin_logs','操作审计'),('admin_broadcasts','系统广播'),('admin_webhooks','Webhook通知'),('admin_backups','WebDAV备份'),('ai_assistant','AI助手'),('ai_config','AI配置'),('security','系统安全'),('invites','邀请链接'),('permission_tickets','权限工单')] %}
-                  {% for key, label in pages %}
-                  <div class="col-sm-4 col-md-3">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" name="notify_pages_all" value="{{ key }}" id="new_page_{{ key }}" checked>
-                     <label class="form-check-label small" for="new_page_{{ key }}">{{ label }}</label>
-                   </div>
+               <div class="border rounded-3 bg-light p-2" style="max-height: 320px; overflow-y: auto;" id="newTemplateList">
+                 {% for page_key, page_label in ALL_PAGES.items() %}
+                 {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                 {% if ev_key in PAGE_EVENT_MATRIX[page_key] %}
+                 <div class="row g-1 mb-1 align-items-center">
+                   <div class="col-3"><span class="badge bg-secondary-subtle text-secondary small">{{ page_label }}·{{ ev_label }}</span></div>
+                   <div class="col-9"><input type="text" class="form-control form-control-sm template-input" data-page="{{ page_key }}" data-event="{{ ev_key }}" placeholder="{{ DEFAULT_TEMPLATES[ev_key] }}" title="{{ page_label }}·{{ ev_label }} 消息模板"></div>
                  </div>
+                 {% endif %}
+                 {% endfor %}
                  {% endfor %}
                </div>
              </div>
-              <div class="form-text small text-muted">勾选页面后，仅推送勾选页面的操作通知；不勾选任何页面则推送全部。</div>
-            </div>
+           </div>
         </div>
         <div class="modal-footer border-light">
           <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
@@ -600,87 +603,90 @@
             </div>
           </div>
 
-           <!-- 触发事件配置 -->
-           <div class="mb-2">
-             <label class="form-label fw-bold">触发通知事件</label>
-             <div class="row g-2">
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_add" id="editNotifyAdd">
-                   <label class="form-check-label small" for="editNotifyAdd">礼金记账新增通知</label>
-                 </div>
+           <!-- V10.1: Tab 内嵌模式 — 基础事件开关 / 推送配置矩阵 / 消息模板 -->
+           <input type="hidden" name="message_templates" id="editMessageTemplatesHidden" value="{}">
+           <ul class="nav nav-tabs mb-3" id="editWebhookTabs" role="tablist">
+             <li class="nav-item" role="presentation">
+               <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#editTabEvents" type="button" role="tab"><i class="fa-solid fa-toggle-on me-1"></i>基础事件开关</button>
+             </li>
+             <li class="nav-item" role="presentation">
+               <button class="nav-link" data-bs-toggle="tab" data-bs-target="#editTabMatrix" type="button" role="tab"><i class="fa-solid fa-table-cells me-1"></i>推送配置矩阵</button>
+             </li>
+             <li class="nav-item" role="presentation">
+               <button class="nav-link" data-bs-toggle="tab" data-bs-target="#editTabTemplates" type="button" role="tab"><i class="fa-solid fa-comment-dots me-1"></i>消息模板</button>
+             </li>
+           </ul>
+           <div class="tab-content">
+             <!-- Tab 1: 基础事件开关 -->
+             <div class="tab-pane fade show active" id="editTabEvents" role="tabpanel">
+               <div class="row g-2">
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_add" id="editNotifyAdd"><label class="form-check-label small" for="editNotifyAdd">新增操作</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_delete" id="editNotifyDelete"><label class="form-check-label small" for="editNotifyDelete">删除操作（含批量删除/清空）</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_update" id="editNotifyUpdate"><label class="form-check-label small" for="editNotifyUpdate">修改/编辑操作</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_reminder" id="editNotifyReminder"><label class="form-check-label small" for="editNotifyReminder">纪念日提醒</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="editNotifyBroadcast"><label class="form-check-label small" for="editNotifyBroadcast">站内广播</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_security" id="editNotifySecurity"><label class="form-check-label small" for="editNotifySecurity">安全风控</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_system" id="editNotifySystem" checked><label class="form-check-label small" for="editNotifySystem">系统配置/同步</label></div></div>
+                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_status_change" id="editNotifyStatusChange"><label class="form-check-label small" for="editNotifyStatusChange">状态变更/还原</label></div></div>
                </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_delete" id="editNotifyDelete">
-                   <label class="form-check-label small" for="editNotifyDelete">礼金记录删除预警</label>
-                 </div>
-               </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_reminder" id="editNotifyReminder">
-                   <label class="form-check-label small" for="editNotifyReminder">亲友重要纪念日临期提醒</label>
-                 </div>
-               </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="editNotifyBroadcast">
-                   <label class="form-check-label small" for="editNotifyBroadcast">系统站内重要广播推送</label>
-                 </div>
-               </div>
+               <div class="form-text small text-muted mt-1">勾选大类事件开关后，可在「推送配置矩阵」中精细控制每个页面的推送范围。</div>
              </div>
-           </div>
 
-           <!-- 扩展事件开关 -->
-           <div class="mb-2">
-             <label class="form-label fw-bold small text-muted">扩展事件类型</label>
-             <div class="row g-2">
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_update" id="editNotifyUpdate">
-                   <label class="form-check-label small" for="editNotifyUpdate">修改/更新操作</label>
+             <!-- Tab 2: 推送配置矩阵（页面×事件） -->
+             <div class="tab-pane fade" id="editTabMatrix" role="tabpanel">
+               <div class="d-flex justify-content-between align-items-center mb-2">
+                 <span class="small text-muted">勾选 = 该页面该事件触发推送；全选=全推，不勾=不推</span>
+                 <div class="btn-group btn-group-sm">
+                   <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="matrixSelectAll('edit')">全选</button>
+                   <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="matrixClearAll('edit')">清空</button>
                  </div>
                </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_security" id="editNotifySecurity">
-                   <label class="form-check-label small" for="editNotifySecurity">安全相关操作</label>
-                 </div>
-               </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_system" id="editNotifySystem" checked>
-                   <label class="form-check-label small" for="editNotifySystem">系统配置变更</label>
-                 </div>
-               </div>
-               <div class="col-sm-6">
-                 <div class="form-check">
-                   <input class="form-check-input" type="checkbox" name="notify_on_status_change" id="editNotifyStatusChange">
-                   <label class="form-check-label small" for="editNotifyStatusChange">状态变更（启用/禁用等）</label>
-                 </div>
+               <div class="border rounded-3 bg-light p-2" style="max-height: 320px; overflow-y: auto;">
+                 <table class="table table-sm table-bordered table-hover mb-0" id="editMatrixTable">
+                   <thead class="table-light sticky-top">
+                     <tr>
+                       <th class="text-center" style="min-width: 100px;">页面</th>
+                       {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                       <th class="text-center text-nowrap small" title="{{ ev_label }}">{{ ev_label }}</th>
+                       {% endfor %}
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {% for page_key, page_label in ALL_PAGES.items() %}
+                     <tr>
+                       <td class="small fw-bold text-nowrap">{{ page_label }}</td>
+                       {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                       <td class="text-center">
+                         {% if ev_key in PAGE_EVENT_MATRIX[page_key] %}
+                         <input class="form-check-input matrix-cb" type="checkbox" data-page="{{ page_key }}" data-event="{{ ev_key }}" id="edit_m_{{ page_key }}_{{ ev_key }}">
+                         {% else %}
+                         <span class="text-muted" style="opacity:0.3;">—</span>
+                         {% endif %}
+                       </td>
+                       {% endfor %}
+                     </tr>
+                     {% endfor %}
+                   </tbody>
+                 </table>
                </div>
              </div>
-           </div>
 
-           <!-- 推送页面矩阵 -->
-           <div class="mb-2">
-             <div class="d-flex justify-content-between align-items-center mb-1">
-               <label class="form-label fw-bold small text-muted mb-0">页面推送矩阵（勾选需推送的页面）</label>
-               <div class="btn-group btn-group-sm">
-                 <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="selectAllPages('edit')">全选</button>
-                 <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="clearAllPages('edit')">清空</button>
+             <!-- Tab 3: 消息模板自定义 -->
+             <div class="tab-pane fade" id="editTabTemplates" role="tabpanel">
+               <div class="form-text small text-muted mb-2">
+                 <i class="fa-solid fa-circle-info me-1"></i>可为每个「页面×事件」自定义推送消息内容。留空则使用系统默认模板。
+                 支持占位符: <code>{user}</code> <code>{page}</code> <code>{action}</code> <code>{title}</code> <code>{detail}</code> <code>{time}</code> <code>{count}</code>
                </div>
-             </div>
-             <div class="border rounded-3 p-2 bg-light" style="max-height: 200px; overflow-y: auto;">
-               <div class="row g-1" id="editPageMatrix">
-                  {% set pages = [('ledger','礼金账本'),('banquets','专属宴席'),('reminders','纪念日备忘'),('reconciliation','人情对账'),('recycle_bin','回收站'),('admin_users','用户管理'),('admin_logs','操作审计'),('admin_broadcasts','系统广播'),('admin_webhooks','Webhook通知'),('admin_backups','WebDAV备份'),('ai_assistant','AI助手'),('ai_config','AI配置'),('security','系统安全'),('invites','邀请链接'),('permission_tickets','权限工单')] %}
-                  {% for key, label in pages %}
-                  <div class="col-sm-4 col-md-3">
-                    <div class="form-check">
-                      <input class="form-check-input" type="checkbox" name="notify_pages_all" value="{{ key }}" id="edit_page_{{ key }}">
-                     <label class="form-check-label small" for="edit_page_{{ key }}">{{ label }}</label>
-                   </div>
+               <div class="border rounded-3 bg-light p-2" style="max-height: 320px; overflow-y: auto;" id="editTemplateList">
+                 {% for page_key, page_label in ALL_PAGES.items() %}
+                 {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                 {% if ev_key in PAGE_EVENT_MATRIX[page_key] %}
+                 <div class="row g-1 mb-1 align-items-center">
+                   <div class="col-3"><span class="badge bg-secondary-subtle text-secondary small">{{ page_label }}·{{ ev_label }}</span></div>
+                   <div class="col-9"><input type="text" class="form-control form-control-sm template-input" data-page="{{ page_key }}" data-event="{{ ev_key }}" placeholder="{{ DEFAULT_TEMPLATES[ev_key] }}" title="{{ page_label }}·{{ ev_label }} 消息模板"></div>
                  </div>
+                 {% endif %}
+                 {% endfor %}
                  {% endfor %}
                </div>
              </div>
@@ -732,37 +738,81 @@ function togglePasswordVisibility(inputId, btn) {
   }
 }
 
-// 页面矩阵全选/清空
-function selectAllPages(prefix) {
-  const container = document.getElementById(prefix + 'PageMatrix');
-  if (container) {
-    container.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+// V10.1: 矩阵全选/清空
+function matrixSelectAll(prefix) {
+  const table = document.getElementById(prefix + 'MatrixTable');
+  if (table) {
+    table.querySelectorAll('input.matrix-cb').forEach(cb => { cb.checked = true; });
   }
 }
-function clearAllPages(prefix) {
-  const container = document.getElementById(prefix + 'PageMatrix');
-  if (container) {
-    container.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+function matrixClearAll(prefix) {
+  const table = document.getElementById(prefix + 'MatrixTable');
+  if (table) {
+    table.querySelectorAll('input.matrix-cb').forEach(cb => { cb.checked = false; });
   }
 }
 
-// 将页面矩阵中勾选的 checkbox 组装为 notify_pages JSON
-// 格式: {"create": [...], "update": [...], "delete": [...], "reminder": [...], "broadcast": [...], "security": [...], "system": [...], "status_change": [...]}
-// 简化方案: 选中的页面统一放入所有事件类别下
+// V10.1: 将矩阵勾选组装为 notify_pages JSON
+// 格式: {"create": ["ledger","banquets",...], "update": [...], ...}
 function assembleNotifyPages(prefix) {
-  const container = document.getElementById(prefix + 'PageMatrix');
-  if (!container) return '{}';
-  const checkedPages = [];
-  container.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
-    checkedPages.push(cb.value);
+  const table = document.getElementById(prefix + 'MatrixTable');
+  if (!table) return '{}';
+  const result = {};
+  table.querySelectorAll('input.matrix-cb:checked').forEach(cb => {
+    const page = cb.dataset.page;
+    const event = cb.dataset.event;
+    if (!result[event]) result[event] = [];
+    result[event].push(page);
   });
-  // 如果全部勾选或不勾选，返回空对象 {} 表示不过滤
-  if (checkedPages.length === 0 || checkedPages.length === 14) return '{}';
-  // 将选中的页面放入各事件类别下
-  const categories = ['create', 'update', 'delete', 'reminder', 'broadcast', 'security', 'system', 'status_change'];
-  const pagesObj = {};
-  categories.forEach(cat => { pagesObj[cat] = checkedPages.slice(); });
-  return JSON.stringify(pagesObj);
+  return JSON.stringify(result);
+}
+
+// V10.1: 将模板输入组装为 message_templates JSON
+// 格式: {"event:page": "自定义模板内容", ...}
+function assembleMessageTemplates(prefix) {
+  const container = document.getElementById(prefix + 'TemplateList');
+  if (!container) return '{}';
+  const result = {};
+  container.querySelectorAll('input.template-input').forEach(input => {
+    const val = input.value.trim();
+    if (val) {
+      const key = input.dataset.event + ':' + input.dataset.page;
+      result[key] = val;
+    }
+  });
+  return JSON.stringify(result);
+}
+
+// V10.1: 从 notify_pages JSON 回填报编辑矩阵
+function fillEditMatrix(notifyPagesJson) {
+  let pagesData = {};
+  try { pagesData = JSON.parse(notifyPagesJson || '{}'); } catch(e) {}
+  const table = document.getElementById('editMatrixTable');
+  if (!table) return;
+  const allCbs = table.querySelectorAll('input.matrix-cb');
+  if (Object.keys(pagesData).length === 0) {
+    // 空配置 = 全选（不过滤）
+    allCbs.forEach(cb => { cb.checked = true; });
+  } else {
+    allCbs.forEach(cb => {
+      const page = cb.dataset.page;
+      const event = cb.dataset.event;
+      const pagesForEvent = pagesData[event] || [];
+      cb.checked = pagesForEvent.includes(page);
+    });
+  }
+}
+
+// V10.1: 从 message_templates JSON 回填报编辑模板
+function fillEditTemplates(templatesJson) {
+  let tplData = {};
+  try { tplData = JSON.parse(templatesJson || '{}'); } catch(e) {}
+  const container = document.getElementById('editTemplateList');
+  if (!container) return;
+  container.querySelectorAll('input.template-input').forEach(input => {
+    const key = input.dataset.event + ':' + input.dataset.page;
+    input.value = tplData[key] || tplData[input.dataset.event] || '';
+  });
 }
 
 // V7: 在 Modal 顶部显示错误提示横幅（替代浏览器原生气泡）
@@ -856,6 +906,7 @@ document.addEventListener('DOMContentLoaded', function() {
     newForm.addEventListener('submit', function(e) {
       e.preventDefault();
       document.getElementById('newNotifyPagesHidden').value = assembleNotifyPages('new');
+      document.getElementById('newMessageTemplatesHidden').value = assembleMessageTemplates('new');
       // V7: 显式必填校验，缺项时在 Modal 顶部明确提示
       const missing = validateWebhookForm(newForm, 'new');
       if (missing.length) {
@@ -871,6 +922,7 @@ document.addEventListener('DOMContentLoaded', function() {
     editForm.addEventListener('submit', function(e) {
       e.preventDefault();
       document.getElementById('editNotifyPagesHidden').value = assembleNotifyPages('edit');
+      document.getElementById('editMessageTemplatesHidden').value = assembleMessageTemplates('edit');
       // V7: 显式必填校验，缺项时在 Modal 顶部明确提示
       const missing = validateWebhookForm(editForm, 'edit');
       if (missing.length) {
@@ -917,32 +969,11 @@ document.addEventListener('DOMContentLoaded', function() {
       document.getElementById('editNotifySystem').checked = (data.notifySystem === '1');
       document.getElementById('editNotifyStatusChange').checked = (data.notifyStatus === '1');
 
-      // 页面矩阵
-      try {
-        const pagesData = JSON.parse(data.notifyPages || '{}');
-        const allPageKeys = ['ledger','banquets','reminders','reconciliation','recycle_bin','admin_users','admin_logs','admin_broadcasts','admin_webhooks','admin_backups','ai_assistant','ai_config','security','invites'];
-        allPageKeys.forEach(pk => {
-          const cb = document.getElementById('edit_page_' + pk);
-          if (cb) {
-            // 如果 pagesData 为空对象 {}，则默认全部勾选
-            if (Object.keys(pagesData).length === 0) {
-              cb.checked = true;
-            } else {
-              cb.checked = false;
-              // 检查各个事件类别下的页面列表
-              for (const cat in pagesData) {
-                if (Array.isArray(pagesData[cat]) && pagesData[cat].includes(pk)) {
-                  cb.checked = true;
-                  break;
-                }
-              }
-            }
-          }
-        });
-      } catch(e) {
-        // 解析失败时默认全选
-        document.querySelectorAll('#editPageMatrix input[type="checkbox"]').forEach(cb => { cb.checked = true; });
-      }
+      // V10.1: 矩阵回填（替代旧的硬编码 allPageKeys 逻辑，修复 permission_tickets 缺失 bug）
+      fillEditMatrix(data.notifyPages);
+
+      // V10.1: 消息模板回填
+      fillEditTemplates(data.messageTemplates);
 
       toggleConnTypeFields('edit');
       const editModal = new bootstrap.Modal(document.getElementById('editWebhookModal'));

@@ -87,6 +87,7 @@
           <div class="form-check mb-2">
             <input class="form-check-input" type="checkbox" name="allow_view_others_tasks" value="on" id="allowViewOthers" {% if allow_view_others %}checked{% endif %}>
             <label class="form-check-label small text-muted" for="allowViewOthers">允许普通用户查看其他用户的定时任务</label>
+            <div class="form-text small text-muted ms-4">勾选后，普通用户可在定时任务列表中看到所有用户创建的定时任务（仅查看，不可编辑/删除他人任务）；不勾选则仅看到自己的任务。</div>
           </div>
           {% endif %}
 
