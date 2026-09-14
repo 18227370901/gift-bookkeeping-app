@@ -149,6 +149,14 @@ def merge_user_scoped_backup(db_path, backup_db_path, user):
         # ATTACH 主库，在同一连接内完成数据合并（自动处理跨库约束）
         src.execute("ATTACH DATABASE ? AS main_db", (db_path,))
         for tbl in user_tables:
+            # V10: 空库保护——DELETE 前先检查备份库中该用户是否有数据，若为 0 则跳过该表
+            # 避免上传空库导致本人现有数据被清空且无新数据写入
+            backup_count = src.execute(
+                f'SELECT COUNT(*) FROM "{tbl}" WHERE user_id = ?', (user_id,)
+            ).fetchone()[0]
+            if backup_count == 0:
+                stats[tbl] = 0
+                continue  # 跳过该表，保留本人现有数据不动
             # 1) 删除主库中该用户本人的旧数据
             src.execute(f'DELETE FROM main_db."{tbl}" WHERE user_id = ?', (user_id,))
             # 2) 从备份导入该用户数据（列对齐，排除 id 由 SQLite 重新分配主键）
@@ -1335,6 +1343,18 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             records = query.filter(GiftRecord.deleted_at.is_(None)).all()
             balance_list, total_received, total_given = calculate_reconciliation(records)
             safe_log('同步对账数据', f"从礼金账本拉取最新数据同步人情对账，共核对 {len(balance_list)} 位亲友往来")
+            # V10: 补充对账同步 webhook 推送
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(),
+                    'system',
+                    f'用户 {current_user.username} 同步了人情对账数据，共核对 {len(balance_list)} 位亲友往来',
+                    page_key='reconciliation',
+                    user_name=current_user.username,
+                    operator_id=current_user.id
+                )
+            except Exception:
+                pass
             flash(f'已成功从礼金账本拉取最新数据完成同步！共核对 {len(balance_list)} 位亲友的人情往来。', 'success')
         except Exception as e:
             flash(f'同步人情对账数据失败：{str(e)}', 'danger')
@@ -4295,6 +4315,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         try:
             trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(),
                 'status_change',
                 f'用户 {user.username} 的备份权限已{"授权" if user.backup_authorized else "撤销"}',
                 page_key='admin_backups',
@@ -4414,13 +4435,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def permission_tickets_view():
         """工单管理页面：普通用户看自己的工单，管理员看全部工单
-        V8 增强：排序（sort/order）、筛选（含 revoked）、分页（page/per_page，默认10条/页）"""
-        # ---- V8 排序参数 ----
+        V8 增强：排序（sort/order）、筛选（含 revoked）、分页（page/per_page，默认10条/页）
+        V10 增强：关键词搜索（q）、申请模块筛选（module）、扩展排序列（applicant/reason）、多选批量删除"""
+        # ---- V8/V10 排序参数 ----
         sort_map = {
             'created_at': PermissionTicket.created_at,
             'updated_at': PermissionTicket.updated_at,
             'status': PermissionTicket.status,
             'id': PermissionTicket.id,
+            'applicant': User.username,       # V10: 按申请人排序
+            'reason': PermissionTicket.reason, # V10: 按申请理由排序
         }
         sort_key = request.args.get('sort', 'created_at').strip()
         if sort_key not in sort_map:
@@ -4430,7 +4454,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             order = 'desc'
         sort_col = sort_map[sort_key]
 
-        # ---- V8 分页参数 ----
+        # ---- V8/V10 分页参数 ----
         try:
             page = max(1, int(request.args.get('page', 1)))
         except (TypeError, ValueError):
@@ -4442,11 +4466,27 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         except (TypeError, ValueError):
             per_page = 10
 
+        # ---- V10: 关键词搜索 & 模块筛选（仅管理员） ----
+        keyword = request.args.get('q', '').strip()
+        module_filter = request.args.get('module', '').strip()
+
         query = PermissionTicket.query
         if current_user.is_admin:
             status_filter = request.args.get('status', '').strip()
             if status_filter in ('pending', 'approved', 'rejected', 'revoked'):
                 query = query.filter(PermissionTicket.status == status_filter)
+            # V10: 关键词搜索（申请人用户名 + 申请理由模糊匹配）
+            if keyword:
+                query = query.join(User, PermissionTicket.user_id == User.id, isouter=True)
+                query = query.filter(
+                    db.or_(
+                        User.username.ilike(f'%{keyword}%'),
+                        PermissionTicket.reason.ilike(f'%{keyword}%')
+                    )
+                )
+            # V10: 申请模块筛选
+            if module_filter:
+                query = query.filter(PermissionTicket.requested_menus.ilike(f'%{module_filter}%'))
         else:
             query = query.filter(PermissionTicket.user_id == current_user.id)
 
@@ -4477,7 +4517,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             sort_key=sort_key,
             order=order,
             per_page=per_page,
-            status_filter=request.args.get('status', '') if current_user.is_admin else ''
+            status_filter=request.args.get('status', '') if current_user.is_admin else '',
+            keyword=keyword if current_user.is_admin else '',
+            module_filter=module_filter if current_user.is_admin else ''
         )
 
     @app.route('/permission_tickets/create', methods=['POST'])
@@ -4532,6 +4574,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         # Webhook 推送
         try:
             trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(),
                 'system',
                 f'用户 {current_user.username} 提交了权限申请工单#{ticket.id}，申请菜单: {", ".join(requested_menus)}',
                 page_key='permission_tickets',
@@ -4590,6 +4633,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         try:
             trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(),
                 'status_change',
                 f'管理员 {current_user.username} 批准了工单#{ticket.id}，用户 {user.username if user else "?"} 获得菜单权限: {ticket.granted_menus}',
                 page_key='permission_tickets',
@@ -4633,6 +4677,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         try:
             trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(),
                 'status_change',
                 f'管理员 {current_user.username} 驳回了工单#{ticket.id}，用户 {user.username if user else "?"} 的权限申请',
                 page_key='permission_tickets',
@@ -4683,6 +4728,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         try:
             trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(),
                 'status_change',
                 f'管理员 {current_user.username} 撤销了工单#{ticket.id}，用户 {user.username if user else "?"} 的菜单权限已被收回',
                 page_key='permission_tickets',
@@ -4717,6 +4763,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         try:
             trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(),
                 'status_change',
                 f'管理员 {current_user.username} 删除了工单#{ticket_id_val}（申请人: {applicant}）',
                 page_key='permission_tickets',
@@ -4727,6 +4774,53 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             pass
 
         flash(f'工单#{ticket_id_val} 已删除。', 'info')
+        return redirect(url_for('permission_tickets_view'))
+
+    @app.route('/permission_tickets/batch_delete', methods=['POST'])
+    @login_required
+    def permission_ticket_batch_delete():
+        """V10 新增：管理员批量删除工单"""
+        if not current_user.is_admin:
+            flash('无权限执行此操作。', 'danger')
+            return redirect(url_for('index'))
+
+        ticket_ids = request.form.getlist('ticket_ids')
+        if not ticket_ids:
+            flash('请至少选择一个工单。', 'warning')
+            return redirect(url_for('permission_tickets_view'))
+
+        # 转换为整数并过滤无效值
+        valid_ids = []
+        for tid in ticket_ids:
+            try:
+                valid_ids.append(int(tid))
+            except (TypeError, ValueError):
+                pass
+        if not valid_ids:
+            flash('未选择有效工单。', 'warning')
+            return redirect(url_for('permission_tickets_view'))
+
+        tickets = PermissionTicket.query.filter(PermissionTicket.id.in_(valid_ids)).all()
+        count = len(tickets)
+        for t in tickets:
+            db.session.delete(t)
+        db.session.commit()
+
+        safe_log('批量删除权限工单', f'删除 {count} 条工单（ID: {", ".join(str(t.id) for t in tickets)}）', user=current_user)
+
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(),
+                'status_change',
+                f'管理员 {current_user.username} 批量删除了 {count} 条权限工单',
+                page_key='permission_tickets',
+                user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
+
+        flash(f'已批量删除 {count} 条工单。', 'info')
         return redirect(url_for('permission_tickets_view'))
 
     # 启动企业微信智能机器人长连接后台监听守护线程与亲友纪念日自动提醒后台调度器

@@ -23,12 +23,12 @@
     {% endif %}
 </div>
 
-<!-- 管理员筛选 -->
+<!-- V10: 管理员筛选区（状态 + 关键词 + 模块） -->
 {% if current_user.is_admin %}
-{% set base_qs = 'sort=' ~ sort_key ~ '&order=' ~ order ~ '&per_page=' ~ per_page %}
+{% set base_qs = 'sort=' ~ sort_key ~ '&order=' ~ order ~ '&per_page=' ~ per_page ~ ('&q=' ~ keyword if keyword else '') ~ ('&module=' ~ module_filter if module_filter else '') %}
 <div class="card shadow-sm mb-3">
     <div class="card-body py-2">
-        <div class="d-flex gap-2 align-items-center flex-wrap">
+        <div class="d-flex gap-2 align-items-center flex-wrap mb-2">
             <span class="text-muted small fw-bold">筛选状态：</span>
             <a href="{{ url_for('permission_tickets_view') }}?{{ base_qs }}" class="btn btn-sm {% if not status_filter %}btn-primary{% else %}btn-outline-secondary{% endif %} rounded-pill">全部</a>
             <a href="?status=pending&{{ base_qs }}" class="btn btn-sm {% if status_filter == 'pending' %}btn-warning{% else %}btn-outline-warning{% endif %} rounded-pill">待审批</a>
@@ -36,8 +36,32 @@
             <a href="?status=rejected&{{ base_qs }}" class="btn btn-sm {% if status_filter == 'rejected' %}btn-danger{% else %}btn-outline-danger{% endif %} rounded-pill">已驳回</a>
             <a href="?status=revoked&{{ base_qs }}" class="btn btn-sm {% if status_filter == 'revoked' %}btn-warning{% else %}btn-outline-warning{% endif %} rounded-pill">已撤销</a>
         </div>
+        <div class="d-flex gap-2 align-items-center flex-wrap">
+            <!-- V10: 关键词搜索 -->
+            <form method="GET" action="{{ url_for('permission_tickets_view') }}" class="d-flex gap-2 align-items-center flex-grow-1" id="searchForm">
+                <input type="hidden" name="sort" value="{{ sort_key }}">
+                <input type="hidden" name="order" value="{{ order }}">
+                <input type="hidden" name="per_page" value="{{ per_page }}">
+                {% if status_filter %}<input type="hidden" name="status" value="{{ status_filter }}">{% endif %}
+                <div class="input-group input-group-sm" style="max-width:260px">
+                    <span class="input-group-text bg-light"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
+                    <input type="text" name="q" value="{{ keyword }}" class="form-control" placeholder="搜索申请人/理由" id="keywordInput">
+                    {% if keyword %}<button class="btn btn-outline-secondary" type="button" onclick="clearKeyword()" title="清除"><i class="fa-solid fa-xmark"></i></button>{% endif %}
+                </div>
+                <!-- V10: 模块筛选下拉 -->
+                <select name="module" class="form-select form-select-sm" style="max-width:180px" id="moduleSelect" onchange="this.form.submit()">
+                    <option value="">全部模块</option>
+                    {% for key, label in menu_options %}
+                    <option value="{{ key }}" {% if module_filter == key %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-sm btn-primary"><i class="fa-solid fa-search me-1"></i>搜索</button>
+            </form>
+        </div>
     </div>
 </div>
+{% else %}
+{% set base_qs = 'sort=' ~ sort_key ~ '&order=' ~ order ~ '&per_page=' ~ per_page %}
 {% endif %}
 
 <!-- 工单列表 -->
@@ -49,23 +73,35 @@
                 共 <strong>{{ pagination.total }}</strong> 条工单
                 {% if pagination.pages > 1 %}，第 <strong>{{ pagination.page }}</strong>/{{ pagination.pages }} 页{% endif %}
             </span>
-            <span class="small text-muted">
-                每页
-                <select class="form-select form-select-sm d-inline-block w-auto" onchange="window.location.href = '?' + updatePerPage(this.value)">
-                    {% for n in [5, 10, 20, 50, 100] %}
-                    <option value="{{ n }}" {% if per_page == n %}selected{% endif %}>{{ n }} 条</option>
-                    {% endfor %}
-                </select>
-            </span>
+            <div class="d-flex align-items-center gap-2">
+                {% if current_user.is_admin and tickets %}
+                <!-- V10: 多选批量删除 -->
+                <button type="button" class="btn btn-sm btn-outline-danger" id="btnBatchDeleteTickets" onclick="batchDeleteTickets()" style="display:none">
+                    <i class="fa-solid fa-trash me-1"></i>批量删除选中
+                </button>
+                <span class="small text-muted" id="ticketSelectedCount"></span>
+                {% endif %}
+                <span class="small text-muted">
+                    每页
+                    <select class="form-select form-select-sm d-inline-block w-auto" onchange="window.location.href = '?' + updatePerPage(this.value)">
+                        {% for n in [5, 10, 20, 50, 100] %}
+                        <option value="{{ n }}" {% if per_page == n %}selected{% endif %}>{{ n }} 条</option>
+                        {% endfor %}
+                    </select>
+                </span>
+            </div>
         </div>
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th style="width:60px"><a href="javascript:location.href='?'+toggleSortQs('id')" class="text-decoration-none text-reset">#{% if sort_key == 'id' %}<i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }} ms-1"></i>{% endif %}</a></th>
-                        <th>申请人</th>
+                        {% if current_user.is_admin %}
+                        <th style="width:36px"><input type="checkbox" id="selectAllTickets" onclick="toggleSelectAllTickets(this)"></th>
+                        {% endif %}
+                        <th style="width:50px"><a href="javascript:location.href='?'+toggleSortQs('id')" class="text-decoration-none text-reset">#</a></th>
+                        <th><a href="javascript:location.href='?'+toggleSortQs('applicant')" class="text-decoration-none text-reset">申请人{% if sort_key == 'applicant' %}<i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }} ms-1"></i>{% endif %}</a></th>
                         <th>申请模块</th>
-                        <th>申请理由</th>
+                        <th><a href="javascript:location.href='?'+toggleSortQs('reason')" class="text-decoration-none text-reset">申请理由{% if sort_key == 'reason' %}<i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }} ms-1"></i>{% endif %}</a></th>
                         <th style="width:90px"><a href="javascript:location.href='?'+toggleSortQs('status')" class="text-decoration-none text-reset">状态{% if sort_key == 'status' %}<i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }} ms-1"></i>{% endif %}</a></th>
                         <th><a href="javascript:location.href='?'+toggleSortQs('created_at')" class="text-decoration-none text-reset">提交时间{% if sort_key == 'created_at' %}<i class="fa-solid fa-sort-{{ 'up' if order == 'asc' else 'down' }} ms-1"></i>{% endif %}</a></th>
                         <th>审批人</th>
@@ -76,7 +112,10 @@
                 <tbody>
                     {% for t in tickets %}
                     <tr>
-                        <td class="fw-bold text-muted">{{ t.id }}</td>
+                        {% if current_user.is_admin %}
+                        <td><input type="checkbox" class="ticket-checkbox" value="{{ t.id }}" onchange="updateTicketBatchBtn()"></td>
+                        {% endif %}
+                        <td class="fw-bold text-muted">{{ loop.index + (pagination.page - 1) * per_page }}</td>
                         <td>
                             <i class="fa-solid fa-user-circle text-secondary me-1"></i>{{ t.user.username if t.user else '已删除用户' }}
                         </td>
@@ -325,7 +364,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 });
 
-// V8: 构造带排序/筛选/分页参数的 URL（供排序列头与分页条使用）
+// V8/V10: 构造带排序/筛选/搜索/分页参数的 URL
 function buildQs(params) {
     const url = new URL(window.location.href);
     Object.keys(params).forEach(k => {
@@ -337,7 +376,7 @@ function buildQs(params) {
     return url.searchParams.toString();
 }
 
-// 排序：切换 sort 字段与 asc/desc
+// V10: 排序时保留所有筛选/搜索参数
 function toggleSortQs(key) {
     const url = new URL(window.location.href);
     const curSort = url.searchParams.get('sort') || 'created_at';
@@ -347,6 +386,7 @@ function toggleSortQs(key) {
     url.searchParams.set('sort', key);
     url.searchParams.set('order', newOrder);
     url.searchParams.set('page', '1');
+    // 保留 q、module、status、per_page 等筛选参数（已在 url 中，无需额外处理）
     return url.searchParams.toString();
 }
 
@@ -363,6 +403,58 @@ function pageQs(p) {
     const url = new URL(window.location.href);
     url.searchParams.set('page', p);
     return url.searchParams.toString();
+}
+
+// V10: 清除关键词搜索
+function clearKeyword() {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('q');
+    url.searchParams.set('page', '1');
+    window.location.href = '?' + url.searchParams.toString();
+}
+
+// V10: 全选/取消全选工单
+function toggleSelectAllTickets(checkbox) {
+    document.querySelectorAll('.ticket-checkbox').forEach(cb => cb.checked = checkbox.checked);
+    updateTicketBatchBtn();
+}
+
+// V10: 更新批量删除按钮显示状态
+function updateTicketBatchBtn() {
+    const checked = document.querySelectorAll('.ticket-checkbox:checked');
+    const btn = document.getElementById('btnBatchDeleteTickets');
+    const countSpan = document.getElementById('ticketSelectedCount');
+    if (checked.length > 0) {
+        if (btn) btn.style.display = 'inline-block';
+        if (countSpan) countSpan.textContent = '已选 ' + checked.length + ' 项';
+    } else {
+        if (btn) btn.style.display = 'none';
+        if (countSpan) countSpan.textContent = '';
+    }
+}
+
+// V10: 批量删除工单
+function batchDeleteTickets() {
+    const checked = document.querySelectorAll('.ticket-checkbox:checked');
+    if (checked.length === 0) return;
+    if (!confirm('确定删除选中的 ' + checked.length + ' 条工单？删除后不可恢复！')) return;
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = '{{ url_for("permission_ticket_batch_delete") }}';
+    const csrf = document.createElement('input');
+    csrf.type = 'hidden';
+    csrf.name = 'csrf_token';
+    csrf.value = '{{ csrf_token }}';
+    form.appendChild(csrf);
+    checked.forEach(cb => {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'ticket_ids';
+        input.value = cb.value;
+        form.appendChild(input);
+    });
+    document.body.appendChild(form);
+    form.submit();
 }
 </script>
 {% endblock %}

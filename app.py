@@ -320,6 +320,47 @@ def purge_expired_logs(days=90):
             pass
         print(f"[Purge Logs Error] 自动清理失效日志异常: {e}")
 
+import json as _json_module
+
+# V10: 审计日志模块过滤映射——按 action 关键词归组
+AUDIT_MODULE_MAP = {
+    'ledger': ['记录', '极简记账', '导入', '导出', '查询记录'],
+    'banquets': ['大账本', '宴席', '分享链接'],
+    'reconciliation': ['对账'],
+    'reminders': ['纪念日', '提醒'],
+    'recycle_bin': ['回收站'],
+    'admin_users': ['用户', '权限', '账号', '密码', '密保'],
+    'webhooks': ['Webhook', 'webhook', '推送日志'],
+    'backups': ['WebDAV', '备份', '恢复', '定时任务', '附件'],
+    'permission_tickets': ['工单', '权限申请'],
+    'broadcasts': ['广播'],
+    'ai_assistant': ['AI', '会话', '配置更新', '授权管理'],
+    'auth': ['登录', '注册', '退出', '找回', '风控', '锁定'],
+    'system': ['系统配置', '注册策略', '邀请', '日志'],
+}
+
+def _get_audit_module(action_text):
+    """根据 action 文本判断所属模块，返回模块标识或 None"""
+    for module_key, keywords in AUDIT_MODULE_MAP.items():
+        for kw in keywords:
+            if kw in action_text:
+                return module_key
+    return 'system'  # 未匹配的默认归入 system
+
+def _should_log_module(action_text):
+    """检查当前模块是否在管理员配置的审计日志白名单中"""
+    try:
+        config_val = SystemSetting.get_val('audit_log_modules', None)
+        if not config_val:
+            return True  # 未配置 = 默认全部记录
+        modules = _json_module.loads(config_val)
+        if not modules or 'all' in modules:
+            return True  # 空列表或包含 'all' = 全部记录
+        module_key = _get_audit_module(action_text)
+        return module_key in modules
+    except Exception:
+        return True  # 出错时默认记录
+
 def log_action(action, detail="", user=None):
     # 每次写入日志时顺便触发清理超过3个月的超期日志
     purge_expired_logs(days=90)
@@ -344,6 +385,10 @@ def log_action(action, detail="", user=None):
             else:
                 u_id = None
                 u_name = "未登录/系统"
+
+        # V10: 模块级过滤——若该模块未在白名单中则跳过写入
+        if not _should_log_module(actual_action):
+            return
 
         ip_addr = request.remote_addr if request else ""
         if request and request.headers.get("X-Forwarded-For"):
@@ -1877,13 +1922,36 @@ def admin_logs():
         query = query.order_by(col.desc())
 
     logs = query.paginate(page=page, per_page=per_page)
+
+    # V10: 读取审计日志模块配置
+    audit_modules_raw = SystemSetting.get_val('audit_log_modules', None)
+    audit_modules_enabled = []
+    audit_modules_all = [
+        ('ledger', '礼金账本'), ('banquets', '专属宴席'), ('reconciliation', '人情对账'),
+        ('reminders', '纪念日备忘'), ('recycle_bin', '回收站'), ('admin_users', '用户管理'),
+        ('webhooks', 'Webhook'), ('backups', '备份管理'), ('permission_tickets', '权限工单'),
+        ('broadcasts', '系统广播'), ('ai_assistant', 'AI助手'), ('auth', '认证安全'),
+        ('system', '系统配置'),
+    ]
+    if not audit_modules_raw:
+        audit_modules_enabled = [m[0] for m in audit_modules_all]  # 默认全部启用
+    else:
+        try:
+            audit_modules_enabled = _json_module.loads(audit_modules_raw)
+            if not audit_modules_enabled or 'all' in audit_modules_enabled:
+                audit_modules_enabled = [m[0] for m in audit_modules_all]
+        except Exception:
+            audit_modules_enabled = [m[0] for m in audit_modules_all]
+
     return render_template(
         'admin_logs.html',
         logs=logs,
         q=search_q,
         sort_by=sort_by,
         sort_order=sort_order,
-        per_page=per_page
+        per_page=per_page,
+        audit_modules_all=audit_modules_all,
+        audit_modules_enabled=audit_modules_enabled
     )
 
 @app.route('/admin/logs/batch_delete', methods=['POST'])
@@ -1903,6 +1971,15 @@ def admin_batch_delete_logs():
         deleted_count = OperationLog.query.filter(OperationLog.id.in_(log_ids_int)).delete(synchronize_session=False)
         db.session.commit()
         log_action('批量删除日志', f'管理员勾选删除了 {deleted_count} 条操作日志')
+        # V10: 补充审计日志删除推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'管理员 {current_user.username} 批量删除了 {deleted_count} 条操作审计日志',
+                page_key='admin_logs', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'成功批量删除 {deleted_count} 条审计日志！', 'success')
     except Exception as e:
         db.session.rollback()
@@ -2027,6 +2104,15 @@ def admin_delete_log(log_id):
     db.session.commit()
 
     log_action('删除日志', f'管理员删除了操作日志ID #{log_id} ({action_info})')
+    # V10: 补充审计日志删除推送
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+            f'管理员 {current_user.username} 删除了操作日志 #{log_id} ({action_info})',
+            page_key='admin_logs', user_name=current_user.username, operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash('日志记录已成功删除！', 'success')
     return redirect(url_for('admin_logs'))
 
@@ -2041,7 +2127,34 @@ def admin_clear_logs():
     db.session.commit()
 
     log_action('清空日志', f'管理员清空了所有操作日志（共删除 {deleted_count} 条）')
+    # V10: 补充审计日志清空推送
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+            f'管理员 {current_user.username} 清空了所有操作审计日志（共 {deleted_count} 条）',
+            page_key='admin_logs', user_name=current_user.username, operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash(f'已成功清空所有审计日志（共 {deleted_count} 条）！', 'success')
+    return redirect(url_for('admin_logs'))
+
+# V10: 审计日志模块配置保存
+@app.route('/admin/audit-log-config', methods=['POST'])
+@login_required
+def admin_save_audit_log_config():
+    if not current_user.is_admin:
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
+    modules = request.form.getlist('audit_modules')
+    if not modules:
+        SystemSetting.set_val('audit_log_modules', '[]')
+    elif 'all' in modules:
+        SystemSetting.set_val('audit_log_modules', '["all"]')
+    else:
+        SystemSetting.set_val('audit_log_modules', _json_module.dumps(modules))
+    log_action('更新系统配置', f'管理员更新了审计日志记录模块配置: {", ".join(modules) if modules else "全部禁用"}')
+    flash('审计日志记录配置已保存成功！', 'success')
     return redirect(url_for('admin_logs'))
 
 @app.route('/admin/settings/registration_mode', methods=['POST'])

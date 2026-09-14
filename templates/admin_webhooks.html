@@ -488,11 +488,11 @@
              </div>
              <div class="border rounded-3 p-2 bg-light" style="max-height: 200px; overflow-y: auto;">
                <div class="row g-1" id="newPageMatrix">
-                 {% set pages = [('ledger','礼金账本'),('banquets','专属宴席'),('reminders','纪念日备忘'),('reconciliation','人情对账'),('recycle_bin','回收站'),('admin_users','用户管理'),('admin_logs','操作审计'),('admin_broadcasts','系统广播'),('admin_webhooks','Webhook通知'),('admin_backups','WebDAV备份'),('ai_assistant','AI助手'),('ai_config','AI配置'),('security','系统安全'),('invites','邀请链接')] %}
-                 {% for key, label in pages %}
-                 <div class="col-sm-4 col-md-3">
-                   <div class="form-check">
-                     <input class="form-check-input" type="checkbox" name="notify_pages_all" value="{{ key }}" id="new_page_{{ key }}" checked>
+                  {% set pages = [('ledger','礼金账本'),('banquets','专属宴席'),('reminders','纪念日备忘'),('reconciliation','人情对账'),('recycle_bin','回收站'),('admin_users','用户管理'),('admin_logs','操作审计'),('admin_broadcasts','系统广播'),('admin_webhooks','Webhook通知'),('admin_backups','WebDAV备份'),('ai_assistant','AI助手'),('ai_config','AI配置'),('security','系统安全'),('invites','邀请链接'),('permission_tickets','权限工单')] %}
+                  {% for key, label in pages %}
+                  <div class="col-sm-4 col-md-3">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" name="notify_pages_all" value="{{ key }}" id="new_page_{{ key }}" checked>
                      <label class="form-check-label small" for="new_page_{{ key }}">{{ label }}</label>
                    </div>
                  </div>
@@ -673,11 +673,11 @@
              </div>
              <div class="border rounded-3 p-2 bg-light" style="max-height: 200px; overflow-y: auto;">
                <div class="row g-1" id="editPageMatrix">
-                 {% set pages = [('ledger','礼金账本'),('banquets','专属宴席'),('reminders','纪念日备忘'),('reconciliation','人情对账'),('recycle_bin','回收站'),('admin_users','用户管理'),('admin_logs','操作审计'),('admin_broadcasts','系统广播'),('admin_webhooks','Webhook通知'),('admin_backups','WebDAV备份'),('ai_assistant','AI助手'),('ai_config','AI配置'),('security','系统安全'),('invites','邀请链接')] %}
-                 {% for key, label in pages %}
-                 <div class="col-sm-4 col-md-3">
-                   <div class="form-check">
-                     <input class="form-check-input" type="checkbox" name="notify_pages_all" value="{{ key }}" id="edit_page_{{ key }}">
+                  {% set pages = [('ledger','礼金账本'),('banquets','专属宴席'),('reminders','纪念日备忘'),('reconciliation','人情对账'),('recycle_bin','回收站'),('admin_users','用户管理'),('admin_logs','操作审计'),('admin_broadcasts','系统广播'),('admin_webhooks','Webhook通知'),('admin_backups','WebDAV备份'),('ai_assistant','AI助手'),('ai_config','AI配置'),('security','系统安全'),('invites','邀请链接'),('permission_tickets','权限工单')] %}
+                  {% for key, label in pages %}
+                  <div class="col-sm-4 col-md-3">
+                    <div class="form-check">
+                      <input class="form-check-input" type="checkbox" name="notify_pages_all" value="{{ key }}" id="edit_page_{{ key }}">
                      <label class="form-check-label small" for="edit_page_{{ key }}">{{ label }}</label>
                    </div>
                  </div>
@@ -981,8 +981,8 @@ document.addEventListener('DOMContentLoaded', function() {
       .then(data => {
         if (data.success && (data.code === 200 || data.status_code === 200)) {
           showToast('【测试成功】' + (data.message || 'Webhook / 机器人通道测试响应正常！') + '（状态码 ' + (data.status_code || data.code || 200) + '）', 'success');
-          // 局部刷新推送日志表格
-          window.location.reload();
+          // V10: 延迟 2 秒刷新页面，确保 toast 提示可见后再刷新
+          setTimeout(() => { window.location.reload(); }, 2000);
         } else {
           showToast('【测试失败】' + (data.message || '连接失败，请检查企业微信机器人凭证或目标地址') + '（状态码 ' + (data.status_code || data.code || '?') + '）', 'danger');
         }

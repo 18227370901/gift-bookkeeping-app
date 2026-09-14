@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'c6304472-e508-4eac-86c4-da9a9a38e00a'
-  PropagateID: 'c6304472-e508-4eac-86c4-da9a9a38e00a'
-  ReservedCode1: '3e1ce82f-0f8c-4feb-ab23-03b85bbcace8'
-  ReservedCode2: '3e1ce82f-0f8c-4feb-ab23-03b85bbcace8'
+  ProduceID: 'f5d30781-d932-4879-82ad-b9c5ff7940af'
+  PropagateID: 'f5d30781-d932-4879-82ad-b9c5ff7940af'
+  ReservedCode1: '01b5a111-4df9-42a9-bd00-959cbc739f3d'
+  ReservedCode2: '01b5a111-4df9-42a9-bd00-959cbc739f3d'
 ---
 
 # AI 助手模块技术设计方案
@@ -1037,5 +1037,183 @@ V8 批次共 12 项需求，覆盖三大模块：
 | `models.py` | `BackupConfig` 新增 `config_alias`、`adopted_from_admin` |
 | `app.py` | migration_sqls 追加 `config_alias`、`adopted_from_admin` 两条 ALTER TABLE |
 | `templates/admin_backups.html` | 管理员别称输入框；普通用户双状态 UI（引用卡片/原表单）；`adoptAdminConfig()`/`confirmDetachAdminConfig()` JS |
+
+> AI生成
+
+---
+
+## 第十四章 V10 修复与优化（2026-09-14）
+
+### 14.1 需求总览
+
+V10 批次共 5 模块 15 项改动，覆盖 Webhook 推送修复、审计日志可配置化、WebDAV 页面布局优化与权限工单增强：
+
+| 编号 | 模块 | 类型 | 需求 |
+|------|------|------|------|
+| 1.1 | Webhook | 修复 | 测试成功后 toast 被立即刷新销毁，不可见 |
+| 2.1 | Webhook | 修复 | 5 处 `trigger_webhook_event` 调用缺少 `webhooks` 参数 |
+| 2.2 | Webhook | 修复 | 对账同步路由 `reconciliation_sync` 缺少推送 |
+| 2.3 | Webhook | 修复 | 审计日志删除/清空/批量删除路由缺少推送 |
+| 2.4 | Webhook | 修复 | 页面推送矩阵 + PAGE_NAMES 缺少 `permission_tickets` |
+| 3.1 | 审计日志 | 新增 | 可配置记录模块（SystemSetting key `audit_log_modules`） |
+| 3.2 | 审计日志 | 新增 | `log_action` 函数按模块过滤 |
+| 3.3 | 审计日志 | 新增 | 管理员配置面板（13 模块 checkbox） |
+| 3.4 | 审计日志 | 新增 | `POST /admin/audit-log-config` 保存配置路由 |
+| 4.1 | WebDAV | 优化 | 备份页面整体布局重排（三行两栏） |
+| 4.2 | WebDAV | 优化 | 普通用户本地备份卡片差异化提示横幅 |
+| 4.3 | WebDAV | 修复 | 合并函数空库保护（DELETE 前 COUNT 检查） |
+| 5.1 | 权限工单 | 新增 | 关键词搜索（申请人/理由模糊匹配） |
+| 5.2 | 权限工单 | 新增 | 申请模块筛选下拉框 |
+| 5.3 | 权限工单 | 新增 | 扩展排序列（applicant/reason） |
+| 5.4 | 权限工单 | 新增 | 多选 checkbox + 批量删除路由 |
+| 5.5 | 权限工单 | 优化 | ID 列改为分页行序号 |
+| 5.6 | 权限工单 | 修复 | 排序时 JS 丢失筛选/搜索参数 |
+
+### 14.2 模块一：Webhook 测试成功无提示
+
+**根因**：测试成功后立即 `window.location.reload()` 刷新页面，toast 被 DOM 销毁不可见。
+
+**修复**：`templates/admin_webhooks.html` 测试成功分支改为延迟 2 秒再刷新页面（`setTimeout(() => location.reload(), 2000)`），确保 toast 完整展示。
+
+### 14.3 模块二：Webhook 推送缺失修复
+
+#### 2.1 — 6 处参数签名错误
+
+`routes_ext.py` 中 6 处 `trigger_webhook_event` 调用缺少第一个 `webhooks` 参数（`WebhookConfig.query.filter_by(is_enabled=True).all()`），导致推送静默失败：
+- 行 4297（纪念日批量删除推送）
+- 行 4534（权限工单创建推送）
+- 行 4592（权限工单批准推送）
+- 行 4635（权限工单驳回推送）
+- 行 4685（权限工单撤销推送）
+- 行 4745（权限工单删除推送）
+
+**修复**：全部补齐 `WebhookConfig.query.filter_by(is_enabled=True).all()` 作为第一个参数。
+
+#### 2.2 — 对账同步路由缺少推送
+
+`routes_ext.py` 的 `reconciliation_sync` 路由执行同步后无 webhook 推送。
+
+**修复**：补充 `trigger_webhook_event` 调用，`page_key='reconciliation'`。
+
+#### 2.3 — 审计日志操作缺少推送
+
+`app.py` 中三个审计日志路由（`admin_delete_log`/`admin_clear_logs`/`admin_batch_delete_logs`）执行后无推送。
+
+**修复**：三个路由均补充 `trigger_webhook_event`，`page_key='admin_logs'`。
+
+#### 2.4 — 页面推送矩阵与 PAGE_NAMES 补全
+
+- `templates/admin_webhooks.html` 的 14 个 checkbox 缺少 `permission_tickets` 选项 → 补充第 15 个 checkbox
+- `webhook_utils.py` 的 `PAGE_NAMES` 字典缺少 `permission_tickets` 条目 → 补充 `'permission_tickets': '权限工单'`
+
+### 14.4 模块三：审计日志可配置记录
+
+#### 设计思路
+
+复用现有 `SystemSetting` 表，新增 key `audit_log_modules`，值为 JSON 数组（如 `["ledger","banquets","reconciliation"]`）。管理员在审计日志页面配置需要记录的模块，未勾选模块的操作不写入审计日志。
+
+#### 模块映射
+
+`app.py` 新增 `AUDIT_MODULE_MAP` 字典，13 个模块标识：
+
+| 模块标识 | 匹配关键词 | 说明 |
+|----------|-----------|------|
+| `ledger` | 礼金/账本 | 礼金账本 |
+| `banquets` | 宴席 | 专属宴席 |
+| `reconciliation` | 对账 | 人情对账 |
+| `reminders` | 纪念日/备忘 | 亲友纪念日 |
+| `recycle_bin` | 回收站 | 回收站 |
+| `admin_users` | 用户/权限/注册 | 用户管理 |
+| `webhooks` | webhook/机器人/通道 | Webhook |
+| `backups` | 备份/恢复/webdav/定时任务 | 备份 |
+| `permission_tickets` | 工单/权限申请 | 权限工单 |
+| `broadcasts` | 广播 | 系统广播 |
+| `ai_assistant` | AI/聊天/会话 | AI 助手 |
+| `auth` | 登录/注册/密码 | 认证 |
+| `system` | 系统设置/审计/安全 | 系统管理 |
+
+#### 实现
+
+- `app.py` `log_action` 函数增加模块过滤：按 action 关键词匹配模块标识，未在配置中勾选的模块跳过写入
+- `templates/admin_logs.html` 增加可折叠配置面板，列出 13 个模块 checkbox + 全选/清空按钮
+- 新增 `POST /admin/audit-log-config` 路由保存配置到 `SystemSetting`
+- `admin_logs` 路由将当前配置传入模板
+
+### 14.5 模块四：WebDAV 页面布局优化
+
+#### 4.1 — 整体布局重排
+
+原布局为 `col-lg-5`（WebDAV 配置 + 备份授权）+ `col-lg-7`（定时任务 + 云端备份 + 本地备份 + 附件恢复）两栏，右栏过长左栏过短。
+
+**新布局**（四行）：
+- 第一行（`col-12`）：WebDAV 配置 + 备份授权管理
+- 第二行（`col-12`）：定时任务
+- 第三行（`col-12`）：WebDAV 云端备份与恢复
+- 第四行（`col-lg-6` + `col-lg-6`）：本地数据库备份与恢复 | 附件文件恢复
+
+#### 4.2 — 普通用户本地备份差异化提示
+
+普通用户本地备份卡片新增蓝色提示横幅："您下载的备份仅包含本人数据；上传恢复时系统将只合并您的数据，不影响其他用户或系统配置。"
+
+管理员视图文案保持"下载完整数据库备份 (.db)"，普通用户文案改为"下载我的数据备份 (.db)"。
+
+#### 4.3 — 合并函数空库保护
+
+`routes_ext.py` `merge_user_scoped_backup()` 中 DELETE 前先 `SELECT COUNT(*)` 检查备份库中该用户是否有数据，为 0 则跳过删除+插入，避免上传空库导致本人数据被清空。
+
+### 14.6 模块五：权限工单增强
+
+#### 5.1 — 关键词搜索
+
+- **后端**：`permission_tickets_view` 新增 `q` 参数，使用 `User.username.ilike()` + `PermissionTicket.reason.ilike()` 联合模糊匹配
+- **前端**：筛选区新增搜索输入框 + 搜索按钮 + 清除按钮
+
+#### 5.2 — 申请模块筛选
+
+- **后端**：`permission_tickets_view` 新增 `module` 参数，使用 `PermissionTicket.requested_menus.ilike()` 模糊匹配
+- **前端**：筛选区新增下拉框（全部模块 + TICKET_MENU_OPTIONS 所有选项），选中后自动提交表单
+
+#### 5.3 — 扩展排序列
+
+`sort_map` 新增 `applicant`（`User.username`）和 `reason`（`PermissionTicket.reason`）两个排序字段。前端表头对应列增加排序链接与升降序箭头。
+
+#### 5.4 — 多选 + 批量删除
+
+- **后端**：新增 `POST /permission_tickets/batch_delete` 路由，接收 `ticket_ids` 列表，管理员专属，删除后审计日志 + webhook 推送
+- **前端**：表头新增全选 checkbox，每行新增行 checkbox，选中后显示"批量删除选中"按钮，提交动态创建表单 POST
+
+#### 5.5 — ID 列改为分页行序号
+
+原 `{{ t.id }}` 改为 `{{ loop.index + (pagination.page - 1) * per_page }}`，显示分页内连续序号而非数据库 ID，不受删除影响。
+
+#### 5.6 — 排序时保留筛选参数
+
+`toggleSortQs()` 原实现只构造 sort/order/page 参数，会丢失 q/module/status 等筛选参数。改为基于 `new URL(window.location.href)` 修改，自动保留当前 URL 中已有的所有查询参数。
+
+### 14.7 涉及文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `templates/admin_webhooks.html` | 测试成功延迟 2 秒刷新 + 页面矩阵补充 permission_tickets checkbox |
+| `routes_ext.py` | 6 处 webhook 参数修复 + 对账同步推送 + 合并函数空库保护 + 权限工单后端增强（搜索/筛选/排序/批量删除） |
+| `app.py` | 审计日志删除推送 + log_action 模块过滤 + AUDIT_MODULE_MAP + 审计配置路由 + admin_logs 传配置 |
+| `webhook_utils.py` | PAGE_NAMES 补充 permission_tickets |
+| `templates/admin_logs.html` | 审计日志配置面板 + JS |
+| `templates/admin_backups.html` | 布局重排（四行）+ 普通用户差异化提示 |
+| `templates/permission_tickets.html` | 筛选/搜索/排序/批量删除/序号/JS 修复 |
+
+### 14.8 浏览器验证结果（2026-09-14）
+
+| 验证项 | 结果 |
+|--------|------|
+| 服务启动无报错，模板编译正常 | ✅ 通过 |
+| WebDAV 备份页面四行布局正常 | ✅ 通过 |
+| 普通用户本地备份卡片差异化提示 | ✅ 通过 |
+| 权限工单关键词搜索功能 | ✅ 通过 |
+| 权限工单模块筛选下拉框 | ✅ 通过 |
+| 权限工单排序（申请人/理由列） | ✅ 通过 |
+| 权限工单排序时保留筛选参数 | ✅ 通过 |
+| 审计日志配置面板（13 模块可折叠） | ✅ 通过 |
+| 审计日志列表 303 条正常显示 | ✅ 通过 |
 
 > AI生成

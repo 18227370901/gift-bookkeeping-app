@@ -9,8 +9,8 @@
 </div>
 
 <div class="row g-4">
-  <!-- 左侧：WebDAV 配置 + 定时任务 + 授权管理 -->
-  <div class="col-lg-5">
+  <!-- WebDAV 配置 + 备份授权 -->
+  <div class="col-12">
 
     <!-- WebDAV 配置：管理员可编辑 / 普通用户只读状态 -->
     {% if current_user.is_admin %}
@@ -223,11 +223,11 @@
     </div>
     {% endif %}
   </div>
+</div>
 
-  <!-- 右侧：定时任务 + 备份与恢复操作 -->
-  <div class="col-lg-7">
-
-    <!-- V7: 定时任务管理（从左栏移到右栏顶部，表格 8列→6列瘦身） -->
+<div class="row g-4">
+  <div class="col-12">
+    <!-- 定时任务 -->
     {% if current_user.is_admin or can_use_scheduled_tasks %}
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
@@ -317,7 +317,11 @@
       </div>
     </div>
     {% endif %}
+  </div>
+</div>
 
+<div class="row g-4">
+  <div class="col-12">
     <!-- WebDAV 云端备份与恢复 -->
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
@@ -393,23 +397,41 @@
         </div>
       </div>
     </div>
+  </div>
+</div>
 
+<div class="row g-4">
+  <div class="col-lg-6">
     <!-- 本地数据库备份与恢复 -->
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light">
         <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-database text-success me-2"></i>本地数据库备份与恢复</h5>
       </div>
       <div class="card-body">
+        {% if not current_user.is_admin %}
+        <!-- V10: 普通用户差异化提示 -->
+        <div class="alert alert-info border-0 rounded-3 mb-3 py-2">
+          <i class="fa-solid fa-shield-halved me-1 text-info"></i>
+          <span class="small">您下载的备份仅包含本人数据；上传恢复时系统将只合并您的数据，不影响其他用户或系统配置。</span>
+        </div>
+        {% endif %}
         <div class="row g-3 align-items-center">
           <div class="col-md-6">
             <label class="form-label fw-bold">一键下载当前数据库文件</label>
+            {% if current_user.is_admin %}
             <p class="small text-muted mb-2">直接导出本地 SQLite 完整数据库（.db），安全离线保存至个人电脑或移动硬盘。</p>
             <a href="{{ url_for('admin_download_local_backup') }}" class="btn btn-success rounded-pill px-3 shadow-sm">
               <i class="fa-solid fa-download me-1"></i>下载完整数据库备份 (.db)
             </a>
+            {% else %}
+            <p class="small text-muted mb-2">导出仅包含您本人数据的数据库文件（.db），安全离线保存至个人电脑或移动硬盘。</p>
+            <a href="{{ url_for('admin_download_local_backup') }}" class="btn btn-success rounded-pill px-3 shadow-sm">
+              <i class="fa-solid fa-download me-1"></i>下载我的数据备份 (.db)
+            </a>
+            {% endif %}
           </div>
           <div class="col-md-6 border-start-md">
-            <form action="{{ url_for('admin_upload_local_backup') }}" method="POST" enctype="multipart/form-data" onsubmit="return confirm('警告：上传恢复数据库将替换现有数据，系统会自动创建历史回滚副本，是否确认恢复？');">
+            <form action="{{ url_for('admin_upload_local_backup') }}" method="POST" enctype="multipart/form-data" onsubmit="return confirm('警告：上传恢复数据库将{% if current_user.is_admin %}替换现有数据，系统会自动创建历史回滚副本{% else %}合并您的个人数据{% endif %}，是否确认恢复？');">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <label class="form-label fw-bold">上传 .db 备份文件恢复</label>
               <div class="input-group">
@@ -424,7 +446,8 @@
         </div>
       </div>
     </div>
-
+  </div>
+  <div class="col-lg-6">
     <!-- 附件文件恢复 -->
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light">

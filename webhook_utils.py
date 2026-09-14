@@ -419,7 +419,7 @@ PAGE_NAMES = {
     'reconciliation': '人情对账', 'recycle_bin': '回收站', 'admin_users': '用户管理',
     'admin_logs': '操作审计日志', 'admin_broadcasts': '系统广播', 'admin_webhooks': 'Webhook通知',
     'admin_backups': 'WebDAV备份', 'ai_assistant': 'AI助手', 'ai_config': 'AI助手配置',
-    'security': '系统安全', 'invites': '邀请链接',
+    'security': '系统安全', 'invites': '邀请链接', 'permission_tickets': '权限工单',
 }
 
 ALL_PAGES = list(PAGE_NAMES.keys())
