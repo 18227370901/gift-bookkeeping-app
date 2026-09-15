@@ -135,26 +135,63 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <div class="mb-3">
             <label class="form-label fw-bold">WebDAV 服务器地址 (URL)</label>
-            <input type="url" name="webdav_url" id="cfg_webdav_url_user" class="form-control rounded-3" value="{{ config_data.webdav_url or '' }}" placeholder="https://dav.jianguoyun.com/dav/">
+            <input type="url" name="webdav_url" id="cfg_webdav_url_user" class="form-control rounded-3" value="{{ config_data.webdav_url or '' }}" placeholder="https://dav.jianguoyun.com/dav/" required>
+            <div class="form-text">支持坚果云、Nextcloud、群晖、Alist 等 WebDAV 完整路径</div>
           </div>
           <div class="mb-3">
             <label class="form-label fw-bold">账号 / 用户名</label>
-            <input type="text" name="webdav_username" id="cfg_webdav_username_user" class="form-control rounded-3" value="{{ config_data.webdav_username or '' }}" placeholder="username@example.com">
+            <input type="text" name="webdav_username" id="cfg_webdav_username_user" class="form-control rounded-3" value="{{ config_data.webdav_username or '' }}" placeholder="username@example.com" required>
           </div>
           <div class="mb-3">
             <label class="form-label fw-bold">密码 / 应用专属授权码</label>
             <div class="input-group">
-              <input type="password" name="webdav_password" id="cfg_webdav_password_user" class="form-control rounded-start-3" placeholder="留空不修改密码" autocomplete="new-password">
-              <button class="btn btn-outline-secondary rounded-end-3" type="button" onclick="togglePasswordVisibility('cfg_webdav_password_user', this)"><i class="fa-regular fa-eye"></i></button>
+              <input type="password" name="webdav_password" id="cfg_webdav_password_user" class="form-control rounded-start-3" value="{{ config_data.get_webdav_password() or '' }}" placeholder="请输入密码或应用授权码" autocomplete="new-password" required>
+              <button class="btn btn-outline-secondary rounded-end-3" type="button" onclick="togglePasswordVisibility('cfg_webdav_password_user', this)" title="查看/隐藏密码"><i class="fa-regular fa-eye"></i></button>
             </div>
+            <div class="form-text small text-muted">点击眼睛图标可切换明文显示/隐藏，方便核对输入</div>
           </div>
           <div class="mb-3">
             <label class="form-label fw-bold">备份存储子目录</label>
             <input type="text" name="backup_subdir" class="form-control rounded-3" value="{{ config_data.backup_subdir or 'gift_backups' }}" placeholder="gift_backups">
+            <div class="form-text small text-muted">备份文件在 WebDAV 服务器上的存储子目录名，默认 gift_backups</div>
           </div>
-          <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">
-            <i class="fa-solid fa-floppy-disk me-1"></i>保存我的配置
-          </button>
+          <!-- V10.3: 普通用户加密密码配置区（与管理员对齐） -->
+          <hr class="my-3">
+          <h6 class="text-muted mb-2"><i class="fa-solid fa-lock me-1 text-warning"></i>自动备份加密密码（可选）
+            {% if has_encrypt_password %}
+            <span class="badge bg-success-subtle text-success ms-2"><i class="fa-solid fa-check-circle me-1"></i>已设置</span>
+            {% else %}
+            <span class="badge bg-secondary-subtle text-secondary ms-2"><i class="fa-solid fa-circle me-1"></i>未设置</span>
+            {% endif %}
+          </h6>
+          <div class="mb-2">
+            <div class="input-group">
+              <input type="password" name="backup_encrypt_password" id="cfg_encrypt_pwd_user" class="form-control rounded-start-3"
+                value="{{ config_encrypt_pwd_plain or '' }}"
+                {% if has_encrypt_password %}placeholder="已设置，修改请直接输入新密码"{% else %}placeholder="预设加密密码（留空不加密）"{% endif %}
+                autocomplete="new-password">
+              <button class="btn btn-outline-secondary rounded-end-3" type="button" onclick="togglePasswordVisibility('cfg_encrypt_pwd_user', this)" title="查看/隐藏密码">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+            {% if not has_pyzipper %}
+            <div class="form-text small text-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>未安装 pyzipper 库，加密功能不可用</div>
+            {% else %}
+            <div class="form-text small text-muted">使用 AES-256 加密，手动备份时可单独选择密码</div>
+            {% endif %}
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="backup_encrypt_password_clear" value="1" id="clearEncryptPwdUser" onchange="toggleClearEncryptPwdUser()" {% if not has_encrypt_password %}disabled{% endif %}>
+            <label class="form-check-label small text-muted" for="clearEncryptPwdUser">{% if has_encrypt_password %}勾选此项清除已保存的加密密码{% else %}尚未设置加密密码，无可清除{% endif %}</label>
+          </div>
+          <div class="d-flex gap-2 mt-2">
+            <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">
+              <i class="fa-solid fa-floppy-disk me-1"></i>保存我的配置
+            </button>
+            <button type="button" class="btn btn-outline-secondary rounded-pill px-4" id="btnTestWebdavUser">
+              <i class="fa-solid fa-plug me-1"></i>测试连接
+            </button>
+          </div>
         </form>
         {% endif %}
       </div>
@@ -1067,6 +1104,63 @@ if (btnTestWebdav) {
     const url = document.getElementById('cfg_webdav_url').value.trim();
     const username = document.getElementById('cfg_webdav_username').value.trim();
     const password = document.getElementById('cfg_webdav_password').value.trim();
+
+    if (!url || !username || !password) {
+      alert('请先填写完整的 WebDAV URL、账号和密码！');
+      return;
+    }
+
+    const btn = this;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>测试中...';
+
+    fetch("{{ url_for('admin_test_webdav') }}", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+        'X-CSRFToken': '{{ csrf_token }}',
+        'X-CSRF-Token': '{{ csrf_token }}'
+      },
+      body: JSON.stringify({ webdav_url: url, webdav_username: username, webdav_password: password })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        alert('WebDAV 连接成功！服务器响应正常。');
+      } else {
+        alert('连接失败: ' + (data.message || '请检查配置与网络'));
+      }
+    })
+    .catch(err => alert('请求异常: ' + err))
+    .finally(() => {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-plug me-1"></i>测试连接';
+    });
+  });
+}
+
+// V10.3: 普通用户加密密码清除切换
+toggleClearEncryptPwdUser();
+function toggleClearEncryptPwdUser() {
+  const cb = document.getElementById('clearEncryptPwdUser');
+  const pwd = document.getElementById('cfg_encrypt_pwd_user');
+  if (!cb || !pwd) return;
+  if (cb.checked) {
+    pwd.value = '';
+    pwd.disabled = true;
+  } else {
+    pwd.disabled = false;
+  }
+}
+
+// V10.3: 普通用户测试 WebDAV 连接
+var btnTestWebdavUser = document.getElementById('btnTestWebdavUser');
+if (btnTestWebdavUser) {
+  btnTestWebdavUser.addEventListener('click', function() {
+    const url = document.getElementById('cfg_webdav_url_user').value.trim();
+    const username = document.getElementById('cfg_webdav_username_user').value.trim();
+    const password = document.getElementById('cfg_webdav_password_user').value.trim();
 
     if (!url || !username || !password) {
       alert('请先填写完整的 WebDAV URL、账号和密码！');

@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '9aec77a3-b4a4-4059-8549-6a916cacc453'
-  PropagateID: '9aec77a3-b4a4-4059-8549-6a916cacc453'
-  ReservedCode1: 'f700af2b-8fc2-4f56-90f7-24fe7eb73dbd'
-  ReservedCode2: 'f700af2b-8fc2-4f56-90f7-24fe7eb73dbd'
+  ProduceID: '6773cc4a-48d2-45bd-a61d-313fc05698d9'
+  PropagateID: '6773cc4a-48d2-45bd-a61d-313fc05698d9'
+  ReservedCode1: 'e01dc470-662e-43f7-bb67-9a32547afee9'
+  ReservedCode2: 'e01dc470-662e-43f7-bb67-9a32547afee9'
 ---
 
 # AI 助手模块技术设计方案
@@ -1455,5 +1455,128 @@ return title, details
 | `webhook_utils.py` | `_render_message` 自定义模板 details 保留原始内容（不再置空） |
 | `templates/admin_backups.html` | 授权卡片拆分为「WebDAV 备份授权」+「定时任务授权与权限」；新增 3 个全局开关+AJAX 保存；定时任务列表按钮权限细化（编辑/删除独立判断） |
 | `app.py` | migration_sqls 追加 2 条 ALTER TABLE |
+
+> AI生成
+
+## 第十七章 V10.3 推送全覆盖与用户级监控（2026-09-15）
+
+### 17.1 需求总览
+
+V10.3 批次覆盖 4 大方向：普通用户 WebDAV 配置体验对齐管理员、推送事件类型分类修正、全面补充缺失推送（18 处）、新增用户级 Webhook 监控过滤。
+
+| 编号 | 模块 | 类型 | 需求 |
+|------|------|------|------|
+| 1 | WebDAV 配置 | 优化 | 普通用户 WebDAV 配置对齐管理员体验：密码回显、可查看密码、可测试连接、加密密码配置区、空值校验 |
+| 2 | 事件分类 | 修复 | 礼金账本"全部删除"应为 clear、审计日志"清空"应为 clear、宴席移出明细应推送 update |
+| 3 | 推送补缺 | 修复 | 排查出 18 处缺失推送的操作点需补充（app.py 6 处 + routes_ext.py 12 处） |
+| 4 | 用户级监控 | 新增 | 管理员可自定义 Webhook 通道仅推送特定用户的操作或特定事件类型 |
+
+### 17.2 模块 A：普通用户 WebDAV 配置体验对齐
+
+**问题**：普通用户表单缺少密码回显、测试连接按钮、加密密码配置区，且空配置可保存。
+
+**方案**：
+
+1. **表单 HTML**（`admin_backups.html`）：
+   - 密码输入框添加 `value="{{ config_data.get_webdav_password() or '' }}"` 回显
+   - placeholder 改为 `请输入密码或应用授权码`
+   - 地址/账号输入框添加 `required` 属性
+   - 新增加密密码配置区（与管理员表单结构一致）
+   - 新增"测试连接"按钮（`id="btnTestWebdavUser"`）
+   - 新增清除加密密码复选框（`id="clearEncryptPwdUser"`）
+
+2. **JS 函数**（`admin_backups.html`）：
+   - `toggleClearEncryptPwdUser()`：勾选清除加密密码时禁用密码输入框
+   - `btnTestWebdavUser` 事件监听：通过 AJAX 调用 `admin_test_webdav` 测试连接
+
+3. **后端校验**（`routes_ext.py`）：
+   - `admin_save_webdav_config` 路由新增空值校验：URL 和账号为空时返回错误提示
+
+### 17.3 模块 B：推送事件类型分类修正
+
+| 路由 | 文件 | 修正前 | 修正后 | 原因 |
+|------|------|--------|--------|------|
+| `delete_all_records` | app.py | `batch_delete` | `clear` | 全部清空≠批量删除，应归 clear 类 |
+| `admin_clear_logs` | app.py | `security` | `clear` | 清空日志应归 clear 类 |
+| `banquet_unlink_record` | routes_ext.py | 无推送 | `update` | 移出宴席明细是更新操作，需补充推送 |
+
+### 17.4 模块 C：全面补充缺失推送（18 处）
+
+**PAGE_EVENT_MATRIX 补充**（4 个页面）：
+
+| 页面 | 原有事件 | 新增事件 |
+|------|----------|----------|
+| `admin_broadcasts` | create, broadcast | delete, status_change |
+| `admin_webhooks` | create, update, delete, status_change | clear |
+| `admin_users` | create, update, delete, status_change | batch_delete |
+| `admin_backups` | create, update, delete, status_change, system | clear |
+
+**app.py 补充推送（6 处）**：
+
+| 路由 | event_type | 说明 |
+|------|------------|------|
+| `admin_batch_delete_users` | batch_delete | 批量删除用户 |
+| `admin_batch_user_permissions` | update | 批量配置权限 |
+| `admin_reset_user_security` | security | 重置用户密保 |
+| `update_session_timeout` | system | 系统安全配置 |
+| `admin_save_audit_log_config` | system | 审计日志配置 |
+| `admin_set_registration_mode` | system | 注册模式变更 |
+
+**routes_ext.py 补充推送（12 处）**：
+
+| 路由 | event_type | 说明 |
+|------|------------|------|
+| `admin_toggle_broadcast` | status_change | 广播状态切换 |
+| `admin_delete_broadcast` | delete | 删除广播 |
+| `banquet_share` | update | 配置分享链接 |
+| `banquet_share_delete` | delete | 删除分享链接 |
+| `admin_delete_webhook_log` | delete | 删除推送日志 |
+| `admin_batch_delete_webhook_logs` | batch_delete | 批量删除推送日志 |
+| `admin_clear_webhook_logs` | clear | 清空推送日志 |
+| `admin_delete_webdav_backup` | delete | 删除WebDAV备份 |
+| `admin_upload_local_backup`（普通用户） | restore | 上传恢复（数据级合并） |
+| `admin_upload_local_backup`（管理员） | restore | 上传恢复（文件级替换） |
+| `admin_set_recycle_retention` | system | 回收站策略设置 |
+| `admin_save_task_permissions` | system | 定时任务权限设置 |
+| `admin_adopt_admin_config` | system | 采用管理员配置 |
+
+### 17.5 模块 D：用户级 Webhook 监控过滤
+
+**需求**：管理员可为每个 Webhook 通道配置"仅推送特定用户的操作"或"仅推送特定事件类型"，实现精细化监控。
+
+**方案**：
+
+1. **WebhookConfig 新增 2 字段**（`models.py`）：
+   - `monitor_user_ids` (Text/JSON)：监控用户 ID 列表，空=不限制
+   - `monitor_event_types` (Text/JSON)：监控事件大类列表，空=不限制
+
+2. **trigger_webhook_event 新增过滤**（`webhook_utils.py`）：
+   - 新增 `_get_monitor_user_ids()` / `_get_monitor_event_types()` / `_monitor_matches()` 辅助函数
+   - 在事件开关+页面过滤之后，增加用户 ID 过滤和事件类型过滤
+   - `monitor_user_ids` 为空 = 不限制用户；非空 = 仅推送列表内用户的操作
+   - `monitor_event_types` 为空 = 不限制事件类型；非空 = 仅推送列表内事件大类
+
+3. **前端 UI**（`admin_webhooks.html`）：
+   - 新增/编辑 Modal 新增第 4 个 Tab「监控范围」
+   - 用户多选列表（普通用户列表，复选框）
+   - 事件类型多选列表（12 个事件大类，复选框）
+   - 新增 `assembleMonitorData()` / `fillEditMonitor()` JS 函数
+
+4. **保存路由**（`routes_ext.py`）：
+   - `admin_create_webhook` / `admin_edit_webhook` 读取并保存 `monitor_user_ids` / `monitor_event_types`
+
+5. **数据库迁移**（`app.py`）：
+   - migration_sqls 追加 2 条 ALTER TABLE
+
+### 17.6 涉及文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `models.py` | WebhookConfig 新增 `monitor_user_ids`/`monitor_event_types` 字段 |
+| `webhook_utils.py` | `trigger_webhook_event` 新增监控过滤；`PAGE_EVENT_MATRIX` 补充 4 页面；新增 `_monitor_matches` 等辅助函数 |
+| `routes_ext.py` | 12 处缺失推送补充；`admin_save_webdav_config` 空值校验；`admin_create_webhook`/`admin_edit_webhook` 读取 monitor 字段；`admin_webhooks` 传参新增 `all_users` |
+| `app.py` | 6 处缺失推送补充；3 处 event_type 修正；migration_sqls 追加 2 条 |
+| `templates/admin_backups.html` | 普通用户 WebDAV 表单增强（密码回显+测试连接+加密密码区+required）；新增 `toggleClearEncryptPwdUser`/`btnTestWebdavUser` JS |
+| `templates/admin_webhooks.html` | 新增/编辑 Modal 第 4 个 Tab「监控范围」+ JS 函数；编辑按钮 data 属性新增 monitor 数据 |
 
 > AI生成

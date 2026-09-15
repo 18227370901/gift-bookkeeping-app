@@ -801,6 +801,9 @@ class WebhookConfig(db.Model):
     notify_on_status_change = db.Column(db.Boolean, default=False)
     notify_pages = db.Column(db.Text, default='{}')  # JSON: {event_category: [page_keys]}
     message_templates = db.Column(db.Text, default='{}')  # JSON: {event_type:page_key or event_type: template_str}
+    # V10.3: 用户级 Webhook 监控过滤
+    monitor_user_ids = db.Column(db.Text, default='[]')    # JSON: [user_id, ...], 空=不限制
+    monitor_event_types = db.Column(db.Text, default='[]')  # JSON: [event_type, ...], 空=不限制
     created_at = db.Column(db.DateTime, default=datetime.now)
     
     user = db.relationship('User', backref=db.backref('webhooks', lazy=True))

@@ -791,6 +791,11 @@ def init_database():
             "ALTER TABLE backup_configs ADD COLUMN allow_edit_others_tasks BOOLEAN DEFAULT 0",
             "ALTER TABLE backup_configs ADD COLUMN allow_delete_others_tasks BOOLEAN DEFAULT 0",
         ])
+        # --- V10.3 新增：Webhook 用户级监控过滤字段 ---
+        migration_sqls.extend([
+            "ALTER TABLE webhook_configs ADD COLUMN monitor_user_ids TEXT DEFAULT '[]'",
+            "ALTER TABLE webhook_configs ADD COLUMN monitor_event_types TEXT DEFAULT '[]'",
+        ])
         with db.engine.connect() as conn:
             for sql in migration_sqls:
                 try:
@@ -1757,8 +1762,8 @@ def delete_all_records():
     if deleted_count > 0:
         try:
             trigger_webhook_event(
-                WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
-                f'{current_user.username} 全部删除 {deleted_count} 条记录',
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'clear',
+                f'{current_user.username} 清空 {deleted_count} 条记录',
                 f'操作人：{current_user.username} | 页面：礼金账本 | 数量：全部 {deleted_count} 条 | 状态：已移入回收站',
                 page_key='ledger', user_name=current_user.username
             )
@@ -1881,6 +1886,17 @@ def update_session_timeout():
             SystemSetting.set_val('max_security_attempts', sec_attempts)
             SystemSetting.set_val('login_lockout_seconds', lockout_sec)
             log_action('更新系统配置', f'设置超时时间为 {minutes} 分钟，密码最大尝试次数为 {attempts} 次，密保最大尝试次数为 {sec_attempts} 次，锁定时长为 {lockout_sec} 秒')
+            # V10.3: 补充系统安全配置推送
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                    f'{current_user.username} 更新安全配置',
+                    f'操作人：{current_user.username} | 页面：用户管理 | 操作：更新系统安全配置',
+                    page_key='admin_users', user_name=current_user.username,
+                    operator_id=current_user.id
+                )
+            except Exception:
+                pass
             flash('系统安全与登录设置修改成功！', 'success')
     except (ValueError, TypeError):
         flash('无效的配置参数！', 'danger')
@@ -2135,7 +2151,7 @@ def admin_clear_logs():
     # V10: 补充审计日志清空推送
     try:
         trigger_webhook_event(
-            WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'clear',
             f'管理员 {current_user.username} 清空了所有操作审计日志（共 {deleted_count} 条）',
             page_key='admin_logs', user_name=current_user.username, operator_id=current_user.id
         )
@@ -2159,6 +2175,17 @@ def admin_save_audit_log_config():
     else:
         SystemSetting.set_val('audit_log_modules', _json_module.dumps(modules))
     log_action('更新系统配置', f'管理员更新了审计日志记录模块配置: {", ".join(modules) if modules else "全部禁用"}')
+    # V10.3: 补充审计日志配置推送
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+            f'{current_user.username} 更新审计日志配置',
+            f'操作人：{current_user.username} | 页面：审计日志 | 操作：更新模块配置',
+            page_key='admin_logs', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash('审计日志记录配置已保存成功！', 'success')
     return redirect(url_for('admin_logs'))
 
@@ -2175,6 +2202,17 @@ def admin_set_registration_mode():
     SystemSetting.set_val('registration_mode', mode)
     mode_name = '自由开放注册' if mode == 'free' else '仅邀请链接注册'
     log_action('修改注册策略', f"管理员将系统注册模式调整为: [{mode_name}]")
+    # V10.3: 补充注册模式变更推送
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+            f'{current_user.username} 修改注册模式',
+            f'操作人：{current_user.username} | 页面：用户管理 | 操作：修改注册模式 | 模式：{mode_name}',
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash(f'注册模式已成功调整为：【{mode_name}】！', 'success')
     return redirect(url_for('admin_users'))
 
@@ -2238,6 +2276,17 @@ def admin_batch_user_permissions():
     if count > 0:
         db.session.commit()
         log_action('批量配置权限', f"管理员批量更新了 {count} 位用户的菜单与各菜单独立数据权限")
+        # V10.3: 补充批量配置权限推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'update',
+                f'{current_user.username} 批量配置 {count} 位用户权限',
+                f'操作人：{current_user.username} | 页面：用户管理 | 操作：批量配置权限 | 数量：{count}',
+                page_key='admin_users', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'成功批量更新了 {count} 位用户的菜单访问与各菜单独立数据权限！', 'success')
     else:
         flash('未找到符合批量更新条件的普通用户！', 'warning')
@@ -2370,6 +2419,17 @@ def admin_reset_user_security(user_id):
         FORGOT_SECURITY_LOCK_UNTILS.pop(user.username, None)
         db.session.commit()
         log_action('重置密保问题', f'管理员重置了用户 [{user.username}] 的密保问题与答案')
+        # V10.3: 补充重置密保推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'{current_user.username} 重置用户密保',
+                f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username} | 操作：重置密保问题',
+                page_key='admin_users', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'用户 [{user.username}] 的密保问题与答案已重置成功！', 'success')
     else:
         flash('密保问题和密保答案均不能为空！', 'warning')
@@ -2578,6 +2638,17 @@ def admin_batch_delete_users():
         db.session.commit()
 
         log_action('批量删除用户', f'管理员批量删除了 {deleted_count} 个用户: {", ".join(deleted_usernames)}')
+        # V10.3: 补充批量删除用户推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
+                f'{current_user.username} 批量删除 {deleted_count} 个用户',
+                f'操作人：{current_user.username} | 页面：用户管理 | 用户：{", ".join(deleted_usernames)} | 数量：{deleted_count}',
+                page_key='admin_users', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'成功批量删除 {deleted_count} 个用户及其关联数据：{", ".join(deleted_usernames)}', 'success')
     except Exception as e:
         db.session.rollback()

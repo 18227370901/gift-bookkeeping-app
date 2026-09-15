@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '69550171-b5cb-49b0-a1ed-e5e0994008a7'
-  PropagateID: '69550171-b5cb-49b0-a1ed-e5e0994008a7'
-  ReservedCode1: '70d3f66b-a9e1-46bd-8e21-a1e2e496b8c1'
-  ReservedCode2: '70d3f66b-a9e1-46bd-8e21-a1e2e496b8c1'
+  ProduceID: 'd511ed59-e322-453e-9d18-18b33996b3b8'
+  PropagateID: 'd511ed59-e322-453e-9d18-18b33996b3b8'
+  ReservedCode1: 'c683d9b3-c729-4b92-8fcd-2f0761f4d97b'
+  ReservedCode2: 'c683d9b3-c729-4b92-8fcd-2f0761f4d97b'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -382,6 +382,30 @@ AIGC:
 
 #### 补充缺失推送
 - `admin_toggle_task_auth`（定时任务授权切换）补充 `status_change` 类型 Webhook 推送
+
+### V10.3 推送全覆盖与用户级监控（2026-09-15）
+
+#### 普通用户 WebDAV 配置体验对齐
+- 普通用户 WebDAV 表单新增密码回显、查看密码眼睛图标、测试连接按钮、加密密码配置区
+- 地址和账号输入框添加 `required` 属性，后端新增空值校验防止保存空配置
+- 新增 `toggleClearEncryptPwdUser()` / `btnTestWebdavUser` JS 函数
+
+#### 推送事件类型分类修正
+- 礼金账本"全部删除"：`batch_delete` → `clear`（清空≠批量删除）
+- 审计日志"清空"：`security` → `clear`（清空操作应归 clear 类）
+- 宴席移出明细：无推送 → 新增 `update` 类型推送
+
+#### 全面补充缺失推送（18 处）
+- PAGE_EVENT_MATRIX 补充 4 个页面：admin_broadcasts(+delete/status_change)、admin_webhooks(+clear)、admin_users(+batch_delete)、admin_backups(+clear)
+- app.py 补充 6 处：批量删除用户、批量配置权限、重置密保、系统安全配置、审计日志配置、注册模式变更
+- routes_ext.py 补充 12 处：广播状态切换/删除、宴席分享配置/删除、推送日志删除/批量删除/清空、WebDAV备份删除、上传恢复(普通用户+管理员)、回收站策略、定时任务权限、采用管理员配置
+
+#### 用户级 Webhook 监控过滤
+- WebhookConfig 新增 `monitor_user_ids`/`monitor_event_types` 字段（JSON 数组）
+- `trigger_webhook_event` 在事件开关+页面过滤之后新增用户 ID 和事件类型双重过滤
+- 新增/编辑 Modal 新增第 4 个 Tab「监控范围」，含用户多选列表和事件类型多选
+- 空 = 不限制（推送全部）；非空 = 仅推送匹配的操作
+- 数据库迁移新增 2 条 ALTER TABLE
 
 ## 📂 项目文件结构
 

@@ -1235,6 +1235,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         SystemSetting.set_val('recycle_bin_retention_days', str(days))
         cleanup_expired_recycle_items()
         safe_log('设置回收站策略', f"管理员将回收站数据保留时长设置为 {days} 天")
+        # V10.3: 补充回收站策略设置推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                f'{current_user.username} 设置回收站策略',
+                f'操作人：{current_user.username} | 页面：回收站 | 保留天数：{days}',
+                page_key='recycle_bin', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
         desc = f"保留 {days} 天（超出自动彻底清理）" if days > 0 else "永久保留（不自动清理）"
         flash(f'回收站保留时长已设置为：【{desc}】！', 'success')
         return redirect(url_for('recycle_bin_view'))
@@ -2285,6 +2295,17 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             r.banquet_id = None
             db.session.commit()
             safe_log('移出宴席明细', f"将客人 [{r.name}] 的记录移出专属宴席 [{b.title}]（保留在主账本中）")
+            # V10.3: 补充移出宴席明细推送
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'update',
+                    f'{current_user.username} 移出宴席明细',
+                    f'操作人：{current_user.username} | 页面：宴席管理 | 客人：{r.name} | 宴席：{b.title} | 操作：移出',
+                    page_key='banquets', user_name=current_user.username,
+                    operator_id=current_user.id
+                )
+            except Exception:
+                pass
             flash(f'已将客人 [{r.name}] 的记录移出专属宴席（主账本数据仍完好保留）！', 'success')
         return redirect(url_for('banquet_detail_view', banquet_id=banquet_id))
 
@@ -2351,6 +2372,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         db.session.commit()
         share_url = url_for('shared_ledger_view', token=share.share_token, _external=True)
         safe_log('配置分享链接', f"更新了宴席 [{b.title}] 的专属分享链接 (有效期: {expire_label})")
+        # V10.3: 补充宴席分享链接配置推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'update',
+                f'{current_user.username} 配置分享链接',
+                f'操作人：{current_user.username} | 页面：宴席管理 | 宴席：{b.title} | 操作：配置分享链接 | 有效期：{expire_label}',
+                page_key='banquets', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
 
         if not is_ajax:
             flash(f'专属免登录只读分享链接已更新并生效（有效期: {expire_label}）！', 'success')
@@ -2389,6 +2420,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             db.session.delete(share)
             db.session.commit()
             safe_log('删除分享链接', f"删除了宴席 [{b.title}] 的免登录分享链接")
+            # V10.3: 补充删除分享链接推送
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'delete',
+                    f'{current_user.username} 删除分享链接',
+                    f'操作人：{current_user.username} | 页面：宴席管理 | 宴席：{b.title} | 操作：删除分享链接',
+                    page_key='banquets', user_name=current_user.username, operator_id=current_user.id
+                )
+            except Exception:
+                pass
 
         if not is_ajax:
             flash('专属分享链接已成功删除作废！', 'success')
@@ -2975,6 +3016,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         bc.is_active = not bc.is_active
         db.session.commit()
         safe_log('切换系统广播状态', f"ID: {broadcast_id} -> {'上线' if bc.is_active else '下线'}", user=current_user)
+        # V10.3: 补充广播状态切换推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
+                f'{current_user.username} 切换广播状态',
+                f'操作人：{current_user.username} | 页面：系统广播 | 状态：{"上线" if bc.is_active else "下线"}',
+                page_key='admin_broadcasts', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
         if is_ajax:
             return jsonify({'success': True, 'is_active': bc.is_active})
         flash(f"系统广播已{'上线展示' if bc.is_active else '下线暂不展示'}！", 'success')
@@ -2992,6 +3043,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             db.session.delete(bc)
             db.session.commit()
             safe_log('删除系统广播', f"ID: {broadcast_id}", user=current_user)
+            # V10.3: 补充删除广播推送
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'delete',
+                    f'{current_user.username} 删除广播',
+                    f'操作人：{current_user.username} | 页面：系统广播 | ID: {broadcast_id}',
+                    page_key='admin_broadcasts', user_name=current_user.username, operator_id=current_user.id
+                )
+            except Exception:
+                pass
             flash('广播已彻底删除', 'success')
         return redirect(url_for('admin_broadcasts'))
 
@@ -3065,7 +3126,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         return render_template('admin_webhooks.html', webhooks=webhooks, logs=logs,
                                ALL_PAGES=_PAGE_NAMES, EVENT_COLUMNS=_EVENT_COLUMNS,
                                PAGE_EVENT_MATRIX=_PAGE_EVENT_MATRIX,
-                               DEFAULT_TEMPLATES=_DEFAULT_TEMPLATES)
+                               DEFAULT_TEMPLATES=_DEFAULT_TEMPLATES,
+                               all_users=User.query.filter_by(is_admin=False).all())
 
     @app.route('/admin/webhooks/create', methods=['POST'])
     @login_required
@@ -3097,6 +3159,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         notify_on_status_change = bool(request.form.get('notify_on_status_change'))
         notify_pages = request.form.get('notify_pages', '{}').strip()
         message_templates = request.form.get('message_templates', '{}').strip()
+        # V10.3: 用户级监控过滤
+        monitor_user_ids = request.form.get('monitor_user_ids', '[]').strip()
+        monitor_event_types = request.form.get('monitor_event_types', '[]').strip()
 
         is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
 
@@ -3142,6 +3207,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             notify_on_status_change=notify_on_status_change,
             notify_pages=notify_pages,
             message_templates=message_templates,
+            monitor_user_ids=monitor_user_ids,
+            monitor_event_types=monitor_event_types,
             is_enabled=True
         )
         db.session.add(hook)
@@ -3231,6 +3298,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         hook.notify_on_status_change = bool(request.form.get('notify_on_status_change'))
         hook.notify_pages = request.form.get('notify_pages', '{}').strip()
         hook.message_templates = request.form.get('message_templates', '{}').strip()
+        # V10.3: 用户级监控过滤
+        hook.monitor_user_ids = request.form.get('monitor_user_ids', '[]').strip()
+        hook.monitor_event_types = request.form.get('monitor_event_types', '[]').strip()
 
         db.session.commit()
         safe_log('编辑Webhook', f"ID: {webhook_id}, 名称: {name}, 连接方式: {connection_type}")
@@ -3338,6 +3408,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         db.session.delete(log_item)
         db.session.commit()
         safe_log('删除推送日志', f"日志ID: {log_id}")
+        # V10.3: 补充删除推送日志推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'delete',
+                f'{current_user.username} 删除推送日志',
+                f'操作人：{current_user.username} | 页面：Webhook管理 | 日志ID: {log_id}',
+                page_key='admin_webhooks', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({'code': 200, 'message': '推送日志已成功删除！'})
 
     @app.route('/admin/webhook/logs/batch_delete', methods=['POST'])
@@ -3358,6 +3438,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         deleted_count = WebhookLog.query.filter(WebhookLog.id.in_(ids)).delete(synchronize_session=False)
         db.session.commit()
+        # V10.3: 补充批量删除推送日志推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
+                f'{current_user.username} 批量删除推送日志',
+                f'操作人：{current_user.username} | 页面：Webhook管理 | 数量：{deleted_count} 条',
+                page_key='admin_webhooks', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({'code': 200, 'message': f'已成功删除 {deleted_count} 条推送日志！', 'deleted_count': deleted_count})
 
     @app.route('/admin/webhook/logs/clear', methods=['POST'])
@@ -3368,6 +3458,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return jsonify({'code': 403, 'message': '权限不足'}), 403
         count = WebhookLog.query.delete(synchronize_session=False)
         db.session.commit()
+        # V10.3: 补充清空推送日志推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'clear',
+                f'{current_user.username} 清空推送日志',
+                f'操作人：{current_user.username} | 页面：Webhook管理 | 数量：全部 {count} 条',
+                page_key='admin_webhooks', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({'code': 200, 'message': f'已成功清空全部 {count} 条推送日志！'})
 
     @app.route('/api/wecom/callback', methods=['GET', 'POST'])
@@ -3586,6 +3686,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         alias = global_config.config_alias or '管理员配置'
         safe_log('引用WebDAV配置', f"用户 {current_user.username} 一键采用管理员配置「{alias}」（凭证服务端加密复制，页面不回显）")
+        # V10.3: 补充采用管理员配置推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                f'{current_user.username} 采用管理员配置',
+                f'操作人：{current_user.username} | 页面：WebDAV备份 | 配置：{alias}',
+                page_key='admin_backups', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({'success': True, 'config_alias': alias, 'message': f'已采用管理员配置「{alias}」，可直接执行备份操作'})
 
     @app.route('/admin/backups/list_ajax', methods=['GET'])
@@ -3664,6 +3774,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         # V9: 普通用户手动保存自己的配置时，视为脱离管理员引用（地址/账号将正常回显）
         if not current_user.is_admin:
             config.adopted_from_admin = False
+
+        # V10.3: 空值校验——URL 和账号不允许保存空值
+        if not server_url or not username:
+            flash('WebDAV 服务器地址和账号不能为空！', 'danger')
+            return redirect(url_for('admin_backups'))
 
         config.webdav_url = server_url
         config.webdav_username = username
@@ -3889,6 +4004,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 shutil.rmtree(tmp_dir, ignore_errors=True)
                 if ok:
                     safe_log('上传恢复本地备份', f"普通用户 {current_user.username} 数据级合并恢复成功: {msg}")
+                    # V10.3: 补充普通用户恢复推送
+                    try:
+                        trigger_webhook_event(
+                            WebhookConfig.query.filter_by(is_enabled=True).all(), 'restore',
+                            f'{current_user.username} 恢复本地备份',
+                            f'操作人：{current_user.username} | 页面：WebDAV备份 | 操作：上传恢复 | 方式：数据级合并 | 结果：成功',
+                            page_key='admin_backups', user_name=current_user.username, operator_id=current_user.id
+                        )
+                    except Exception:
+                        pass
                     flash(f'已成功恢复您的个人数据（{msg}），系统与其他用户数据不受影响。', 'success')
                 else:
                     flash(f'恢复失败：{msg}', 'danger')
@@ -3944,6 +4069,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 safe_log('数据库迁移', f"init_database 执行失败: {e}")
             
             safe_log('上传恢复本地备份', f"成功恢复了上传的数据库文件: {file.filename}")
+            # V10.3: 补充管理员恢复推送
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'restore',
+                    f'{current_user.username} 恢复本地备份',
+                    f'操作人：{current_user.username} | 页面：WebDAV备份 | 操作：上传恢复 | 方式：文件级替换 | 文件：{file.filename} | 结果：成功',
+                    page_key='admin_backups', user_name=current_user.username, operator_id=current_user.id
+                )
+            except Exception:
+                pass
             flash('本地数据库已成功恢复，请刷新页面确认数据更新。', 'success')
         except Exception as e:
             flash(f'恢复数据库文件失败: {e}', 'danger')
@@ -4211,6 +4346,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 all_success = False
 
         safe_log('删除WebDAV备份', f"文件: {', '.join(filenames)}, 结果: {'全部成功' if all_success else '部分失败'}")
+        # V10.3: 补充删除WebDAV备份推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'delete',
+                f'{current_user.username} 删除WebDAV备份',
+                f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{', '.join(filenames)} | 结果：{"全部成功" if all_success else "部分失败"}',
+                page_key='admin_backups', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({'success': all_success, 'results': results})
 
     # ===================== 定时备份任务管理 =====================
@@ -4452,6 +4597,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         config.allow_delete_others_tasks = bool(data.get('allow_delete_others_tasks', False))
         db.session.commit()
         safe_log('更新定时任务权限', f'查看他人: {config.allow_view_others_tasks}, 编辑他人: {config.allow_edit_others_tasks}, 删除他人: {config.allow_delete_others_tasks}', user=current_user)
+        # V10.3: 补充定时任务权限设置推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                f'{current_user.username} 更新定时任务权限',
+                f'操作人：{current_user.username} | 页面：WebDAV备份 | 查看：{config.allow_view_others_tasks} | 编辑：{config.allow_edit_others_tasks} | 删除：{config.allow_delete_others_tasks}',
+                page_key='admin_backups', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({'success': True})
 
     @app.route('/manifest.json')

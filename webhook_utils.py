@@ -440,11 +440,11 @@ PAGE_EVENT_MATRIX = {
     'reminders':         ['create', 'update', 'delete', 'batch_delete', 'reminder'],
     'reconciliation':    ['sync'],
     'recycle_bin':       ['restore', 'delete', 'batch_delete', 'clear'],
-    'admin_users':       ['create', 'update', 'delete', 'status_change'],
+    'admin_users':       ['create', 'update', 'delete', 'batch_delete', 'status_change'],
     'admin_logs':        ['delete', 'clear'],
-    'admin_broadcasts':  ['create', 'broadcast'],
-    'admin_webhooks':    ['create', 'update', 'delete', 'status_change'],
-    'admin_backups':     ['create', 'update', 'delete', 'status_change', 'system'],
+    'admin_broadcasts':  ['create', 'delete', 'status_change', 'broadcast'],
+    'admin_webhooks':    ['create', 'update', 'delete', 'clear', 'status_change'],
+    'admin_backups':     ['create', 'update', 'delete', 'clear', 'status_change', 'system'],
     'ai_assistant':      ['create'],
     'ai_config':         ['update', 'system'],
     'security':          ['security'],
@@ -514,6 +514,52 @@ def _page_matches(webhook, event_type, page_key):
     event_category = _get_event_category(event_type)
     pages_for_event = notify_pages.get(event_category, [])
     return page_key in pages_for_event
+
+
+def _get_monitor_user_ids(webhook):
+    """V10.3: 获取 Webhook 监控的用户 ID 列表，空列表=不限制"""
+    import json as _json
+    raw = getattr(webhook, 'monitor_user_ids', None) or '[]'
+    try:
+        data = _json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(data, list):
+            return [int(uid) for uid in data if uid]
+    except Exception:
+        pass
+    return []
+
+
+def _get_monitor_event_types(webhook):
+    """V10.3: 获取 Webhook 监控的事件大类列表，空列表=不限制"""
+    import json as _json
+    raw = getattr(webhook, 'monitor_event_types', None) or '[]'
+    try:
+        data = _json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+
+def _monitor_matches(webhook, event_type, operator_id):
+    """V10.3: 检查该 Webhook 通道的监控范围是否匹配当前操作
+    - monitor_user_ids 为空 = 不限制用户（全部通过）
+    - monitor_event_types 为空 = 不限制事件类型（全部通过）
+    - 两者都配置时需同时满足
+    """
+    # 用户过滤
+    monitor_uids = _get_monitor_user_ids(webhook)
+    if monitor_uids and operator_id is not None:
+        if operator_id not in monitor_uids:
+            return False
+    # 事件类型过滤（按大类匹配）
+    monitor_types = _get_monitor_event_types(webhook)
+    if monitor_types:
+        event_cat = _get_event_category(event_type)
+        if event_cat not in monitor_types and event_type not in monitor_types:
+            return False
+    return True
 
 
 def _get_event_category(event_type):
@@ -651,6 +697,9 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                 continue
             # 页面级过滤
             if not _page_matches(w, event_type, page_key):
+                continue
+            # V10.3: 用户级监控过滤
+            if not _monitor_matches(w, event_type, operator_id):
                 continue
 
         hook_data_list.append({

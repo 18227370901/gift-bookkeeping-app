@@ -120,6 +120,8 @@
                data-notify-status="{{ 1 if w.notify_on_status_change else 0 }}"
                data-notify-pages="{{ w.notify_pages or '{}' }}"
                data-message-templates="{{ w.message_templates or '{}' }}"
+               data-monitor-user-ids="{{ w.monitor_user_ids or '[]' }}"
+               data-monitor-event-types="{{ w.monitor_event_types or '[]' }}"
                title="编辑配置">
                 <i class="fa-solid fa-pen-to-square"></i>
               </button>
@@ -225,9 +227,9 @@
         <button type="button" class="btn btn-outline-secondary btn-sm rounded-3 text-nowrap" onclick="resetLogFilters()" title="重置筛选">
           <i class="fa-solid fa-rotate-left"></i>
         </button>
-      </div>
-    </div>
-  </div>
+              </div>
+            </div>
+         </div>
 
   <!-- 日志表格 -->
   <div class="card-body p-0">
@@ -334,6 +336,8 @@
       <form id="newWebhookForm" action="{{ url_for('admin_create_webhook') }}" method="POST" novalidate>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="notify_pages" id="newNotifyPagesHidden" value="{}">
+        <input type="hidden" name="monitor_user_ids" id="newMonitorUserIdsHidden" value="[]">
+        <input type="hidden" name="monitor_event_types" id="newMonitorEventTypesHidden" value="[]">
         <div class="modal-body p-4">
           <div id="newWebhookError"></div>
           <!-- 渠道名称 -->
@@ -425,10 +429,13 @@
              <li class="nav-item" role="presentation">
                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#newTabMatrix" type="button" role="tab"><i class="fa-solid fa-table-cells me-1"></i>推送配置矩阵</button>
              </li>
-             <li class="nav-item" role="presentation">
-               <button class="nav-link" data-bs-toggle="tab" data-bs-target="#newTabTemplates" type="button" role="tab"><i class="fa-solid fa-comment-dots me-1"></i>消息模板</button>
-             </li>
-           </ul>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#newTabTemplates" type="button" role="tab"><i class="fa-solid fa-comment-dots me-1"></i>消息模板</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#newTabMonitor" type="button" role="tab"><i class="fa-solid fa-shield-halved me-1"></i>监控范围</button>
+              </li>
+            </ul>
            <div class="tab-content">
              <!-- Tab 1: 基础事件开关 -->
              <div class="tab-pane fade show active" id="newTabEvents" role="tabpanel">
@@ -502,12 +509,42 @@
                  {% endfor %}
                  {% endfor %}
                </div>
-             </div>
-           </div>
-        </div>
-        <div class="modal-footer border-light">
-          <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
-          <button type="submit" id="newWebhookSubmitBtn" class="btn btn-primary rounded-pill px-4 shadow-sm">保存配置</button>
+              </div>
+
+              <!-- V10.3: Tab 4: 监控范围 -->
+              <div class="tab-pane fade" id="newTabMonitor" role="tabpanel">
+                <div class="form-text small text-muted mb-2">
+                  <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。留空 = 不限制（推送全部）。
+                </div>
+                <h6 class="text-muted mb-2"><i class="fa-solid fa-user-shield me-1"></i>监控用户（可选）</h6>
+                <div class="border rounded-3 bg-light p-2 mb-3" style="max-height: 150px; overflow-y: auto;">
+                  {% if all_users %}
+                  {% for u in all_users %}
+                  <div class="form-check">
+                    <input class="form-check-input monitor-user-cb" type="checkbox" value="{{ u.id }}" id="new_monitor_user_{{ u.id }}">
+                    <label class="form-check-label small" for="new_monitor_user_{{ u.id }}">{{ u.username }}</label>
+                  </div>
+                  {% endfor %}
+                  {% else %}
+                  <span class="small text-muted">暂无普通用户</span>
+                  {% endif %}
+                </div>
+                <h6 class="text-muted mb-2"><i class="fa-solid fa-filter me-1"></i>监控事件类型（可选）</h6>
+                <div class="border rounded-3 bg-light p-2">
+                  {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                  <div class="form-check d-inline-block me-3">
+                    <input class="form-check-input monitor-event-cb" type="checkbox" value="{{ ev_key }}" id="new_monitor_ev_{{ ev_key }}">
+                    <label class="form-check-label small" for="new_monitor_ev_{{ ev_key }}">{{ ev_label }}</label>
+                  </div>
+                  {% endfor %}
+                </div>
+                <div class="form-text small text-muted mt-2">不勾选任何用户 = 推送所有用户的操作；不勾选任何事件 = 推送所有事件类型。</div>
+              </div>
+            </div>
+         </div>
+         <div class="modal-footer border-light">
+           <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
+           <button type="submit" id="newWebhookSubmitBtn" class="btn btn-primary rounded-pill px-4 shadow-sm">保存配置</button>
         </div>
       </form>
     </div>
@@ -525,6 +562,8 @@
       <form id="editWebhookForm" action="" method="POST" novalidate>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="notify_pages" id="editNotifyPagesHidden" value="{}">
+        <input type="hidden" name="monitor_user_ids" id="editMonitorUserIdsHidden" value="[]">
+        <input type="hidden" name="monitor_event_types" id="editMonitorEventTypesHidden" value="[]">
         <div class="modal-body p-4">
           <div id="editWebhookError"></div>
           <!-- 渠道名称 -->
@@ -612,10 +651,13 @@
              <li class="nav-item" role="presentation">
                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#editTabMatrix" type="button" role="tab"><i class="fa-solid fa-table-cells me-1"></i>推送配置矩阵</button>
              </li>
-             <li class="nav-item" role="presentation">
-               <button class="nav-link" data-bs-toggle="tab" data-bs-target="#editTabTemplates" type="button" role="tab"><i class="fa-solid fa-comment-dots me-1"></i>消息模板</button>
-             </li>
-           </ul>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#editTabTemplates" type="button" role="tab"><i class="fa-solid fa-comment-dots me-1"></i>消息模板</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#editTabMonitor" type="button" role="tab"><i class="fa-solid fa-shield-halved me-1"></i>监控范围</button>
+              </li>
+            </ul>
            <div class="tab-content">
              <!-- Tab 1: 基础事件开关 -->
              <div class="tab-pane fade show active" id="editTabEvents" role="tabpanel">
@@ -689,14 +731,44 @@
                  {% endfor %}
                  {% endfor %}
                </div>
+              </div>
+
+              <!-- V10.3: Tab 4: 监控范围 -->
+              <div class="tab-pane fade" id="editTabMonitor" role="tabpanel">
+                <div class="form-text small text-muted mb-2">
+                  <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。留空 = 不限制（推送全部）。
+                </div>
+                <h6 class="text-muted mb-2"><i class="fa-solid fa-user-shield me-1"></i>监控用户（可选）</h6>
+                <div class="border rounded-3 bg-light p-2 mb-3" style="max-height: 150px; overflow-y: auto;">
+                  {% if all_users %}
+                  {% for u in all_users %}
+                  <div class="form-check">
+                    <input class="form-check-input monitor-user-cb" type="checkbox" value="{{ u.id }}" id="edit_monitor_user_{{ u.id }}">
+                    <label class="form-check-label small" for="edit_monitor_user_{{ u.id }}">{{ u.username }}</label>
+                  </div>
+                  {% endfor %}
+                  {% else %}
+                  <span class="small text-muted">暂无普通用户</span>
+                  {% endif %}
+                </div>
+                <h6 class="text-muted mb-2"><i class="fa-solid fa-filter me-1"></i>监控事件类型（可选）</h6>
+                <div class="border rounded-3 bg-light p-2">
+                  {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                  <div class="form-check d-inline-block me-3">
+                    <input class="form-check-input monitor-event-cb" type="checkbox" value="{{ ev_key }}" id="edit_monitor_ev_{{ ev_key }}">
+                    <label class="form-check-label small" for="edit_monitor_ev_{{ ev_key }}">{{ ev_label }}</label>
+                  </div>
+                  {% endfor %}
+                </div>
+                <div class="form-text small text-muted mt-2">不勾选任何用户 = 推送所有用户的操作；不勾选任何事件 = 推送所有事件类型。</div>
+              </div>
              </div>
-           </div>
-        </div>
-        <div class="modal-footer border-light">
-          <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
-          <button type="submit" id="editWebhookSubmitBtn" class="btn btn-primary rounded-pill px-4 shadow-sm">保存修改</button>
-        </div>
-      </form>
+          </div>
+         <div class="modal-footer border-light">
+           <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
+           <button type="submit" id="editWebhookSubmitBtn" class="btn btn-primary rounded-pill px-4 shadow-sm">保存修改</button>
+         </div>
+       </form>
     </div>
   </div>
 </div>
@@ -781,6 +853,35 @@ function assembleMessageTemplates(prefix) {
     }
   });
   return JSON.stringify(result);
+}
+
+// V10.3: 将监控用户和事件类型组装为 JSON
+function assembleMonitorData(prefix) {
+  // 组装用户 ID
+  var userIds = [];
+  document.querySelectorAll('#' + prefix + 'TabMonitor input.monitor-user-cb:checked').forEach(function(cb) {
+    userIds.push(parseInt(cb.value));
+  });
+  // 组装事件类型
+  var eventTypes = [];
+  document.querySelectorAll('#' + prefix + 'TabMonitor input.monitor-event-cb:checked').forEach(function(cb) {
+    eventTypes.push(cb.value);
+  });
+  return [JSON.stringify(userIds), JSON.stringify(eventTypes)];
+}
+
+// V10.3: 回填编辑监控数据
+function fillEditMonitor(userIdsJson, eventTypesJson) {
+  var userIds = [];
+  try { userIds = JSON.parse(userIdsJson || '[]'); } catch(e) {}
+  var eventTypes = [];
+  try { eventTypes = JSON.parse(eventTypesJson || '[]'); } catch(e) {}
+  document.querySelectorAll('#editTabMonitor input.monitor-user-cb').forEach(function(cb) {
+    cb.checked = userIds.includes(parseInt(cb.value));
+  });
+  document.querySelectorAll('#editTabMonitor input.monitor-event-cb').forEach(function(cb) {
+    cb.checked = eventTypes.includes(cb.value);
+  });
 }
 
 // V10.1: 从 notify_pages JSON 回填报编辑矩阵
@@ -907,6 +1008,10 @@ document.addEventListener('DOMContentLoaded', function() {
       e.preventDefault();
       document.getElementById('newNotifyPagesHidden').value = assembleNotifyPages('new');
       document.getElementById('newMessageTemplatesHidden').value = assembleMessageTemplates('new');
+      // V10.3: 组装监控数据
+      var monitorData = assembleMonitorData('new');
+      document.getElementById('newMonitorUserIdsHidden').value = monitorData[0];
+      document.getElementById('newMonitorEventTypesHidden').value = monitorData[1];
       // V7: 显式必填校验，缺项时在 Modal 顶部明确提示
       const missing = validateWebhookForm(newForm, 'new');
       if (missing.length) {
@@ -923,6 +1028,10 @@ document.addEventListener('DOMContentLoaded', function() {
       e.preventDefault();
       document.getElementById('editNotifyPagesHidden').value = assembleNotifyPages('edit');
       document.getElementById('editMessageTemplatesHidden').value = assembleMessageTemplates('edit');
+      // V10.3: 组装监控数据
+      var editMonitorData = assembleMonitorData('edit');
+      document.getElementById('editMonitorUserIdsHidden').value = editMonitorData[0];
+      document.getElementById('editMonitorEventTypesHidden').value = editMonitorData[1];
       // V7: 显式必填校验，缺项时在 Modal 顶部明确提示
       const missing = validateWebhookForm(editForm, 'edit');
       if (missing.length) {
@@ -974,6 +1083,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
       // V10.1: 消息模板回填
       fillEditTemplates(data.messageTemplates);
+
+      // V10.3: 监控数据回填
+      fillEditMonitor(data.monitorUserIds, data.monitorEventTypes);
 
       toggleConnTypeFields('edit');
       const editModal = new bootstrap.Modal(document.getElementById('editWebhookModal'));
