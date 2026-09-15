@@ -580,7 +580,10 @@ def _render_message(webhook, event_type, page_key, default_title, default_detail
             tpl = templates.get(template_key) or templates.get(event_cat) or templates.get(event_type)
             if tpl and isinstance(tpl, str) and tpl.strip():
                 title = tpl.format(**fmt_ctx)
-                details = ''
+                # V10.2 修复: 自定义模板仅覆盖标题，详情保留原始内容（敏感页面仍脱敏）
+                details = default_details or ''
+                if page_key in SENSITIVE_PAGES:
+                    details = _sanitize_details(page_key, event_type, user_name, details)
                 return title, details
     except Exception:
         pass

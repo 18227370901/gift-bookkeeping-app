@@ -786,6 +786,11 @@ def init_database():
             "ALTER TABLE backup_configs ADD COLUMN config_alias VARCHAR(100)",
             "ALTER TABLE backup_configs ADD COLUMN adopted_from_admin BOOLEAN DEFAULT 0",
         ])
+        # --- V10.2 新增：定时任务操作权限细化字段 ---
+        migration_sqls.extend([
+            "ALTER TABLE backup_configs ADD COLUMN allow_edit_others_tasks BOOLEAN DEFAULT 0",
+            "ALTER TABLE backup_configs ADD COLUMN allow_delete_others_tasks BOOLEAN DEFAULT 0",
+        ])
         with db.engine.connect() as conn:
             for sql in migration_sqls:
                 try:

@@ -84,11 +84,7 @@
             <label class="form-check-label small text-muted" for="clearEncryptPwd">{% if has_encrypt_password %}勾选此项清除已保存的加密密码（勾选后无需填写新密码）{% else %}尚未设置加密密码，无可清除{% endif %}</label>
           </div>
           {% if current_user.is_admin %}
-          <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" name="allow_view_others_tasks" value="on" id="allowViewOthers" {% if allow_view_others %}checked{% endif %}>
-            <label class="form-check-label small text-muted" for="allowViewOthers">允许普通用户查看其他用户的定时任务</label>
-            <div class="form-text small text-muted ms-4">勾选后，普通用户可在定时任务列表中看到所有用户创建的定时任务（仅查看，不可编辑/删除他人任务）；不勾选则仅看到自己的任务。</div>
-          </div>
+          <!-- V10.2: 定时任务全局开关迁移至「定时任务授权」卡片，不再放在 WebDAV 配置表单中 -->
           {% endif %}
 
           <div class="d-flex gap-2 mt-2">
@@ -165,11 +161,11 @@
     </div>
     {% endif %}
 
-    <!-- 备份授权管理：仅管理员 -->
+    <!-- V10.2: WebDAV 备份授权（仅管理员） — 仅备份授权，与定时任务授权拆分 -->
     {% if current_user.is_admin %}
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-user-shield text-warning me-2"></i>备份功能授权</h5>
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-cloud text-warning me-2"></i>WebDAV 备份授权</h5>
         <div class="form-text small text-muted mt-1"><i class="fa-solid fa-arrows-rotate me-1"></i>授权状态与「用户管理」页面实时同步，无需重复操作</div>
       </div>
       <div class="card-body p-0">
@@ -179,9 +175,8 @@
             <thead class="table-light">
               <tr>
                 <th class="ps-3">用户名</th>
-                <th style="width:90px">备份授权</th>
-                <th style="width:90px">定时任务授权</th>
-                <th style="width:160px">操作</th>
+                <th style="width:100px">备份授权</th>
+                <th style="width:140px">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -194,19 +189,9 @@
                   </span>
                 </td>
                 <td>
-                  <span class="badge bg-{{ 'success' if u.scheduled_task_authorized else 'secondary' }}" id="taskBadge_{{ u.id }}">
-                    {{ '已授权' if u.scheduled_task_authorized else '未授权' }}
-                  </span>
-                </td>
-                <td>
-                  <!-- V7: 按钮图标+文字化，撤销操作加确认弹窗 -->
-                  <button class="btn btn-sm btn-outline-{{ 'danger' if u.backup_authorized else 'success' }} py-0 px-2 me-1"
+                  <button class="btn btn-sm btn-outline-{{ 'danger' if u.backup_authorized else 'success' }} py-0 px-2"
                     onclick="{% if u.backup_authorized %}if(confirm('确定撤销 {{ u.username }} 的备份授权？撤销后该用户将无法使用 WebDAV 备份功能。')){% endif %}toggleBackupAuth({{ u.id }})">
                     <i class="fa-solid fa-cloud{{ '-slash' if u.backup_authorized }} me-1"></i>{{ '撤销备份' if u.backup_authorized else '授权备份' }}
-                  </button>
-                  <button class="btn btn-sm btn-outline-{{ 'danger' if u.scheduled_task_authorized else 'success' }} py-0 px-2"
-                    onclick="{% if u.scheduled_task_authorized %}if(confirm('确定撤销 {{ u.username }} 的定时任务授权？撤销后该用户将无法管理定时任务。')){% endif %}toggleTaskAuth({{ u.id }})">
-                    <i class="fa-solid fa-clock{{ '-slash' if u.scheduled_task_authorized }} me-1"></i>{{ '撤销任务' if u.scheduled_task_authorized else '授权任务' }}
                   </button>
                 </td>
               </tr>
@@ -218,8 +203,8 @@
         <div class="text-center py-4 text-muted">
           <i class="fa-solid fa-users fa-2x opacity-25 mb-2 d-block"></i>
           <p class="mb-0 small">暂无普通用户</p>
-    </div>
-    {% endif %}
+        </div>
+        {% endif %}
       </div>
     </div>
     {% endif %}
@@ -228,6 +213,79 @@
 
 <div class="row g-4">
   <div class="col-12">
+    <!-- V10.2: 定时任务授权与权限（仅管理员） — 全局开关 + 每用户任务授权，紧邻定时任务列表 -->
+    {% if current_user.is_admin %}
+    <div class="card border-0 shadow-sm rounded-4 mb-3">
+      <div class="card-header bg-white py-3 border-light">
+        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-user-clock text-success me-2"></i>定时任务授权与权限</h5>
+        <div class="form-text small text-muted mt-1"><i class="fa-solid fa-arrows-rotate me-1"></i>授权状态与「用户管理」页面实时同步</div>
+      </div>
+      <div class="card-body">
+        <!-- V10.2: 全局权限开关（管理员配置） -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="allow_view_others_tasks" value="on" id="allowViewOthers" {% if allow_view_others %}checked{% endif %} onchange="saveTaskPermissionToggles()">
+              <label class="form-check-label small fw-bold" for="allowViewOthers">允许查看他人任务</label>
+              <div class="form-text small text-muted">勾选后普通用户可看到全部定时任务（只读）</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="allow_edit_others_tasks" value="on" id="allowEditOthers" {% if allow_edit_others_tasks %}checked{% endif %} onchange="saveTaskPermissionToggles()">
+              <label class="form-check-label small fw-bold" for="allowEditOthers">允许编辑他人任务</label>
+              <div class="form-text small text-muted">勾选后普通用户可编辑非自己创建的定时任务</div>
+            </div>
+          </div>
+          <div class="col-md-4">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="allow_delete_others_tasks" value="on" id="allowDeleteOthers" {% if allow_delete_others_tasks %}checked{% endif %} onchange="saveTaskPermissionToggles()">
+              <label class="form-check-label small fw-bold" for="allowDeleteOthers">允许删除他人任务</label>
+              <div class="form-text small text-muted">勾选后普通用户可删除非自己创建的定时任务</div>
+            </div>
+          </div>
+        </div>
+        <!-- 每用户定时任务授权列表 -->
+        {% if all_users %}
+        <div class="table-responsive">
+          <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th class="ps-3">用户名</th>
+                <th style="width:100px">任务授权</th>
+                <th style="width:140px">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for u in all_users %}
+              <tr>
+                <td class="ps-3"><i class="fa-solid fa-user text-secondary me-1"></i>{{ u.username }}</td>
+                <td>
+                  <span class="badge bg-{{ 'success' if u.scheduled_task_authorized else 'secondary' }}" id="taskBadge_{{ u.id }}">
+                    {{ '已授权' if u.scheduled_task_authorized else '未授权' }}
+                  </span>
+                </td>
+                <td>
+                  <button class="btn btn-sm btn-outline-{{ 'danger' if u.scheduled_task_authorized else 'success' }} py-0 px-2"
+                    onclick="{% if u.scheduled_task_authorized %}if(confirm('确定撤销 {{ u.username }} 的定时任务授权？撤销后该用户将无法管理定时任务。')){% endif %}toggleTaskAuth({{ u.id }})">
+                    <i class="fa-solid fa-clock{{ '-slash' if u.scheduled_task_authorized }} me-1"></i>{{ '撤销任务' if u.scheduled_task_authorized else '授权任务' }}
+                  </button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="text-center py-3 text-muted">
+          <i class="fa-solid fa-users fa-2x opacity-25 mb-2 d-block"></i>
+          <p class="mb-0 small">暂无普通用户</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
     <!-- 定时任务 -->
     {% if current_user.is_admin or can_use_scheduled_tasks %}
     <div class="card border-0 shadow-sm rounded-4 mb-4">
@@ -273,19 +331,30 @@
                   {{ t.last_run_time.strftime('%m-%d %H:%M') if t.last_run_time else '—' }}
                   <br><span class="text-secondary">{% if t.creator %}{{ t.creator.username }}{% else %}—{% endif %}</span>
                 </td>
-                <!-- V7: 操作+历史合并；V8: 非本人/非管理员按钮置灰 -->
+                <!-- V10.2: 操作按钮权限细化 — 查看/编辑/删除各自独立判断 -->
                 <td class="text-end pe-3">
                   <button class="btn btn-sm btn-outline-info py-0 px-1" onclick="showExecutionLogs({{ t.id }})" title="执行历史">
                     <i class="fa-solid fa-clock-rotate-left"></i>
                   </button>
-                  {% set can_operate = current_user.is_admin or t.created_by == current_user.id %}
-                  {% if can_operate %}
+                  {% set is_owner = t.created_by == current_user.id %}
+                  {% set can_edit = is_owner or can_edit_others_tasks %}
+                  {% set can_del = is_owner or can_delete_others_tasks %}
+                  {% if can_edit %}
                   <button class="btn btn-sm btn-outline-{{ 'secondary' if t.is_enabled else 'success' }} py-0 px-1" onclick="toggleScheduledTask({{ t.id }})" title="{{ '禁用' if t.is_enabled else '启用' }}">
                     <i class="fa-solid fa-{{ 'pause' if t.is_enabled else 'play' }}"></i>
                   </button>
                   <button class="btn btn-sm btn-outline-primary py-0 px-1" onclick="editScheduledTask({{ t.id }}, '{{ t.name }}', '{{ t.cron_expr }}', {{ t.is_enabled|tojson }}, '{{ t.task_type or 'db_backup' }}')" title="编辑">
                     <i class="fa-solid fa-pen"></i>
                   </button>
+                  {% else %}
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" disabled title="无编辑权限">
+                    <i class="fa-solid fa-pause"></i>
+                  </button>
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" disabled title="无编辑权限">
+                    <i class="fa-solid fa-pen"></i>
+                  </button>
+                  {% endif %}
+                  {% if can_del %}
                   <form action="{{ url_for('admin_delete_scheduled_task', task_id=t.id) }}" method="POST" class="d-inline" onsubmit="return confirm('确定删除定时任务「{{ t.name }}」？');">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <button type="submit" class="btn btn-sm btn-outline-danger py-0 px-1" title="删除">
@@ -293,13 +362,7 @@
                     </button>
                   </form>
                   {% else %}
-                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" disabled title="仅创建者或管理员可操作">
-                    <i class="fa-solid fa-pause"></i>
-                  </button>
-                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" disabled title="仅创建者或管理员可操作">
-                    <i class="fa-solid fa-pen"></i>
-                  </button>
-                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" disabled title="仅创建者或管理员可操作">
+                  <button class="btn btn-sm btn-outline-secondary py-0 px-1" disabled title="无删除权限">
                     <i class="fa-solid fa-trash"></i>
                   </button>
                   {% endif %}
@@ -660,6 +723,44 @@ function toggleTaskAuth(userId) {
       location.reload();
     } else {
       alert(data.message || '操作失败');
+    }
+  })
+    .catch(() => alert('网络请求异常'));
+}
+
+// V10.2: 定时任务全局权限开关保存（AJAX，无需刷新页面）
+function saveTaskPermissionToggles() {
+  const viewOthers = document.getElementById('allowViewOthers')?.checked || false;
+  const editOthers = document.getElementById('allowEditOthers')?.checked || false;
+  const deleteOthers = document.getElementById('allowDeleteOthers')?.checked || false;
+  fetch('/admin/backups/save_task_permissions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-CSRFToken': '{{ csrf_token }}',
+      'X-CSRF-Token': '{{ csrf_token }}',
+      'X-Requested-With': 'XMLHttpRequest'
+    },
+    body: JSON.stringify({
+      allow_view_others_tasks: viewOthers,
+      allow_edit_others_tasks: editOthers,
+      allow_delete_others_tasks: deleteOthers
+    })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      // 显示成功提示
+      const banner = document.createElement('div');
+      banner.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-2 shadow-sm';
+      banner.style.zIndex = '9999';
+      banner.innerHTML = '<i class="fa-solid fa-check-circle me-1"></i>定时任务权限已更新<button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
+      document.body.appendChild(banner);
+      setTimeout(() => banner.remove(), 2000);
+      // 权限变更后刷新页面以更新按钮状态
+      setTimeout(() => location.reload(), 1500);
+    } else {
+      alert(data.message || '保存失败');
     }
   })
   .catch(() => alert('网络请求异常'));

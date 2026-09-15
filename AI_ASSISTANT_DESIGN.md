@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '1f044b72-762f-42e4-a7c9-3c21a024ca2f'
-  PropagateID: '1f044b72-762f-42e4-a7c9-3c21a024ca2f'
-  ReservedCode1: '79ec99c2-cbe2-4bd2-94bc-7f11d46eb5e7'
-  ReservedCode2: '79ec99c2-cbe2-4bd2-94bc-7f11d46eb5e7'
+  ProduceID: '9aec77a3-b4a4-4059-8549-6a916cacc453'
+  PropagateID: '9aec77a3-b4a4-4059-8549-6a916cacc453'
+  ReservedCode1: 'f700af2b-8fc2-4f56-90f7-24fe7eb73dbd'
+  ReservedCode2: 'f700af2b-8fc2-4f56-90f7-24fe7eb73dbd'
 ---
 
 # AI 助手模块技术设计方案
@@ -1345,5 +1345,115 @@ restore:       【{page}·还原】操作人 {user} 还原了「{title}」
 | `routes_ext.py` | WebDAV 定时任务查看权限解耦；推送覆盖补全（宴席同步/批量移出/回收站清理/定时任务增删改）；admin_webhooks 路由注入矩阵数据 |
 | `templates/admin_webhooks.html` | 新增/编辑 Modal 三段式→Tab 三面板（事件开关/矩阵/模板）；JS 函数重构（matrixSelectAll/matrixClearAll/assembleNotifyPages/assembleMessageTemplates/fillEditMatrix/fillEditTemplates）；编辑按钮新增 data-message-templates |
 | `templates/admin_backups.html` | allow_view_others_tasks 复选框补充说明文案 |
+
+> AI生成
+
+---
+
+## 第十六章 V10.2 修复与优化（2026-09-15）
+
+### 16.1 需求总览
+
+V10.2 批次覆盖 5 大方向：WebDAV 定时任务权限细化、备份授权模块排版优化、Webhook 自定义模板渲染修复、推送事件类型分类修正、补充缺失推送。
+
+| 编号 | 模块 | 类型 | 需求 |
+|------|------|------|------|
+| 1 | WebDAV 权限 | 优化 | 定时任务操作权限从粗粒度（查看开关+使用授权）细化为查看/编辑/删除三个独立维度 |
+| 2 | 页面排版 | 优化 | 备份授权卡片拆分为「WebDAV 备份授权」与「定时任务授权与权限」两张独立卡片，紧邻各自功能区 |
+| 3 | Webhook 模板 | 修复 | 自定义模板命中后 details 被置空，导致推送消息详情显示"无" |
+| 4 | 事件分类 | 修复 | 单条还原/批量还原误用 status_change、清空回收站误用 batch_delete |
+| 5 | 推送补缺 | 修复 | admin_toggle_task_auth 缺少 Webhook 推送 |
+
+### 16.2 模块 A：WebDAV 定时任务权限细化
+
+**问题**：原仅有 `allow_view_others_tasks`（查看开关）和 `scheduled_task_authorized`（按用户授权使用），缺少编辑/删除他人任务的独立控制。`can_edit_others_backup()`/`can_delete_others_backup()` 方法定义了但未用于定时任务路由。
+
+**方案**：
+
+1. **BackupConfig 新增 2 字段**（`models.py`）：
+   - `allow_edit_others_tasks`：允许普通用户编辑他人定时任务
+   - `allow_delete_others_tasks`：允许普通用户删除他人定时任务
+
+2. **User 模型新增 3 方法**（`models.py`）：
+   - `can_view_others_scheduled_tasks()`：管理员 True / 普通用户看全局 `allow_view_others_tasks`
+   - `can_edit_others_scheduled_tasks()`：管理员 True / 普通用户看全局 `allow_edit_others_tasks`
+   - `can_delete_others_scheduled_tasks()`：管理员 True / 普通用户看全局 `allow_delete_others_tasks`
+
+3. **4 处路由权限校验更新**（`routes_ext.py`）：
+   - 保存任务（编辑）：`task.created_by != self 且 !can_edit_others_scheduled_tasks()` → 拒绝
+   - 删除任务：`task.created_by != self 且 !can_delete_others_scheduled_tasks()` → 拒绝
+   - 启停任务：`task.created_by != self 且 !can_edit_others_scheduled_tasks()` → 拒绝
+   - 执行历史：`task.created_by != self 且 !can_view_others_scheduled_tasks()` → 拒绝
+
+4. **全局开关保存**（`routes_ext.py`）：
+   - `admin_save_webdav_config` 路由新增读取并保存 `allow_edit_others_tasks`/`allow_delete_others_tasks`
+   - 新增 AJAX 路由 `admin_save_task_permissions`，供前端开关即时保存
+
+5. **数据库迁移**（`app.py`）：migration_sqls 追加 2 条 ALTER TABLE
+
+### 16.3 模块 B：备份授权模块排版优化
+
+**问题**：原"备份功能授权"卡片混合了备份授权和定时任务授权两类不同维度的权限，与下方紧邻的"定时任务"管理区割裂感强；V10.2 新增的编辑/删除开关无处安放。
+
+**方案**：
+
+将原单一卡片拆分为两张：
+
+1. **WebDAV 备份授权**卡片（紧邻 WebDAV 配置区下方）：
+   - 仅含用户名、备份授权状态、授权/撤销备份按钮
+
+2. **定时任务授权与权限**卡片（紧邻定时任务列表上方）：
+   - 顶部三列全局开关：允许查看他人任务 / 允许编辑他人任务 / 允许删除他人任务
+   - 开关通过 AJAX 即时保存（`saveTaskPermissionToggles()` JS 函数），保存后自动刷新页面更新按钮状态
+   - 下方用户表：用户名、任务授权状态、授权/撤销任务按钮
+
+3. **定时任务列表按钮权限**：
+   - 编辑按钮（启停+编辑）：`is_owner or can_edit_others_tasks` → 可操作，否则置灰
+   - 删除按钮：`is_owner or can_delete_others_tasks` → 可操作，否则置灰
+   - 执行历史按钮：始终可用（查看权限由后端路由校验）
+
+### 16.4 模块 C：Webhook 自定义模板渲染修复
+
+**根因**：`_render_message()` 第 583 行，自定义模板命中后 `details = ''`，导致所有推送平台详情显示"无"。
+
+**修复**：自定义模板仅覆盖标题格式，详情保留原始内容（敏感页面仍脱敏）：
+
+```python
+# 修复前
+title = tpl.format(**fmt_ctx)
+details = ''
+return title, details
+
+# 修复后
+title = tpl.format(**fmt_ctx)
+details = default_details or ''
+if page_key in SENSITIVE_PAGES:
+    details = _sanitize_details(page_key, event_type, user_name, details)
+return title, details
+```
+
+### 16.5 模块 D：推送事件类型分类修正
+
+| 行号 | 场景 | 修正前 | 修正后 | 原因 |
+|------|------|--------|--------|------|
+| 987 | 单条还原 | `status_change` | `restore` | 还原操作应归 restore 类，对应矩阵"还原"列 |
+| 1092 | 批量还原 | `status_change` | `restore` | 同上 |
+| 1206 | 清空回收站 | `batch_delete` | `clear` | 清空≠批量删除，应归 clear 类，对应矩阵"清空"列 |
+
+### 16.6 模块 E：补充缺失推送
+
+`admin_toggle_task_auth` 路由（定时任务授权切换）缺少 Webhook 推送，而对比 `admin_toggle_backup_auth`（备份授权切换）有推送。
+
+**修复**：在 commit 后添加 `status_change` 类型推送，page_key 为 `admin_backups`，与备份授权切换推送格式对齐。
+
+### 16.7 涉及文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `models.py` | BackupConfig 新增 `allow_edit_others_tasks`/`allow_delete_others_tasks` 字段；User 新增 `can_view_others_scheduled_tasks`/`can_edit_others_scheduled_tasks`/`can_delete_others_scheduled_tasks` 方法 |
+| `routes_ext.py` | 4 处定时任务路由权限校验更新；`admin_save_webdav_config` 读取保存新字段；新增 `admin_save_task_permissions` AJAX 路由；`admin_backups` 传参新增 4 个权限变量；3 处 event_type 修正；`admin_toggle_task_auth` 补充推送 |
+| `webhook_utils.py` | `_render_message` 自定义模板 details 保留原始内容（不再置空） |
+| `templates/admin_backups.html` | 授权卡片拆分为「WebDAV 备份授权」+「定时任务授权与权限」；新增 3 个全局开关+AJAX 保存；定时任务列表按钮权限细化（编辑/删除独立判断） |
+| `app.py` | migration_sqls 追加 2 条 ALTER TABLE |
 
 > AI生成

@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'f5ddb334-c489-4d66-af95-7bc51a0cf1c7'
-  PropagateID: 'f5ddb334-c489-4d66-af95-7bc51a0cf1c7'
-  ReservedCode1: 'bee2cb97-9335-41b5-97e8-5293c530757d'
-  ReservedCode2: 'bee2cb97-9335-41b5-97e8-5293c530757d'
+  ProduceID: '69550171-b5cb-49b0-a1ed-e5e0994008a7'
+  PropagateID: '69550171-b5cb-49b0-a1ed-e5e0994008a7'
+  ReservedCode1: '70d3f66b-a9e1-46bd-8e21-a1e2e496b8c1'
+  ReservedCode2: '70d3f66b-a9e1-46bd-8e21-a1e2e496b8c1'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -356,6 +356,32 @@ AIGC:
 - 修复 `allPageKeys` 硬编码 14 项缺少 `permission_tickets` 导致编辑回显不完整的 bug
 - 矩阵和模板改为后端动态注入，前端不再硬编码
 - 新增 `fillEditMatrix()`/`fillEditTemplates()` 函数从 JSON 自动回填
+
+### V10.2 WebDAV 权限细化与 Webhook 模板修复（2026-09-15）
+
+#### WebDAV 定时任务权限细化
+- 新增「允许编辑他人任务」「允许删除他人任务」两个全局开关，与原「允许查看他人任务」形成查看/编辑/删除三维度独立控制
+- User 模型新增 `can_view_others_scheduled_tasks`/`can_edit_others_scheduled_tasks`/`can_delete_others_scheduled_tasks` 方法
+- 4 处定时任务路由（保存/删除/启停/执行历史）权限校验更新为细粒度判断
+- 新增 AJAX 路由 `admin_save_task_permissions` 供前端开关即时保存
+
+#### 备份授权模块排版优化
+- 原「备份功能授权」卡片拆分为「WebDAV 备份授权」和「定时任务授权与权限」两张独立卡片
+- 备份授权卡片紧邻 WebDAV 配置区，定时任务授权卡片紧邻定时任务列表
+- 定时任务授权卡片顶部新增 3 列全局开关（查看/编辑/删除他人任务），AJAX 即时保存
+- 定时任务列表按钮权限细化：编辑和删除按钮各自独立判断，无权限逐个置灰
+
+#### Webhook 自定义模板渲染修复
+- 修复自定义消息模板命中后详情被置空导致推送显示"无"的问题
+- 自定义模板现在仅覆盖标题，详情保留原始内容（敏感页面仍脱敏）
+
+#### 推送事件类型分类修正
+- 单条还原：`status_change` → `restore`（对应矩阵"还原"列）
+- 批量还原：`status_change` → `restore`（同上）
+- 清空回收站：`batch_delete` → `clear`（对应矩阵"清空"列）
+
+#### 补充缺失推送
+- `admin_toggle_task_auth`（定时任务授权切换）补充 `status_change` 类型 Webhook 推送
 
 ## 📂 项目文件结构
 

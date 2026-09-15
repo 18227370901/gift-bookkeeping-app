@@ -985,7 +985,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         safe_log('还原回收站数据', f"还原了 [{target_type}] ID #{target_id}: [{title}]", user=current_user)
         try:
             trigger_webhook_event(
-                WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'restore',
                 f'还原回收站数据 [{title}]',
                 f'操作人：{current_user.username} | 页面：回收站 | 类型：{target_type} | 名称：{title}',
                 page_key='recycle_bin', user_name=current_user.username,
@@ -1090,7 +1090,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             safe_log('批量还原数据', f"批量还原了 {count} 条回收站记录", user=current_user)
             try:
                 trigger_webhook_event(
-                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'restore',
                     f'批量还原 {count} 条回收站数据',
                     f'操作人：{current_user.username} | 页面：回收站 | 数量：{count}',
                     page_key='recycle_bin', user_name=current_user.username,
@@ -1204,7 +1204,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             safe_log('清空回收站', f"清空回收站数据共 {count} 条", user=current_user)
             try:
                 trigger_webhook_event(
-                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'clear',
                     f'清空回收站 {count} 条数据',
                     f'操作人：{current_user.username} | 页面：回收站 | 数量：{count}',
                     page_key='recycle_bin', user_name=current_user.username,
@@ -3529,7 +3529,12 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             config_encrypt_pwd_plain=config_encrypt_pwd_plain,
             allow_view_others=allow_view_others,
             admin_config_alias=admin_config_alias,
-            can_use_scheduled_tasks=current_user.can_use_scheduled_tasks()
+            can_use_scheduled_tasks=current_user.can_use_scheduled_tasks(),
+            # V10.2 新增：定时任务操作权限
+            allow_edit_others_tasks=getattr(global_config, 'allow_edit_others_tasks', False),
+            allow_delete_others_tasks=getattr(global_config, 'allow_delete_others_tasks', False),
+            can_edit_others_tasks=current_user.can_edit_others_scheduled_tasks(),
+            can_delete_others_tasks=current_user.can_delete_others_scheduled_tasks()
         )
 
     @app.route('/admin/backups/reference_admin_config', methods=['GET'])
@@ -3652,6 +3657,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         encrypt_pwd = request.form.get('backup_encrypt_password', '').strip()
         # V3: 管理员全局配置项 - 是否允许普通用户查看他人任务
         allow_view_others = request.form.get('allow_view_others_tasks', '') == 'on'
+        # V10.2 新增：定时任务操作权限细化
+        allow_edit_others = request.form.get('allow_edit_others_tasks', '') == 'on'
+        allow_delete_others = request.form.get('allow_delete_others_tasks', '') == 'on'
 
         # V9: 普通用户手动保存自己的配置时，视为脱离管理员引用（地址/账号将正常回显）
         if not current_user.is_admin:
@@ -3670,6 +3678,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         # V3: 仅管理员全局配置才保存 allow_view_others_tasks
         if current_user.is_admin:
             config.allow_view_others_tasks = allow_view_others
+            # V10.2 新增：保存定时任务编辑/删除他人权限
+            config.allow_edit_others_tasks = allow_edit_others
+            config.allow_delete_others_tasks = allow_delete_others
         # 保存或清除加密密码
         # V7 修复：勾选「清除」时优先执行清除（原逻辑先判断新密码分支，
         # 勾选清除+密码框留空时清除动作会被吞掉，导致清除失效）
@@ -4229,8 +4240,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             if not task:
                 flash('定时任务不存在', 'danger')
                 return redirect(url_for('admin_backups'))
-            # V3: 权限隔离 - 普通用户只能编辑自己的任务
-            if not current_user.is_admin and task.created_by != current_user.id:
+            # V10.2: 权限细化 - 普通用户可编辑自己的任务，或被授权编辑他人任务
+            if not current_user.is_admin and task.created_by != current_user.id and not current_user.can_edit_others_scheduled_tasks():
                 flash('权限不足：只能编辑自己的定时任务', 'danger')
                 return redirect(url_for('admin_backups'))
             task.name = name
@@ -4281,8 +4292,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('定时任务不存在', 'danger')
             return redirect(url_for('admin_backups'))
 
-        # V3: 权限隔离 - 普通用户只能删除自己的任务
-        if not current_user.is_admin and task.created_by != current_user.id:
+        # V10.2: 权限细化 - 普通用户可删除自己的任务，或被授权删除他人任务
+        if not current_user.is_admin and task.created_by != current_user.id and not current_user.can_delete_others_scheduled_tasks():
             flash('权限不足：只能删除自己的定时任务', 'danger')
             return redirect(url_for('admin_backups'))
 
@@ -4314,8 +4325,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         if not task:
             return jsonify({'success': False, 'message': '任务不存在'}), 404
 
-        # V3: 权限隔离 - 普通用户只能切换自己的任务
-        if not current_user.is_admin and task.created_by != current_user.id:
+        # V10.2: 权限细化 - 普通用户可操作自己的任务，或被授权编辑他人任务
+        if not current_user.is_admin and task.created_by != current_user.id and not current_user.can_edit_others_scheduled_tasks():
             return jsonify({'success': False, 'message': '权限不足：只能操作自己的定时任务'}), 403
 
         task.is_enabled = not task.is_enabled
@@ -4344,8 +4355,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         if not task:
             return jsonify({'success': False, 'message': '任务不存在'}), 404
 
-        # V3: 权限隔离 - 普通用户只能查看自己的任务历史
-        if not current_user.is_admin and task.created_by != current_user.id:
+        # V10.2: 权限细化 - 普通用户可查看自己的任务，或被授权查看他人任务
+        if not current_user.is_admin and task.created_by != current_user.id and not current_user.can_view_others_scheduled_tasks():
             return jsonify({'success': False, 'message': '权限不足'}), 403
 
         logs = ScheduledTaskExecutionLog.query.filter_by(task_id=task_id).order_by(ScheduledTaskExecutionLog.created_at.desc()).limit(50).all()
@@ -4413,7 +4424,35 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         db.session.commit()
         safe_log('切换定时任务授权', f'用户: {user.username}, 授权: {"是" if user.scheduled_task_authorized else "否"}', user=current_user)
 
+        # V10.2: 补充缺失的 Webhook 推送（与 admin_toggle_backup_auth 对齐）
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(),
+                'status_change',
+                f'用户 {user.username} 的定时任务权限已{"授权" if user.scheduled_task_authorized else "撤销"}',
+                page_key='admin_backups',
+                user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
+
         return jsonify({'success': True, 'scheduled_task_authorized': user.scheduled_task_authorized})
+
+    @app.route('/admin/backups/save_task_permissions', methods=['POST'])
+    @login_required
+    def admin_save_task_permissions():
+        """V10.2: 保存定时任务全局权限开关（仅管理员）"""
+        if not current_user.is_admin:
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        data = request.get_json(silent=True) or {}
+        config = BackupConfig.get_config(None)
+        config.allow_view_others_tasks = bool(data.get('allow_view_others_tasks', False))
+        config.allow_edit_others_tasks = bool(data.get('allow_edit_others_tasks', False))
+        config.allow_delete_others_tasks = bool(data.get('allow_delete_others_tasks', False))
+        db.session.commit()
+        safe_log('更新定时任务权限', f'查看他人: {config.allow_view_others_tasks}, 编辑他人: {config.allow_edit_others_tasks}, 删除他人: {config.allow_delete_others_tasks}', user=current_user)
+        return jsonify({'success': True})
 
     @app.route('/manifest.json')
     def pwa_manifest():

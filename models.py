@@ -377,6 +377,28 @@ class User(UserMixin, db.Model):
             return True
         return self.get_menu_perm('backups') >= 3
 
+    # V10.2 新增：定时任务操作权限方法
+    def can_view_others_scheduled_tasks(self):
+        """检查用户是否可查看其他用户的定时任务"""
+        if getattr(self, 'is_admin', False):
+            return True
+        cfg = BackupConfig.get_config(None)
+        return bool(getattr(cfg, 'allow_view_others_tasks', False)) if cfg else False
+
+    def can_edit_others_scheduled_tasks(self):
+        """检查用户是否可编辑其他用户的定时任务"""
+        if getattr(self, 'is_admin', False):
+            return True
+        cfg = BackupConfig.get_config(None)
+        return bool(getattr(cfg, 'allow_edit_others_tasks', False)) if cfg else False
+
+    def can_delete_others_scheduled_tasks(self):
+        """检查用户是否可删除其他用户的定时任务"""
+        if getattr(self, 'is_admin', False):
+            return True
+        cfg = BackupConfig.get_config(None)
+        return bool(getattr(cfg, 'allow_delete_others_tasks', False)) if cfg else False
+
 
 class ChatSession(db.Model):
     """AI 助手聊天会话"""
@@ -861,6 +883,9 @@ class BackupConfig(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, nullable=True)  # NULL=管理员全局配置，非NULL=用户私有配置
     allow_view_others_tasks = db.Column(db.Boolean, default=False)  # 管理员全局配置：是否允许普通用户查看他人任务
+    # V10.2 新增：定时任务操作权限细化
+    allow_edit_others_tasks = db.Column(db.Boolean, default=False)  # 是否允许普通用户编辑他人定时任务
+    allow_delete_others_tasks = db.Column(db.Boolean, default=False)  # 是否允许普通用户删除他人定时任务
     webdav_url = db.Column(db.String(255), nullable=True)
     webdav_username = db.Column(db.String(100), nullable=True)
     webdav_password = db.Column(db.String(255), nullable=True)
