@@ -1052,9 +1052,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def batch_restore_items():
         """批量还原选中项（支持跨模块 items 混合参数如 record:12 或单独 record_ids）"""
-        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('recycle_bin') == 1:
-            flash('当前页面为仅查看权限，无权还原数据！', 'danger')
-            return redirect(url_for('recycle_bin_view'))
+        # V10.4: 级别1可还原自身数据，移除 == 1 拦截
         raw_items = request.form.getlist('selected_items') or request.form.getlist('selected_items[]') or request.form.getlist('record_ids') or request.form.getlist('record_ids[]')
         if not raw_items:
             flash('未选择任何记录！', 'warning')
@@ -1110,7 +1108,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def batch_purge_items():
         """批量彻底删除选中项"""
-        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('recycle_bin') in (1, 2):
+        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('recycle_bin') in (2,):
             flash('当前页面权限不允许彻底删除数据！', 'danger')
             return redirect(url_for('recycle_bin_view'))
         raw_items = request.form.getlist('selected_items') or request.form.getlist('selected_items[]') or request.form.getlist('record_ids') or request.form.getlist('record_ids[]')
@@ -1168,7 +1166,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def clear_recycle_bin():
         """清空回收站中用户有权删除的所有数据"""
-        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('recycle_bin') in (1, 2):
+        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('recycle_bin') in (2,):
             flash('当前页面权限不允许清空回收站！', 'danger')
             return redirect(url_for('recycle_bin_view'))
         if not (current_user.is_admin or (hasattr(current_user, 'can_delete_others_for') and current_user.can_delete_others_for('recycle_bin'))):
@@ -1652,9 +1650,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     def banquets_view():
         """宴席大账本列表与创建（自动从礼金账本获取并按办席原因生成）"""
         if request.method == 'POST':
-            if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') == 1:
-                flash('当前页面为仅查看权限，无权创建专属宴席！', 'danger')
-                return redirect(url_for('banquets_view'))
+            # V10.4: 级别1可创建自身宴席，移除 == 1 拦截
             title = request.form.get('title', '').strip()
             event_type = request.form.get('event_type', '婚宴').strip()
             event_date_str = request.form.get('event_date', '').strip()
@@ -1743,9 +1739,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def banquets_sync():
         """管理员或用户手动从礼金账本拉取数据同步专属大账本"""
-        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') == 1:
-            flash('当前页面为仅查看权限，无权从礼金账本拉取数据同步！', 'danger')
-            return redirect(url_for('banquets_view'))
+        # V10.4: 级别1可同步自身宴席，移除 == 1 拦截
         try:
             created, linked = sync_banquets_from_ledger(current_user, force_restore=True)
             safe_log('同步专属大账本', f"从礼金账本手动拉取数据：自动同步/生成 {created} 个大账本，关联更新 {linked} 条记录")
@@ -1895,7 +1889,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     def banquets_batch_delete():
         """批量软删除专属宴席大账本至回收站"""
         is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', '')
-        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') in (1, 2):
+        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') in (2,):
             if is_ajax:
                 return jsonify({'code': 403, 'message': '当前页面权限不允许删除专属宴席！'}), 403
             flash('当前页面权限不允许删除专属宴席！', 'danger')
@@ -1999,7 +1993,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('专属宴席不存在或已被删除！', 'warning')
             return redirect(url_for('banquets_view'))
 
-        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') in (1, 2):
+        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') in (2,):
             if is_ajax:
                 return jsonify({'code': 403, 'message': '当前页面权限不允许删除记录！'}), 403
             flash('当前页面权限不允许删除记录！', 'danger')
@@ -2059,10 +2053,10 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('专属宴席不存在或已被删除！', 'warning')
             return redirect(url_for('banquets_view'))
 
-        if (hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') == 1) or (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
+        if (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
             if is_ajax:
-                return jsonify({'code': 403, 'message': '当前页面为仅查看权限，无权移出记录！'}), 403
-            flash('当前页面为仅查看权限，无权移出记录！', 'danger')
+                return jsonify({'code': 403, 'message': '当前页面权限不允许此操作！'}), 403
+            flash('当前页面权限不允许此操作！', 'danger')
             return redirect(url_for('banquet_detail_view', banquet_id=banquet_id))
 
         if request.is_json:
@@ -2117,10 +2111,10 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('宴席账本不存在或已被删除！', 'danger')
             return redirect(url_for('banquets_view'))
 
-        if (hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') == 1) or (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
+        if (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
             if is_ajax:
-                return jsonify({'code': 403, 'message': '当前页面为仅查看权限，无权向此专属宴席登记收礼！'}), 403
-            flash('当前页面为仅查看权限，无权向此专属宴席登记收礼！', 'danger')
+                return jsonify({'code': 403, 'message': '当前页面权限不允许向此专属宴席登记收礼！'}), 403
+            flash('当前页面权限不允许向此专属宴席登记收礼！', 'danger')
             return redirect(url_for('banquet_detail_view', banquet_id=banquet_id))
 
         name = request.form.get('name', '').strip()
@@ -2238,8 +2232,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         if not b or b.deleted_at:
             flash('专属宴席不存在或已被删除！', 'warning')
             return redirect(url_for('banquets_view'))
-        if (hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') == 1) or (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
-            flash('当前页面为仅查看权限，无权引入记录！', 'danger')
+        if (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
+            flash('当前页面权限不允许引入记录！', 'danger')
             return redirect(url_for('banquet_detail_view', banquet_id=banquet_id))
 
         record_ids = request.form.getlist('record_ids') or request.form.getlist('record_ids[]')
@@ -2286,8 +2280,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         if not b or b.deleted_at:
             flash('专属宴席不存在！', 'warning')
             return redirect(url_for('banquets_view'))
-        if (hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') == 1) or (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
-            flash('当前页面为仅查看权限，无权移出记录！', 'danger')
+        if (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
+            flash('当前页面权限不允许移出记录！', 'danger')
             return redirect(url_for('banquet_detail_view', banquet_id=banquet_id))
 
         r = db.session.get(GiftRecord, record_id)
@@ -2321,10 +2315,10 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('宴席不存在', 'danger')
             return redirect(url_for('banquets_view'))
 
-        if (hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') == 1) or (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
+        if (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
             if is_ajax:
-                return jsonify({'code': 403, 'success': False, 'message': '当前页面为仅查看权限，无权配置分享！'}), 403
-            flash('当前页面为仅查看权限，无权配置分享！', 'danger')
+                return jsonify({'code': 403, 'success': False, 'message': '当前页面权限不允许配置分享！'}), 403
+            flash('当前页面权限不允许配置分享！', 'danger')
             return redirect(url_for('banquet_detail_view', banquet_id=banquet_id))
 
         import secrets
@@ -2409,10 +2403,10 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('宴席不存在', 'danger')
             return redirect(url_for('banquets_view'))
 
-        if (hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('banquets') == 1) or (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
+        if (can_user_edit_entity and not can_user_edit_entity(current_user, b, 'banquets')):
             if is_ajax:
-                return jsonify({'code': 403, 'success': False, 'message': '当前页面为仅查看权限，无权删除分享！'}), 403
-            flash('当前页面为仅查看权限，无权删除分享！', 'danger')
+                return jsonify({'code': 403, 'success': False, 'message': '当前页面权限不允许删除分享！'}), 403
+            flash('当前页面权限不允许删除分享！', 'danger')
             return redirect(url_for('banquet_detail_view', banquet_id=banquet_id))
 
         share = SharedLedgerLink.query.filter_by(banquet_id=b.id).first()
@@ -2444,9 +2438,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     def reminders_view():
         """纪念日备忘列表与添加"""
         if request.method == 'POST':
-            if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('reminders') == 1:
-                flash('当前页面为仅查看权限，无权添加纪念日提醒！', 'danger')
-                return redirect(url_for('reminders_view'))
+            # V10.4: 级别1可创建自身纪念日，移除 == 1 拦截
             name = request.form.get('name', '').strip()
             relation = request.form.get('relation', '').strip()
             phone = request.form.get('phone', '').strip()
@@ -2601,7 +2593,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def reminders_batch_delete():
         """批量软删除纪念日"""
-        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('reminders') in (1, 2):
+        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('reminders') in (2,):
             flash('当前页面权限不允许删除纪念日提醒！', 'danger')
             return redirect(url_for('reminders_view'))
         reminder_ids = request.form.getlist('reminder_ids') or request.form.getlist('reminder_ids[]')
@@ -2641,9 +2633,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def api_trigger_reminder_push():
         """手动或外部触发即将到期的亲友纪念日 Webhook 推送"""
-        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('reminders') == 1:
-            return jsonify({'code': 403, 'message': '您当前对【纪念日备忘】页面为仅查看权限，无权发起手动推送提醒！'}), 403
-
+        # V10.4: 级别1可发起推送提醒，移除 == 1 拦截
         query = get_accessible_reminders_query(current_user) if get_accessible_reminders_query else AnniversaryReminder.query.filter_by(user_id=current_user.id)
         rems = query.filter(AnniversaryReminder.deleted_at.is_(None), AnniversaryReminder.is_active == True).all()
         today = datetime.now().date()
@@ -2711,9 +2701,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         """用户对单条或多条记录发起自定义手动推送提醒（可设置提醒次数与间隔时长）"""
         if hasattr(current_user, 'can_view_menu') and not current_user.can_view_menu('reminders'):
             return jsonify({'code': 403, 'message': '您没有【纪念日备忘】页面的访问权限！'}), 403
-        if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('reminders') == 1:
-            return jsonify({'code': 403, 'message': '您当前对【纪念日备忘】页面为仅查看权限，无权发起手动推送提醒！'}), 403
-
+        # V10.4: 级别1可发起自定义推送，移除 == 1 拦截
         data = request.get_json(silent=True) or {}
         reminder_ids = data.get('reminder_ids') or []
         if not reminder_ids and request.form.get('reminder_ids'):
@@ -3775,11 +3763,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         if not current_user.is_admin:
             config.adopted_from_admin = False
 
-        # V10.3: 空值校验——URL 和账号不允许保存空值
-        if not server_url or not username:
-            flash('WebDAV 服务器地址和账号不能为空！', 'danger')
-            return redirect(url_for('admin_backups'))
-
+        # V10.4: 移除空值校验——允许普通用户保存空配置（停用引用、自行配置场景）
         config.webdav_url = server_url
         config.webdav_username = username
         if password:

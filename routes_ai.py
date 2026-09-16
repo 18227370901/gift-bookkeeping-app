@@ -234,7 +234,8 @@ def register_ai_routes(app, log_action=None):
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
                 f'删除AI会话 [{title}]',
                 f'操作人：{current_user.username} | 页面：AI助手 | 会话：{title}',
-                page_key='ai_assistant', user_name=current_user.username
+                page_key='ai_assistant', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -283,7 +284,8 @@ def register_ai_routes(app, log_action=None):
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
                 f'更新AI配置',
                 f'操作人：{current_user.username} | 页面：AI助手配置 | 配置数：{len(configs_raw)}',
-                page_key='ai_config', user_name=current_user.username
+                page_key='ai_config', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -346,7 +348,8 @@ def register_ai_routes(app, log_action=None):
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
                 f'AI授权{status} [{target_user.username}]',
                 f'操作人：{current_user.username} | 页面：AI助手配置 | 用户：{target_user.username} | 操作：{status}',
-                page_key='ai_config', user_name=current_user.username
+                page_key='ai_config', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass

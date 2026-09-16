@@ -161,7 +161,7 @@
                             <i class="fa-solid fa-arrow-right-from-bracket me-1"></i>批量移出此宴席 (保留主账本)
                         </button>
                         {% endif %}
-                        {% if not (current_user.get_menu_perm('banquets') in (1, 2)) %}
+                        {% if not (current_user.get_menu_perm('banquets') in (2,)) %}
                         <button type="button" id="btnBatchDeleteRecords" class="btn btn-sm btn-outline-danger" disabled>
                             <i class="fa-solid fa-trash-can me-1"></i>批量移入回收站
                         </button>

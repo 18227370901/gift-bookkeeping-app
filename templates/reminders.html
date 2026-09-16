@@ -11,16 +11,13 @@
                     <i class="fa-solid fa-bell me-2"></i>亲友重要纪念日备忘与提醒
                 </h5>
                 <div class="d-flex gap-2">
-                    {% if not (current_user.get_menu_perm('reminders') == 1) %}
+                    {# V10.4: 级别1可正常操作纪念日，移除 == 1 限制 #}
                     <button type="button" class="btn btn-outline-primary btn-sm" onclick="openAllUpcomingPushModal()" id="pushBtn">
                         <i class="fa-solid fa-paper-plane me-1"></i>立即推送 Webhook 提醒
                     </button>
                     <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addReminderModal">
                         <i class="fa-solid fa-plus-circle me-1"></i>添加纪念日
                     </button>
-                    {% else %}
-                    <span class="badge bg-secondary text-white small align-self-center py-2 px-3"><i class="fa-solid fa-eye me-1"></i>仅查看模式</span>
-                    {% endif %}
                     <a href="{{ url_for('index') }}" class="btn btn-outline-secondary btn-sm">
                         <i class="fa-solid fa-arrow-left me-1"></i>返回账本
                     </a>
@@ -58,12 +55,11 @@
                                 </div>
                             </div>
                             <div class="col-md-6 text-md-end d-flex justify-content-md-end gap-2 flex-wrap">
-                                {% if current_user.get_menu_perm('reminders') != 1 %}
+                                {# V10.4: 级别1可推送提醒 #}
                                 <button type="button" class="btn btn-outline-primary btn-sm" id="batchPushRemindersBtn" onclick="openBatchPushModal()">
                                     <i class="fa-solid fa-paper-plane me-1"></i>批量推送选中提醒
                                 </button>
-                                {% endif %}
-                                {% if current_user.get_menu_perm('reminders') not in (1, 2) %}
+                                {% if current_user.get_menu_perm('reminders') not in (2,) %}
                                 <button type="button" class="btn btn-outline-danger btn-sm" id="batchDeleteRemindersBtn" onclick="submitBatchDeleteReminders()">
                                     <i class="fa-solid fa-trash me-1"></i>批量删除选中项
                                 </button>
@@ -123,7 +119,7 @@
                                         <td class="small text-muted text-truncate" style="max-width: 150px;" title="{{ r.notes }}">{{ r.notes or '-' }}</td>
                                         <td class="text-end pe-3">
                                             <div class="btn-group btn-group-sm">
-                                                {% if current_user.get_menu_perm('reminders') != 1 %}
+                                                {# V10.4: 级别1可操作纪念日 #}
                                                 <button type="button" class="btn btn-outline-primary btn-push-single"
                                                         data-id="{{ r.id }}"
                                                         data-name="{{ r.name }}"
@@ -139,7 +135,6 @@
                                                         title="发起推送提醒">
                                                     <i class="fa-solid fa-paper-plane"></i>
                                                 </button>
-                                                {% endif %}
                                                 {% if can_user_edit_reminder(current_user, r) %}
                                                 <button type="button" class="btn btn-outline-secondary btn-edit-reminder"
                                                         data-id="{{ r.id }}"
@@ -420,7 +415,7 @@
                         </div>
                     </div>
                     <div class="card-body pt-1 pb-3">
-                        {% set user_can_edit = current_user.is_admin or (current_user.get_menu_perm('reminders') != 1) %}
+                        {% set user_can_edit = True %}
                         <textarea id="modalPushPreviewBox" class="form-control font-monospace small bg-white" rows="6" 
                             {% if not user_can_edit %}readonly{% endif %}
                             placeholder="推送内容预览，支持直接编辑自定义推送内容..."></textarea>

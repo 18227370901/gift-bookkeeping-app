@@ -135,17 +135,17 @@
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <div class="mb-3">
             <label class="form-label fw-bold">WebDAV 服务器地址 (URL)</label>
-            <input type="url" name="webdav_url" id="cfg_webdav_url_user" class="form-control rounded-3" value="{{ config_data.webdav_url or '' }}" placeholder="https://dav.jianguoyun.com/dav/" required>
+            <input type="url" name="webdav_url" id="cfg_webdav_url_user" class="form-control rounded-3" value="{{ config_data.webdav_url or '' }}" placeholder="https://dav.jianguoyun.com/dav/">
             <div class="form-text">支持坚果云、Nextcloud、群晖、Alist 等 WebDAV 完整路径</div>
           </div>
           <div class="mb-3">
             <label class="form-label fw-bold">账号 / 用户名</label>
-            <input type="text" name="webdav_username" id="cfg_webdav_username_user" class="form-control rounded-3" value="{{ config_data.webdav_username or '' }}" placeholder="username@example.com" required>
+            <input type="text" name="webdav_username" id="cfg_webdav_username_user" class="form-control rounded-3" value="{{ config_data.webdav_username or '' }}" placeholder="username@example.com">
           </div>
           <div class="mb-3">
             <label class="form-label fw-bold">密码 / 应用专属授权码</label>
             <div class="input-group">
-              <input type="password" name="webdav_password" id="cfg_webdav_password_user" class="form-control rounded-start-3" value="{{ config_data.get_webdav_password() or '' }}" placeholder="请输入密码或应用授权码" autocomplete="new-password" required>
+              <input type="password" name="webdav_password" id="cfg_webdav_password_user" class="form-control rounded-start-3" value="{{ config_data.get_webdav_password() or '' }}" placeholder="请输入密码或应用授权码" autocomplete="new-password">
               <button class="btn btn-outline-secondary rounded-end-3" type="button" onclick="togglePasswordVisibility('cfg_webdav_password_user', this)" title="查看/隐藏密码"><i class="fa-regular fa-eye"></i></button>
             </div>
             <div class="form-text small text-muted">点击眼睛图标可切换明文显示/隐藏，方便核对输入</div>

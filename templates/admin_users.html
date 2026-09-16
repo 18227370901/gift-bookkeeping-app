@@ -282,7 +282,7 @@
               <span class="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill"><i class="fa-solid fa-crown me-1"></i>全局完全权限</span>
               {% else %}
               <div class="d-flex gap-1 flex-wrap align-items-center" style="max-width: 260px;">
-                {% set p_labels = {0: '仅自身', 1: '只读', 2: '协作', 3: '完全'} %}
+                {% set p_labels = {0: '仅自身', 1: '自身全权+查他人', 2: '查改他人', 3: '完全'} %}
                 {% set m_names = {'ledger': '账本', 'banquets': '宴席', 'reconciliation': '对账', 'reminders': '备忘', 'recycle_bin': '回收'} %}
                 {% for mk in ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin'] %}
                   {% set pv = u.get_menu_perm(mk) %}
@@ -462,7 +462,7 @@
                                 {% set p_ledger = u.get_menu_perm('ledger') %}
                                 <select class="form-select form-select-sm" name="menu_perm_ledger">
                                   <option value="0" {% if p_ledger == 0 %}selected{% endif %}>仅管理自身数据</option>
-                                  <option value="1" {% if p_ledger == 1 %}selected{% endif %}>仅查看他人数据</option>
+                                  <option value="1" {% if p_ledger == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
                                   <option value="2" {% if p_ledger == 2 %}selected{% endif %}>查看+修改他人数据</option>
                                   <option value="3" {% if p_ledger == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
                                 </select>
@@ -481,7 +481,7 @@
                                 {% set p_banquets = u.get_menu_perm('banquets') %}
                                 <select class="form-select form-select-sm" name="menu_perm_banquets">
                                   <option value="0" {% if p_banquets == 0 %}selected{% endif %}>仅管理自身数据</option>
-                                  <option value="1" {% if p_banquets == 1 %}selected{% endif %}>仅查看他人数据</option>
+                                  <option value="1" {% if p_banquets == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
                                   <option value="2" {% if p_banquets == 2 %}selected{% endif %}>查看+修改他人数据</option>
                                   <option value="3" {% if p_banquets == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
                                 </select>
@@ -500,7 +500,7 @@
                                 {% set p_recon = u.get_menu_perm('reconciliation') %}
                                 <select class="form-select form-select-sm" name="menu_perm_reconciliation">
                                   <option value="0" {% if p_recon == 0 %}selected{% endif %}>仅管理自身数据</option>
-                                  <option value="1" {% if p_recon == 1 %}selected{% endif %}>仅查看他人数据</option>
+                                  <option value="1" {% if p_recon == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
                                   <option value="2" {% if p_recon == 2 %}selected{% endif %}>查看+修改他人数据</option>
                                   <option value="3" {% if p_recon == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
                                 </select>
@@ -519,7 +519,7 @@
                                 {% set p_reminders = u.get_menu_perm('reminders') %}
                                 <select class="form-select form-select-sm" name="menu_perm_reminders">
                                   <option value="0" {% if p_reminders == 0 %}selected{% endif %}>仅管理自身数据</option>
-                                  <option value="1" {% if p_reminders == 1 %}selected{% endif %}>仅查看他人数据</option>
+                                  <option value="1" {% if p_reminders == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
                                   <option value="2" {% if p_reminders == 2 %}selected{% endif %}>查看+修改他人数据</option>
                                   <option value="3" {% if p_reminders == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
                                 </select>
@@ -538,7 +538,7 @@
                                 {% set p_recycle = u.get_menu_perm('recycle_bin') %}
                                 <select class="form-select form-select-sm" name="menu_perm_recycle_bin">
                                   <option value="0" {% if p_recycle == 0 %}selected{% endif %}>仅管理自身数据</option>
-                                  <option value="1" {% if p_recycle == 1 %}selected{% endif %}>仅查看他人数据</option>
+                                  <option value="1" {% if p_recycle == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
                                   <option value="2" {% if p_recycle == 2 %}selected{% endif %}>查看+修改他人数据</option>
                                   <option value="3" {% if p_recycle == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
                                 </select>
@@ -564,7 +564,7 @@
                             <label class="form-label small text-muted mb-1">备份数据跨用户权限级别：</label>
                             <select class="form-select form-select-sm" name="menu_perm_backups">
                               <option value="0" {% if p_backups == 0 %}selected{% endif %}>仅管理自身数据</option>
-                              <option value="1" {% if p_backups == 1 %}selected{% endif %}>仅查看他人数据</option>
+                              <option value="1" {% if p_backups == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
                               <option value="2" {% if p_backups == 2 %}selected{% endif %}>查看+修改他人数据</option>
                               <option value="3" {% if p_backups == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
                             </select>

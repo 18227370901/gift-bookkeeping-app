@@ -14,16 +14,13 @@
                     <span class="small text-muted">汇总婚礼、满月酒、寿宴等所有专属台账，支持收礼盈亏核算与批量管理</span>
                 </div>
                 <div class="d-flex flex-wrap gap-2">
-                    {% if not (current_user.get_menu_perm('banquets') == 1) %}
+                    {# V10.4: 级别1可创建宴席 #}
                     <a href="{{ url_for('banquets_sync') }}" class="btn btn-outline-warning btn-sm" title="从礼金账本拉取数据自动更新与关联">
                         <i class="fa-solid fa-rotate me-1"></i>从礼金账本同步数据
                     </a>
                     <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#createBanquetModal">
                         <i class="fa-solid fa-plus-circle me-1"></i>创建新宴席账本
                     </button>
-                    {% else %}
-                    <span class="badge bg-secondary text-white small align-self-center py-2 px-3"><i class="fa-solid fa-eye me-1"></i>仅查看模式</span>
-                    {% endif %}
                     <a href="{{ url_for('index') }}" class="btn btn-outline-secondary btn-sm">
                         <i class="fa-solid fa-arrow-left me-1"></i>返回账本
                     </a>
@@ -94,7 +91,7 @@
                         <span id="selectedCountBadge" class="badge bg-primary-subtle text-primary border border-primary-subtle py-2 px-3 small">
                             已选中 <strong id="selectedCountNum">0</strong> 个宴席台账
                         </span>
-                        {% if not (current_user.get_menu_perm('banquets') in (1, 2)) %}
+                        {% if not (current_user.get_menu_perm('banquets') in (2,)) %}
                         <button type="button" id="btnBatchDeleteBanquets" class="btn btn-sm btn-outline-danger" disabled>
                             <i class="fa-solid fa-trash-can me-1"></i>批量移入回收站
                         </button>

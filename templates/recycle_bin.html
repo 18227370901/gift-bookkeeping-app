@@ -21,9 +21,8 @@
                     </span>
                 </div>
                 <div class="d-flex gap-2">
-                    {% if current_user.get_menu_perm('recycle_bin') == 1 %}
-                    <span class="badge bg-secondary text-white small align-self-center py-2 px-3"><i class="fa-solid fa-eye me-1"></i>仅查看模式</span>
-                    {% elif can_clear_recycle and total_count > 0 %}
+                    {# V10.4: 级别1可操作自身回收站数据，移除 == 1 仅查看模式 #}
+                    {% if can_clear_recycle and total_count > 0 %}
                     <form action="{{ url_for('clear_recycle_bin') }}" method="POST" class="d-inline" onsubmit="return confirm('警告：清空回收站将彻底永久删除当前所有已删除的数据且无法恢复！是否确认彻底清空？');">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button type="submit" class="btn btn-outline-danger btn-sm">

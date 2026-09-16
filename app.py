@@ -514,7 +514,7 @@ def can_user_view_entity(user, entity, menu_key=None):
     return bool(getattr(user, 'can_view_others', False))
 
 def can_user_edit_entity(user, entity, menu_key=None):
-    """判断用户是否有权修改指定实体（级别1为仅查看全只读模式，普通用户不得修改管理员创建的实体）"""
+    """判断用户是否有权修改指定实体（级别1：自身可改、他人只读）"""
     if not user or not user.is_authenticated:
         return False
     if getattr(user, 'is_admin', False):
@@ -523,17 +523,14 @@ def can_user_edit_entity(user, entity, menu_key=None):
         return False
     mk = _infer_entity_menu(entity, menu_key)
     perm = user.get_menu_perm(mk) if hasattr(user, 'get_menu_perm') else 0
-    # 级别 1 为仅查看全只读模式，不可进行任何修改
-    if perm == 1:
-        return False
-    # 实体属于自身：权限 0(自管)、2(查+改)、3(查+改+删) 均可修改
+    # 实体属于自身：级别 0(自管)、1(查他人)、2(查+改)、3(查+改+删) 均可修改
     if getattr(entity, 'user_id', None) == user.id:
         return True
     # 他人实体：需要级别 >= 2 (查看+修改他人数据)
     return perm >= 2
 
 def can_user_delete_entity(user, entity, menu_key=None):
-    """判断用户是否有权删除指定实体（级别1与级别2严禁删除，普通用户不得删除管理员创建的实体）"""
+    """判断用户是否有权删除指定实体（级别1自身可删、他人不可删；级别2严禁任何删除）"""
     if not user or not user.is_authenticated:
         return False
     if getattr(user, 'is_admin', False):
@@ -542,12 +539,9 @@ def can_user_delete_entity(user, entity, menu_key=None):
         return False
     mk = _infer_entity_menu(entity, menu_key)
     perm = user.get_menu_perm(mk) if hasattr(user, 'get_menu_perm') else 0
-    # 级别 1 (仅查看) 与 级别 2 (查+改) 严禁任何删除
-    if perm in (1, 2):
-        return False
-    # 实体属于自身：权限 0(自管)、3(查+改+删) 可删除
+    # 实体属于自身：级别 0(自管)、1(查他人)、3(查+改+删) 可删除；级别 2 不可删
     if getattr(entity, 'user_id', None) == user.id:
-        return True
+        return perm != 2
     # 他人实体：需要级别 >= 3 (查看+修改+删除他人数据)
     return perm >= 3
 
@@ -1475,11 +1469,7 @@ def logout():
 @login_required
 def add_record():
     is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
-    if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('ledger') == 1:
-        if is_ajax:
-            return jsonify({'code': 403, 'message': '当前页面为仅查看权限，无权新增礼金记录！'}), 403
-        flash('当前页面为仅查看权限，无权新增礼金记录！', 'danger')
-        return redirect(url_for('index'))
+    # V10.4: 级别1可正常新增自身记录，移除 == 1 拦截
     name = request.form.get('name', '').strip()
     age_str = request.form.get('age', '').strip()
     address = request.form.get('address', '').strip()
@@ -1557,7 +1547,8 @@ def add_record():
             WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
             f'{current_user.username} 新增{type_str}：客人「{name}」，金额 {amount:.2f}元，事由：{event_reason}',
             f'操作人：{current_user.username} | 页面：礼金账本 | 类型：{type_str} | 客人：{name} | 金额：{amount:.2f}元 | 事由：{event_reason}',
-            page_key='ledger', user_name=current_user.username
+            page_key='ledger', user_name=current_user.username,
+            operator_id=current_user.id
         )
     except Exception:
         pass
@@ -1649,7 +1640,8 @@ def edit_record(record_id):
             WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_update',
             f'{current_user.username} 修改记录：客人「{name}」，金额 {amount:.2f}元，事由：{event_reason}',
             f'操作人：{current_user.username} | 页面：礼金账本 | 客人：{name} | 金额：{amount:.2f}元 | 事由：{event_reason}',
-            page_key='ledger', user_name=current_user.username
+            page_key='ledger', user_name=current_user.username,
+            operator_id=current_user.id
         )
     except Exception:
         pass
@@ -1684,7 +1676,8 @@ def delete_record(record_id):
             WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
             f'{current_user.username} 删除记录：客人「{record_name}」，金额 {record_amount:.2f}元',
             f'操作人：{current_user.username} | 页面：礼金账本 | 客人：{record_name} | 金额：{record_amount:.2f}元 | 状态：已移入回收站',
-            page_key='ledger', user_name=current_user.username
+            page_key='ledger', user_name=current_user.username,
+            operator_id=current_user.id
         )
     except Exception:
         pass
@@ -1698,7 +1691,7 @@ def delete_record(record_id):
 @login_required
 def batch_delete_records():
     is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
-    if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('ledger') in (1, 2):
+    if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('ledger') in (2,):
         if is_ajax:
             return jsonify({'code': 403, 'message': '当前页面权限不允许删除记录！'}), 403
         flash('当前页面权限不允许删除记录！', 'danger')
@@ -1729,7 +1722,8 @@ def batch_delete_records():
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
                 f'{current_user.username} 批量删除 {deleted_count} 条记录',
                 f'操作人：{current_user.username} | 页面：礼金账本 | 数量：{deleted_count} 条 | 状态：已移入回收站',
-                page_key='ledger', user_name=current_user.username
+                page_key='ledger', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -1765,7 +1759,8 @@ def delete_all_records():
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'clear',
                 f'{current_user.username} 清空 {deleted_count} 条记录',
                 f'操作人：{current_user.username} | 页面：礼金账本 | 数量：全部 {deleted_count} 条 | 状态：已移入回收站',
-                page_key='ledger', user_name=current_user.username
+                page_key='ledger', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -1798,7 +1793,8 @@ def change_password():
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
                 f'修改密码 [{current_user.username}]',
                 f'操作人：{current_user.username} | 页面：系统安全',
-                page_key='security', user_name=current_user.username
+                page_key='security', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -2044,7 +2040,8 @@ def generate_invite_link():
             WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
             f'生成注册邀请链接',
             f'操作人：{current_user.username} | 页面：邀请链接 | 有效期：{expire_hours}小时 | 可用次数：{max_uses}',
-            page_key='invites', user_name=current_user.username
+            page_key='invites', user_name=current_user.username,
+            operator_id=current_user.id
         )
     except Exception:
         pass
@@ -2069,7 +2066,8 @@ def admin_delete_invite_link(token_id):
             WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
             f'删除注册邀请链接',
             f'操作人：{current_user.username} | 页面：邀请链接 | 前缀：{token_val}',
-            page_key='invites', user_name=current_user.username
+            page_key='invites', user_name=current_user.username,
+            operator_id=current_user.id
         )
     except Exception:
         pass
@@ -2101,7 +2099,8 @@ def admin_batch_delete_invite_links():
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
                 f'批量删除 {deleted_count} 个邀请链接',
                 f'操作人：{current_user.username} | 页面：邀请链接 | 数量：{deleted_count}',
-                page_key='invites', user_name=current_user.username
+                page_key='invites', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass
@@ -2324,7 +2323,7 @@ def admin_update_user_permissions(user_id):
     }
     PERM_LABELS = {
         0: '仅自身',
-        1: '查他人',
+        1: '自身全权+查他人',
         2: '查改他人',
         3: '查改删他人'
     }
@@ -2375,7 +2374,8 @@ def admin_update_user_permissions(user_id):
             WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
             f'修改用户权限 [{user.username}]',
             f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username} | 权限：{perm_summary}',
-            page_key='admin_users', user_name=current_user.username
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
         )
     except Exception:
         pass
@@ -2467,7 +2467,8 @@ def admin_toggle_user_status(user_id):
             WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
             f'{status_str}用户 [{user.username}]',
             f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username} | 状态：{status_str}',
-            page_key='admin_users', user_name=current_user.username
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
         )
     except Exception:
         pass
@@ -2520,7 +2521,8 @@ def admin_reset_user_pass(user_id):
             WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
             f'重置用户密码 [{user.username}]',
             f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username}',
-            page_key='admin_users', user_name=current_user.username
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
         )
     except Exception:
         pass
@@ -2598,7 +2600,8 @@ def admin_delete_user(user_id):
             WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
             f'删除用户 [{deleted_username}]',
             f'操作人：{current_user.username} | 页面：用户管理 | 用户：{deleted_username}',
-            page_key='admin_users', user_name=current_user.username
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
         )
     except Exception:
         pass
@@ -2782,9 +2785,7 @@ def download_import_template():
 @app.route('/import/csv', methods=['POST'])
 @login_required
 def import_csv():
-    if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('ledger') == 1:
-        flash('当前页面为仅查看权限，无权批量导入记录！', 'danger')
-        return redirect(url_for('index'))
+    # V10.4: 级别1可正常导入自身记录，移除 == 1 拦截
     file = request.files.get('file')
     if not file or file.filename == '':
         flash('请选择要导入的 CSV 文件！', 'danger')
@@ -2913,7 +2914,8 @@ def import_csv():
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
                 f'{current_user.username} 导入 {success_count} 条记录',
                 f'操作人：{current_user.username} | 页面：礼金账本 | 导入成功：{success_count} 条 | 忽略：{skip_count} 条',
-                page_key='ledger', user_name=current_user.username
+                page_key='ledger', user_name=current_user.username,
+                operator_id=current_user.id
             )
         except Exception:
             pass

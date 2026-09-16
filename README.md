@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'd511ed59-e322-453e-9d18-18b33996b3b8'
-  PropagateID: 'd511ed59-e322-453e-9d18-18b33996b3b8'
-  ReservedCode1: 'c683d9b3-c729-4b92-8fcd-2f0761f4d97b'
-  ReservedCode2: 'c683d9b3-c729-4b92-8fcd-2f0761f4d97b'
+  ProduceID: '41004872-7087-4796-974c-c81744a7c34d'
+  PropagateID: '41004872-7087-4796-974c-c81744a7c34d'
+  ReservedCode1: 'd6391432-a9f9-40bd-9a10-ef94f339e187'
+  ReservedCode2: 'd6391432-a9f9-40bd-9a10-ef94f339e187'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -406,6 +406,28 @@ AIGC:
 - 新增/编辑 Modal 新增第 4 个 Tab「监控范围」，含用户多选列表和事件类型多选
 - 空 = 不限制（推送全部）；非空 = 仅推送匹配的操作
 - 数据库迁移新增 2 条 ALTER TABLE
+
+### V10.4 权限粒度优化与 Webhook 监控修复（2026-09-16）
+
+#### WebDAV 保存路由空值校验修复
+- 移除 `admin_save_webdav_config` 后端空值校验（允许普通用户保存空配置以"停用引用、自行配置"）
+- 移除普通用户 WebDAV 表单 `webdav_url`、`webdav_username`、`webdav_password` 的 `required` 属性
+
+#### 权限级别 1 语义修正
+- 权限级别 1 从"全只读"修正为"自身全权 + 仅查看他人数据"
+- `can_user_edit_entity`：级别 1 对自身实体可编辑，他人实体需级别 >= 2
+- `can_user_delete_entity`：级别 1 对自身实体可删除（perm != 2），他人实体需级别 >= 3
+- `add_record` / `import_csv`：移除级别 1 拦截
+- `batch_delete_records`：`in (1, 2)` → `in (2,)`（级别 1 可删除自身记录）
+- routes_ext.py 17 处拦截点修正（回收站 3 处、宴席 8 处、纪念日 5 处、对账 1 处无需改）
+- 模板 12 处修正：移除 `== 1` 仅查看模式标签和按钮限制，`can_view_others` → `can_view_others_for('ledger')`
+- admin_users.html 权限下拉选项标签更新为"自身全权 + 仅查看他人数据"
+
+#### Webhook 监控过滤修复
+- app.py 14 处 `trigger_webhook_event` 调用补充 `operator_id=current_user.id`
+- routes_ai.py 3 处 `trigger_webhook_event` 调用补充 `operator_id=current_user.id`
+- 修复前 `_monitor_matches` 因 `operator_id` 为 None 跳过用户过滤，导致监控配置形同虚设
+- 1 处合理缺失（`check_and_trigger_due_reminders` 后台定时任务，无 current_user 上下文）
 
 ## 📂 项目文件结构
 

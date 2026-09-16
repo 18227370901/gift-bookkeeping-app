@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '6773cc4a-48d2-45bd-a61d-313fc05698d9'
-  PropagateID: '6773cc4a-48d2-45bd-a61d-313fc05698d9'
-  ReservedCode1: 'e01dc470-662e-43f7-bb67-9a32547afee9'
-  ReservedCode2: 'e01dc470-662e-43f7-bb67-9a32547afee9'
+  ProduceID: 'f35c9a19-71cb-4086-8c5d-ffb873bf55eb'
+  PropagateID: 'f35c9a19-71cb-4086-8c5d-ffb873bf55eb'
+  ReservedCode1: 'ebd4885e-d3de-4df9-a860-21ef72b1171e'
+  ReservedCode2: 'ebd4885e-d3de-4df9-a860-21ef72b1171e'
 ---
 
 # AI 助手模块技术设计方案
@@ -1580,3 +1580,112 @@ V10.3 批次覆盖 4 大方向：普通用户 WebDAV 配置体验对齐管理员
 | `templates/admin_webhooks.html` | 新增/编辑 Modal 第 4 个 Tab「监控范围」+ JS 函数；编辑按钮 data 属性新增 monitor 数据 |
 
 > AI生成
+
+## 第十八章 V10.4 权限粒度优化与 Webhook 监控修复（2026-09-16）
+
+### 18.1 需求总览
+
+V10.4 批次覆盖 3 个方向：WebDAV 保存路由空值校验误拦截修复、权限级别 1 语义修正、Webhook 监控过滤未生效修复。
+
+| 编号 | 模块 | 类型 | 需求 |
+|------|------|------|------|
+| 1 | WebDAV 配置 | 修复 | 普通用户"停用引用、自行配置"保存空表单时被后端空值校验+前端 required 双重拦截 |
+| 2 | 权限管理 | 修复 | 权限级别 1（仅查看他人数据）被实现为"全只读"，连自身数据都不能增删改，需修正为"自身全权+他人只读" |
+| 3 | Webhook 监控 | 修复 | trigger_webhook_event 调用未传 operator_id，导致用户级监控过滤形同虚设 |
+
+### 18.2 方向一：WebDAV 保存路由空值校验修复
+
+**问题**：普通用户点击"停用引用、自行配置"后保存空表单，被 `routes_ext.py:3778-3781` 后端空值校验 + `admin_backups.html` 前端 `required` 属性双重拦截。
+
+**方案**：
+1. `routes_ext.py`：移除 `admin_save_webdav_config` 中的 `if not server_url or not username` 空值校验块
+2. `admin_backups.html`：移除普通用户 WebDAV 表单中 `webdav_url`、`webdav_username`、`webdav_password` 的 `required` 属性
+
+### 18.3 方向二：权限级别 1 语义修正
+
+**问题**：权限级别 1（仅查看他人数据）当前被实现为"全只读"模式——连自身数据都不能增删改导入，与用户预期不符。
+
+**修正后语义**：
+
+| 级别 | 前端标签 | 自身数据 | 他人数据 |
+|------|----------|----------|----------|
+| 0 | 仅管理自身数据 | 增删改查导入 | 不可见 |
+| 1 | 自身全权 + 仅查看他人数据 | **增删改查导入** | **可查看，不可改不可删** |
+| 2 | 查看+修改他人数据 | 增删改查导入 | 可查看可改，不可删 |
+| 3 | 查看+修改+删除他人数据 | 增删改查导入 | 查改删 |
+
+**后端核心函数修改**（app.py）：
+
+| 函数 | 修改前 | 修改后 |
+|------|--------|--------|
+| `can_user_edit_entity` | `if perm == 1: return False` | 自身实体可编辑，他人实体需 perm >= 2 |
+| `can_user_delete_entity` | `if perm in (1, 2): return False` | 自身实体 perm != 2 可删，他人实体需 perm >= 3 |
+| `add_record` | `if perm == 1: abort(403)` | 移除拦截 |
+| `batch_delete_records` | `if perm in (1, 2): abort(403)` | 改为 `if perm in (2,): abort(403)` |
+| `import_csv` | `if perm == 1: abort(403)` | 移除拦截 |
+| `PERM_LABELS` | `1: '查他人'` | `1: '自身全权+查他人'` |
+
+**routes_ext.py 拦截点修改**（17 处）：
+- 回收站 3 处：还原操作移除 `== 1` 拦截；彻底删除/清空 `in (1, 2)` → `in (2,)`
+- 宴席 8 处：创建/同步移除 `== 1` 拦截；批量删除 `in (1, 2)` → `in (2,)`；编辑操作（移出/登记/引入/配置分享/删除分享）移除 `== 1` 前置条件，保留 `can_user_edit_entity` 检查
+- 纪念日 5 处：创建/推送移除 `== 1` 拦截；批量删除 `in (1, 2)` → `in (2,)`
+- 对账 1 处：无 `== 1` 拦截点（查看页面，无需修改）
+
+**模板文件修改**（约 12 处）：
+- `index.html`：移除新增按钮 `!= 1` 限制；`can_view_others` → `can_view_others_for('ledger')`
+- `reminders.html`：移除 `== 1` 仅查看模式标签和相关按钮限制；`user_can_edit` 直接为 True
+- `banquets.html`：移除 `== 1` 仅查看模式标签；批量删除 `in (1, 2)` → `in (2,)`
+- `banquet_detail.html`：批量删除 `in (1, 2)` → `in (2,)`
+- `recycle_bin.html`：移除 `== 1` 仅查看模式标签
+- `admin_users.html`：权限标签和下拉选项描述更新为"自身全权 + 仅查看他人数据"
+
+### 18.4 方向三：Webhook 监控过滤修复
+
+**问题**：`trigger_webhook_event` 调用时未传 `operator_id`，导致 `_monitor_matches` 函数中 `if monitor_uids and operator_id is not None` 条件不满足（operator_id 为 None），跳过用户过滤（全部放行），监控配置形同虚设。
+
+**排查结果**：全项目 82 处 `trigger_webhook_event` 调用中，17 处缺少 `operator_id` 参数。
+
+**app.py 补充 14 处**：
+
+| 路由 | event_type | page_key |
+|------|------------|----------|
+| `add_record` | record_create | ledger |
+| `edit_record` | record_update | ledger |
+| `delete_record` | record_delete | ledger |
+| `batch_delete_records` | batch_delete | ledger |
+| `delete_all_records` | clear | ledger |
+| `change_password` | security | security |
+| `generate_invite_link` | system | invites |
+| `admin_delete_invite_link` | record_delete | invites |
+| `admin_batch_delete_invite_links` | batch_delete | invites |
+| `admin_update_user_permissions` | status_change | admin_users |
+| `admin_toggle_user_status` | status_change | admin_users |
+| `admin_reset_user_pass` | security | admin_users |
+| `admin_delete_user` | record_delete | admin_users |
+| `import_csv` | record_create | ledger |
+
+**routes_ai.py 补充 3 处**：
+
+| 路由 | event_type | page_key |
+|------|------------|----------|
+| `api_ai_delete_session` | record_delete | ai_assistant |
+| `api_ai_save_config` | system | ai_config |
+| `api_ai_set_auth` | status_change | ai_config |
+
+**不修改 1 处**：
+- `routes_ext.py:349` `check_and_trigger_due_reminders`：后台定时任务，无 `current_user` 上下文，`force_channels=True` 跳过全部过滤
+
+### 18.5 涉及文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `routes_ext.py` | 移除 WebDAV 空值校验；17 处权限拦截点修改 |
+| `app.py` | 6 处权限核心函数/路由修改；14 处 webhook 调用补充 operator_id；PERM_LABELS 更新 |
+| `routes_ai.py` | 3 处 webhook 调用补充 operator_id |
+| `templates/admin_backups.html` | 移除 3 个 required 属性 |
+| `templates/index.html` | 移除新增按钮限制；can_view_others → can_view_others_for('ledger') |
+| `templates/reminders.html` | 移除 == 1 限制标签和按钮限制 |
+| `templates/banquets.html` | 移除 == 1 限制标签；批量删除条件修改 |
+| `templates/banquet_detail.html` | 批量删除条件修改 |
+| `templates/recycle_bin.html` | 移除 == 1 仅查看模式标签 |
+| `templates/admin_users.html` | 权限标签和下拉选项描述更新 |
