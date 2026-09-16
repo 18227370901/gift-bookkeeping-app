@@ -437,20 +437,26 @@
               </li>
             </ul>
            <div class="tab-content">
-             <!-- Tab 1: 基础事件开关 -->
-             <div class="tab-pane fade show active" id="newTabEvents" role="tabpanel">
-               <div class="row g-2">
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_add" id="newNotifyAdd" checked><label class="form-check-label small" for="newNotifyAdd">新增操作</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_delete" id="newNotifyDelete" checked><label class="form-check-label small" for="newNotifyDelete">删除操作（含批量删除/清空）</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_update" id="newNotifyUpdate"><label class="form-check-label small" for="newNotifyUpdate">修改/编辑操作</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_reminder" id="newNotifyReminder" checked><label class="form-check-label small" for="newNotifyReminder">纪念日提醒</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="newNotifyBroadcast" checked><label class="form-check-label small" for="newNotifyBroadcast">站内广播</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_security" id="newNotifySecurity"><label class="form-check-label small" for="newNotifySecurity">安全风控</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_system" id="newNotifySystem" checked><label class="form-check-label small" for="newNotifySystem">系统配置/同步</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_status_change" id="newNotifyStatusChange"><label class="form-check-label small" for="newNotifyStatusChange">状态变更/还原</label></div></div>
-               </div>
-               <div class="form-text small text-muted mt-1">勾选大类事件开关后，可在「推送配置矩阵」中精细控制每个页面的推送范围。</div>
-             </div>
+              <!-- Tab 1: 基础事件开关 -->
+              <div class="tab-pane fade show active" id="newTabEvents" role="tabpanel">
+                <div class="d-flex justify-content-end align-items-center mb-1">
+                  <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="eventSelectAll('new')">全选</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="eventClearAll('new')">清空</button>
+                  </div>
+                </div>
+                <div class="row g-2">
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_add" id="newNotifyAdd" checked><label class="form-check-label small" for="newNotifyAdd">新增操作</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_delete" id="newNotifyDelete" checked><label class="form-check-label small" for="newNotifyDelete">删除操作（含批量删除/清空）</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_update" id="newNotifyUpdate"><label class="form-check-label small" for="newNotifyUpdate">修改/编辑操作</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_reminder" id="newNotifyReminder" checked><label class="form-check-label small" for="newNotifyReminder">纪念日提醒</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_broadcast" id="newNotifyBroadcast" checked><label class="form-check-label small" for="newNotifyBroadcast">站内广播</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_security" id="newNotifySecurity"><label class="form-check-label small" for="newNotifySecurity">安全风控</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_system" id="newNotifySystem" checked><label class="form-check-label small" for="newNotifySystem">系统配置/同步</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_status_change" id="newNotifyStatusChange"><label class="form-check-label small" for="newNotifyStatusChange">状态变更/还原</label></div></div>
+                </div>
+                <div class="form-text small text-muted mt-1">勾选大类事件开关后，可在「推送配置矩阵」中精细控制每个页面的推送范围。</div>
+              </div>
 
              <!-- Tab 2: 推送配置矩阵（页面×事件） -->
              <div class="tab-pane fade" id="newTabMatrix" role="tabpanel">
@@ -511,35 +517,47 @@
                </div>
               </div>
 
-              <!-- V10.3: Tab 4: 监控范围 -->
-              <div class="tab-pane fade" id="newTabMonitor" role="tabpanel">
-                <div class="form-text small text-muted mb-2">
-                  <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。留空 = 不限制（推送全部）。
-                </div>
-                <h6 class="text-muted mb-2"><i class="fa-solid fa-user-shield me-1"></i>监控用户（可选）</h6>
-                <div class="border rounded-3 bg-light p-2 mb-3" style="max-height: 150px; overflow-y: auto;">
-                  {% if all_users %}
-                  {% for u in all_users %}
-                  <div class="form-check">
-                    <input class="form-check-input monitor-user-cb" type="checkbox" value="{{ u.id }}" id="new_monitor_user_{{ u.id }}">
-                    <label class="form-check-label small" for="new_monitor_user_{{ u.id }}">{{ u.username }}</label>
-                  </div>
-                  {% endfor %}
-                  {% else %}
-                  <span class="small text-muted">暂无普通用户</span>
-                  {% endif %}
-                </div>
-                <h6 class="text-muted mb-2"><i class="fa-solid fa-filter me-1"></i>监控事件类型（可选）</h6>
-                <div class="border rounded-3 bg-light p-2">
-                  {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
-                  <div class="form-check d-inline-block me-3">
-                    <input class="form-check-input monitor-event-cb" type="checkbox" value="{{ ev_key }}" id="new_monitor_ev_{{ ev_key }}">
-                    <label class="form-check-label small" for="new_monitor_ev_{{ ev_key }}">{{ ev_label }}</label>
-                  </div>
-                  {% endfor %}
-                </div>
-                <div class="form-text small text-muted mt-2">不勾选任何用户 = 推送所有用户的操作；不勾选任何事件 = 推送所有事件类型。</div>
-              </div>
+               <!-- V10.3: Tab 4: 监控范围 -->
+               <div class="tab-pane fade" id="newTabMonitor" role="tabpanel">
+                 <div class="form-text small text-muted mb-2">
+                   <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。留空 = 不限制（推送全部）。
+                 </div>
+                 <div class="d-flex justify-content-between align-items-center mb-1">
+                   <h6 class="text-muted mb-0"><i class="fa-solid fa-user-shield me-1"></i>监控用户（可选）</h6>
+                   <div class="btn-group btn-group-sm">
+                     <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="monitorUserSelectAll('new')">全选</button>
+                     <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="monitorUserClearAll('new')">清空</button>
+                   </div>
+                 </div>
+                 <div class="border rounded-3 bg-light p-2 mb-3" style="max-height: 150px; overflow-y: auto;">
+                   {% if all_users %}
+                   {% for u in all_users %}
+                   <div class="form-check">
+                     <input class="form-check-input monitor-user-cb" type="checkbox" value="{{ u.id }}" id="new_monitor_user_{{ u.id }}">
+                     <label class="form-check-label small" for="new_monitor_user_{{ u.id }}">{{ u.username }}{% if u.is_admin %}（管理员）{% endif %}</label>
+                   </div>
+                   {% endfor %}
+                   {% else %}
+                   <span class="small text-muted">暂无用户</span>
+                   {% endif %}
+                 </div>
+                 <div class="d-flex justify-content-between align-items-center mb-1">
+                   <h6 class="text-muted mb-0"><i class="fa-solid fa-filter me-1"></i>监控事件类型（可选）</h6>
+                   <div class="btn-group btn-group-sm">
+                     <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="monitorEventSelectAll('new')">全选</button>
+                     <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="monitorEventClearAll('new')">清空</button>
+                   </div>
+                 </div>
+                 <div class="border rounded-3 bg-light p-2">
+                   {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                   <div class="form-check d-inline-block me-3">
+                     <input class="form-check-input monitor-event-cb" type="checkbox" value="{{ ev_key }}" id="new_monitor_ev_{{ ev_key }}">
+                     <label class="form-check-label small" for="new_monitor_ev_{{ ev_key }}">{{ ev_label }}</label>
+                   </div>
+                   {% endfor %}
+                 </div>
+                 <div class="form-text small text-muted mt-2">不勾选任何用户 = 推送所有用户的操作；不勾选任何事件 = 推送所有事件类型。</div>
+               </div>
             </div>
          </div>
          <div class="modal-footer border-light">
@@ -659,20 +677,26 @@
               </li>
             </ul>
            <div class="tab-content">
-             <!-- Tab 1: 基础事件开关 -->
-             <div class="tab-pane fade show active" id="editTabEvents" role="tabpanel">
-               <div class="row g-2">
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_add" id="editNotifyAdd"><label class="form-check-label small" for="editNotifyAdd">新增操作</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_delete" id="editNotifyDelete"><label class="form-check-label small" for="editNotifyDelete">删除操作（含批量删除/清空）</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_update" id="editNotifyUpdate"><label class="form-check-label small" for="editNotifyUpdate">修改/编辑操作</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_reminder" id="editNotifyReminder"><label class="form-check-label small" for="editNotifyReminder">纪念日提醒</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="editNotifyBroadcast"><label class="form-check-label small" for="editNotifyBroadcast">站内广播</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_security" id="editNotifySecurity"><label class="form-check-label small" for="editNotifySecurity">安全风控</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_system" id="editNotifySystem" checked><label class="form-check-label small" for="editNotifySystem">系统配置/同步</label></div></div>
-                 <div class="col-sm-6"><div class="form-check"><input class="form-check-input" type="checkbox" name="notify_on_status_change" id="editNotifyStatusChange"><label class="form-check-label small" for="editNotifyStatusChange">状态变更/还原</label></div></div>
-               </div>
-               <div class="form-text small text-muted mt-1">勾选大类事件开关后，可在「推送配置矩阵」中精细控制每个页面的推送范围。</div>
-             </div>
+              <!-- Tab 1: 基础事件开关 -->
+              <div class="tab-pane fade show active" id="editTabEvents" role="tabpanel">
+                <div class="d-flex justify-content-end align-items-center mb-1">
+                  <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="eventSelectAll('edit')">全选</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="eventClearAll('edit')">清空</button>
+                  </div>
+                </div>
+                <div class="row g-2">
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_add" id="editNotifyAdd"><label class="form-check-label small" for="editNotifyAdd">新增操作</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_delete" id="editNotifyDelete"><label class="form-check-label small" for="editNotifyDelete">删除操作（含批量删除/清空）</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_update" id="editNotifyUpdate"><label class="form-check-label small" for="editNotifyUpdate">修改/编辑操作</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_reminder" id="editNotifyReminder"><label class="form-check-label small" for="editNotifyReminder">纪念日提醒</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_broadcast" id="editNotifyBroadcast"><label class="form-check-label small" for="editNotifyBroadcast">站内广播</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_security" id="editNotifySecurity"><label class="form-check-label small" for="editNotifySecurity">安全风控</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_system" id="editNotifySystem" checked><label class="form-check-label small" for="editNotifySystem">系统配置/同步</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_status_change" id="editNotifyStatusChange"><label class="form-check-label small" for="editNotifyStatusChange">状态变更/还原</label></div></div>
+                </div>
+                <div class="form-text small text-muted mt-1">勾选大类事件开关后，可在「推送配置矩阵」中精细控制每个页面的推送范围。</div>
+              </div>
 
              <!-- Tab 2: 推送配置矩阵（页面×事件） -->
              <div class="tab-pane fade" id="editTabMatrix" role="tabpanel">
@@ -733,35 +757,47 @@
                </div>
               </div>
 
-              <!-- V10.3: Tab 4: 监控范围 -->
-              <div class="tab-pane fade" id="editTabMonitor" role="tabpanel">
-                <div class="form-text small text-muted mb-2">
-                  <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。留空 = 不限制（推送全部）。
-                </div>
-                <h6 class="text-muted mb-2"><i class="fa-solid fa-user-shield me-1"></i>监控用户（可选）</h6>
-                <div class="border rounded-3 bg-light p-2 mb-3" style="max-height: 150px; overflow-y: auto;">
-                  {% if all_users %}
-                  {% for u in all_users %}
-                  <div class="form-check">
-                    <input class="form-check-input monitor-user-cb" type="checkbox" value="{{ u.id }}" id="edit_monitor_user_{{ u.id }}">
-                    <label class="form-check-label small" for="edit_monitor_user_{{ u.id }}">{{ u.username }}</label>
-                  </div>
-                  {% endfor %}
-                  {% else %}
-                  <span class="small text-muted">暂无普通用户</span>
-                  {% endif %}
-                </div>
-                <h6 class="text-muted mb-2"><i class="fa-solid fa-filter me-1"></i>监控事件类型（可选）</h6>
-                <div class="border rounded-3 bg-light p-2">
-                  {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
-                  <div class="form-check d-inline-block me-3">
-                    <input class="form-check-input monitor-event-cb" type="checkbox" value="{{ ev_key }}" id="edit_monitor_ev_{{ ev_key }}">
-                    <label class="form-check-label small" for="edit_monitor_ev_{{ ev_key }}">{{ ev_label }}</label>
-                  </div>
-                  {% endfor %}
-                </div>
-                <div class="form-text small text-muted mt-2">不勾选任何用户 = 推送所有用户的操作；不勾选任何事件 = 推送所有事件类型。</div>
-              </div>
+               <!-- V10.3: Tab 4: 监控范围 -->
+               <div class="tab-pane fade" id="editTabMonitor" role="tabpanel">
+                 <div class="form-text small text-muted mb-2">
+                   <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。留空 = 不限制（推送全部）。
+                 </div>
+                 <div class="d-flex justify-content-between align-items-center mb-1">
+                   <h6 class="text-muted mb-0"><i class="fa-solid fa-user-shield me-1"></i>监控用户（可选）</h6>
+                   <div class="btn-group btn-group-sm">
+                     <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="monitorUserSelectAll('edit')">全选</button>
+                     <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="monitorUserClearAll('edit')">清空</button>
+                   </div>
+                 </div>
+                 <div class="border rounded-3 bg-light p-2 mb-3" style="max-height: 150px; overflow-y: auto;">
+                   {% if all_users %}
+                   {% for u in all_users %}
+                   <div class="form-check">
+                     <input class="form-check-input monitor-user-cb" type="checkbox" value="{{ u.id }}" id="edit_monitor_user_{{ u.id }}">
+                     <label class="form-check-label small" for="edit_monitor_user_{{ u.id }}">{{ u.username }}{% if u.is_admin %}（管理员）{% endif %}</label>
+                   </div>
+                   {% endfor %}
+                   {% else %}
+                   <span class="small text-muted">暂无用户</span>
+                   {% endif %}
+                 </div>
+                 <div class="d-flex justify-content-between align-items-center mb-1">
+                   <h6 class="text-muted mb-0"><i class="fa-solid fa-filter me-1"></i>监控事件类型（可选）</h6>
+                   <div class="btn-group btn-group-sm">
+                     <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="monitorEventSelectAll('edit')">全选</button>
+                     <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="monitorEventClearAll('edit')">清空</button>
+                   </div>
+                 </div>
+                 <div class="border rounded-3 bg-light p-2">
+                   {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                   <div class="form-check d-inline-block me-3">
+                     <input class="form-check-input monitor-event-cb" type="checkbox" value="{{ ev_key }}" id="edit_monitor_ev_{{ ev_key }}">
+                     <label class="form-check-label small" for="edit_monitor_ev_{{ ev_key }}">{{ ev_label }}</label>
+                   </div>
+                   {% endfor %}
+                 </div>
+                 <div class="form-text small text-muted mt-2">不勾选任何用户 = 推送所有用户的操作；不勾选任何事件 = 推送所有事件类型。</div>
+               </div>
              </div>
           </div>
          <div class="modal-footer border-light">
@@ -821,6 +857,48 @@ function matrixClearAll(prefix) {
   const table = document.getElementById(prefix + 'MatrixTable');
   if (table) {
     table.querySelectorAll('input.matrix-cb').forEach(cb => { cb.checked = false; });
+  }
+}
+
+// V10.5: 基础事件开关全选/清空
+function eventSelectAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabEvents');
+  if (tab) {
+    tab.querySelectorAll('input.event-switch-cb').forEach(cb => { cb.checked = true; });
+  }
+}
+function eventClearAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabEvents');
+  if (tab) {
+    tab.querySelectorAll('input.event-switch-cb').forEach(cb => { cb.checked = false; });
+  }
+}
+
+// V10.5: 监控范围 - 监控用户全选/清空
+function monitorUserSelectAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabMonitor');
+  if (tab) {
+    tab.querySelectorAll('input.monitor-user-cb').forEach(cb => { cb.checked = true; });
+  }
+}
+function monitorUserClearAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabMonitor');
+  if (tab) {
+    tab.querySelectorAll('input.monitor-user-cb').forEach(cb => { cb.checked = false; });
+  }
+}
+
+// V10.5: 监控范围 - 监控事件类型全选/清空
+function monitorEventSelectAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabMonitor');
+  if (tab) {
+    tab.querySelectorAll('input.monitor-event-cb').forEach(cb => { cb.checked = true; });
+  }
+}
+function monitorEventClearAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabMonitor');
+  if (tab) {
+    tab.querySelectorAll('input.monitor-event-cb').forEach(cb => { cb.checked = false; });
   }
 }
 

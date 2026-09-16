@@ -182,6 +182,16 @@ def register_ai_routes(app, log_action=None):
         db.session.commit()
 
         safe_log('AI 新建会话', f'会话: [{title}]', user=current_user)
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                f'AI新建会话',
+                f'操作人：{current_user.username} | 页面：AI助手 | 会话：[{title}]',
+                page_key='ai_assistant', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({'code': 200, 'data': {
             'id': chat_session.id,
             'title': chat_session.title
@@ -209,6 +219,16 @@ def register_ai_routes(app, log_action=None):
         db.session.commit()
 
         safe_log('AI 重命名会话', f'会话 #{session_id} → [{title}]', user=current_user)
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                f'AI重命名会话',
+                f'操作人：{current_user.username} | 页面：AI助手 | 会话 #{session_id} → [{title}]',
+                page_key='ai_assistant', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({'code': 200, 'data': {'id': chat_session.id, 'title': title}})
 
     @app.route('/api/ai/sessions/<int:session_id>/delete', methods=['POST', 'DELETE'])

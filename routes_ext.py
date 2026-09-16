@@ -2222,6 +2222,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         filename = f"banquet_{b.id}_{b.title}_ledger.csv"
         response.headers['Content-Disposition'] = f"attachment; filename={urllib.parse.quote(filename)}"
         safe_log('导出宴席台账', f"导出了宴席 [{b.title}] 的全部礼金记录")
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'导出宴席台账',
+                f'操作人：{current_user.username} | 页面：专属宴席 | 宴席：{b.title} | 记录数：{len(records)}',
+                page_key='banquets', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return response
 
     @app.route('/banquet/<int:banquet_id>/import_records', methods=['POST'])
@@ -2927,6 +2937,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 share.is_active = not share.is_active
                 
         db.session.commit()
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
+                f'切换共享链接',
+                f'操作人：{current_user.username} | 页面：礼金账本 | 状态：{"启用" if share.is_active else "禁用"}',
+                page_key='ledger', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({
             'success': True,
             'is_active': share.is_active,
@@ -3115,7 +3135,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                                ALL_PAGES=_PAGE_NAMES, EVENT_COLUMNS=_EVENT_COLUMNS,
                                PAGE_EVENT_MATRIX=_PAGE_EVENT_MATRIX,
                                DEFAULT_TEMPLATES=_DEFAULT_TEMPLATES,
-                               all_users=User.query.filter_by(is_admin=False).all())
+                               all_users=User.query.order_by(User.is_admin.desc(), User.id).all())
 
     @app.route('/admin/webhooks/create', methods=['POST'])
     @login_required
@@ -3590,7 +3610,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         authorized_users = User.query.filter_by(backup_authorized=True, is_admin=False).all() if hasattr(User, 'backup_authorized') else []
         # V6: 获取有定时任务权限的普通用户列表
         task_authorized_users = User.query.filter_by(scheduled_task_authorized=True, is_admin=False).all() if hasattr(User, 'scheduled_task_authorized') else []
-        all_users = User.query.filter_by(is_admin=False).all()
+        all_users = User.query.order_by(User.is_admin.desc(), User.id).all()
         # V3: 检查加密密码是否已配置
         has_encrypt_password = bool(config.backup_encrypt_password)
         # V8: 加密密码明文回显（用户要求：未勾选"清除"时回显已输入密码）
@@ -3900,6 +3920,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"gift_bookkeeping_backup_{timestamp}.db"
         safe_log('下载本地备份', f"下载了当前数据库备份文件: {filename}")
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'下载本地备份',
+                f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{filename}',
+                page_key='admin_backups', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
 
         # V7 修复：普通用户下载时生成仅含本人数据的临时库，防止越权获取他人数据
         if not current_user.is_admin:
@@ -4095,6 +4125,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         try:
             file.save(save_path)
             safe_log('上传附件文件', f"文件: {filename}")
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                    f'上传附件文件',
+                    f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{filename}',
+                    page_key='admin_backups', user_name=current_user.username,
+                    operator_id=current_user.id
+                )
+            except Exception:
+                pass
 
             # V3: 尝试上传到 WebDAV
             try:
@@ -4208,6 +4248,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     shutil.rmtree(tmp_dir, ignore_errors=True)
                     if ok:
                         safe_log('恢复WebDAV备份', f"普通用户 {current_user.username} 数据级合并恢复成功（文件: {target_filename}）: {msg}")
+                        try:
+                            trigger_webhook_event(
+                                WebhookConfig.query.filter_by(is_enabled=True).all(), 'restore',
+                                f'恢复WebDAV备份',
+                                f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{target_filename} | 方式：数据级合并',
+                                page_key='admin_backups', user_name=current_user.username,
+                                operator_id=current_user.id
+                            )
+                        except Exception:
+                            pass
                         flash(f'已成功恢复您的个人数据（{msg}），系统与其他用户数据不受影响。', 'success')
                     else:
                         flash(f'恢复失败：{msg}', 'danger')
@@ -4275,6 +4325,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         password = (data.get('webdav_password') or data.get('password') or '').strip() or config.password
         ok, msg = test_webdav_connection(server_url, username, password)
         safe_log('测试WebDAV连接', f"结果: {'成功' if ok else '失败'}, 消息: {msg}")
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                f'测试WebDAV连接',
+                f'操作人：{current_user.username} | 页面：WebDAV备份 | 结果：{"成功" if ok else "失败"}',
+                page_key='admin_backups', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({'success': ok, 'message': msg})
 
     @app.route('/admin/backups/delete', methods=['POST'])

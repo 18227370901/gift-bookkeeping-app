@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '41004872-7087-4796-974c-c81744a7c34d'
-  PropagateID: '41004872-7087-4796-974c-c81744a7c34d'
-  ReservedCode1: 'd6391432-a9f9-40bd-9a10-ef94f339e187'
-  ReservedCode2: 'd6391432-a9f9-40bd-9a10-ef94f339e187'
+  ProduceID: '130341ea-f6b9-4bf2-819c-cd977d2a0c13'
+  PropagateID: '130341ea-f6b9-4bf2-819c-cd977d2a0c13'
+  ReservedCode1: 'bee2b9d6-8bb4-42cd-8a8d-0cab0af73dfc'
+  ReservedCode2: 'bee2b9d6-8bb4-42cd-8a8d-0cab0af73dfc'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -428,6 +428,23 @@ AIGC:
 - routes_ai.py 3 处 `trigger_webhook_event` 调用补充 `operator_id=current_user.id`
 - 修复前 `_monitor_matches` 因 `operator_id` 为 None 跳过用户过滤，导致监控配置形同虚设
 - 1 处合理缺失（`check_and_trigger_due_reminders` 后台定时任务，无 current_user 上下文）
+
+### V10.5 Webhook 推送系统增强（2026-09-16）
+
+#### 监控范围增加管理员用户
+- `routes_ext.py` 两处 `all_users` 查询从 `filter_by(is_admin=False)` 改为包含全部用户（管理员排前）
+- `admin_webhooks.html` 监控用户列表显示管理员标识"（管理员）"
+
+#### 基础事件与监控范围页面增加全选/清空按钮
+- Tab1 基础事件开关：新增全选/清空按钮（`eventSelectAll`/`eventClearAll`）
+- Tab4 监控范围：监控用户和监控事件类型分别新增全选/清空按钮（4 个 JS 函数）
+- 与 Tab2 推送配置矩阵的全选/清空按钮保持一致
+
+#### Webhook 推送全覆盖审计与补全（14 处）
+- **app.py 7 处**：login（成功+失败）、register、forgot_password、logout、admin_user_credentials、export_csv
+- **routes_ext.py 6 处**：toggle_share_ledger、banquet_export_excel、admin_upload_attachment、admin_test_webdav、admin_download_local_backup、admin_restore_webdav_backup（普通用户数据级合并路径）
+- **routes_ai.py 2 处**：api_ai_session_create、api_ai_session_rename
+- **不补充 2 处**：admin_test_webhook（循环推送风险）、api_ai_chat（高频调用噪音）
 
 ## 📂 项目文件结构
 

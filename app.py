@@ -1156,6 +1156,16 @@ def login():
             session['login_time'] = datetime.now().timestamp()
             session['last_activity'] = datetime.now().timestamp()
             log_action('用户登录', f'用户成功登录系统', user=user)
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                    f'用户登录',
+                    f'操作人：{user.username} | 页面：系统安全 | 结果：登录成功',
+                    page_key='security', user_name=user.username,
+                    operator_id=user.id
+                )
+            except Exception:
+                pass
             flash(f'欢迎回来，{user.username}！', 'success')
             # 登录时主动检测是否有当前用户未读的有效广播并提示
             try:
@@ -1180,6 +1190,16 @@ def login():
             new_fail_count = cur_fail_count + 1
             LOGIN_FAIL_COUNTS[username] = new_fail_count
             log_action('登录失败', f'尝试登录用户名 [{username}] 失败（连续失败{new_fail_count}次）')
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                    f'登录失败',
+                    f'操作人：{username} | 页面：系统安全 | 结果：登录失败（连续{new_fail_count}次）',
+                    page_key='security', user_name=username,
+                    operator_id=None
+                )
+            except Exception:
+                pass
 
             if new_fail_count >= max_attempts:
                 lock_duration = lockout_seconds
@@ -1287,6 +1307,16 @@ def register():
         db.session.commit()
 
         log_action('用户注册', f'新用户 [{username}] 识别邀请码成功注册账号', user=user)
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                f'新用户注册',
+                f'操作人：{username} | 页面：系统安全 | 新用户ID：{user.id}',
+                page_key='security', user_name=username,
+                operator_id=user.id
+            )
+        except Exception:
+            pass
         flash('注册成功！当前账号暂无功能页面权限，登录后请在「权限申请」页面提交权限申请工单，等待管理员审批后即可使用各功能模块。', 'success')
         return redirect(url_for('login'))
 
@@ -1441,6 +1471,16 @@ def forgot_password():
             db.session.commit()
 
             log_action('重置密码', f'用户成功重置个人密码', user=user)
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                    f'找回密码重置',
+                    f'操作人：{user.username} | 页面：系统安全 | 结果：密码重置成功',
+                    page_key='security', user_name=user.username,
+                    operator_id=user.id
+                )
+            except Exception:
+                pass
             flash('密码重置成功！请使用新密码重新登录。', 'success')
             return redirect(url_for('login'))
 
@@ -1450,6 +1490,16 @@ def forgot_password():
 def logout():
     if current_user.is_authenticated:
         log_action('退出登录', f'用户退出系统登录')
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'用户退出登录',
+                f'操作人：{current_user.username} | 页面：系统安全',
+                page_key='security', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         current_user.session_token = None
         db.session.commit()
     logout_user()
@@ -2566,6 +2616,16 @@ def admin_user_credentials(user_id):
     security_qa = user.get_decrypted_security_answers()
 
     log_action('查看安全凭证', f'超级管理员查看了用户 [{user.username}] 的安全凭证详情')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+            f'查看安全凭证',
+            f'操作人：{current_user.username} | 页面：用户管理 | 目标用户：{user.username}',
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     return jsonify({
         'code': 200,
         'message': 'success',
@@ -2763,6 +2823,16 @@ def export_csv():
     response = Response(output.getvalue(), mimetype='text/csv; charset=utf-8')
     response.headers['Content-Disposition'] = 'attachment; filename=gift_records.csv'
     log_action('导出数据', f'用户导出了 {len(records)} 条礼金记录 CSV 文件')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+            f'导出礼金数据',
+            f'操作人：{current_user.username} | 页面：礼金账本 | 导出记录数：{len(records)}',
+            page_key='ledger', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     return response
 
 

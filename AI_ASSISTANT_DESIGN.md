@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'f35c9a19-71cb-4086-8c5d-ffb873bf55eb'
-  PropagateID: 'f35c9a19-71cb-4086-8c5d-ffb873bf55eb'
-  ReservedCode1: 'ebd4885e-d3de-4df9-a860-21ef72b1171e'
-  ReservedCode2: 'ebd4885e-d3de-4df9-a860-21ef72b1171e'
+  ProduceID: 'a8465ea2-dad8-4996-ab9e-8321e8c3e190'
+  PropagateID: 'a8465ea2-dad8-4996-ab9e-8321e8c3e190'
+  ReservedCode1: 'fba5dcd9-25b2-427f-b165-891a06933612'
+  ReservedCode2: 'fba5dcd9-25b2-427f-b165-891a06933612'
 ---
 
 # AI 助手模块技术设计方案
@@ -1689,3 +1689,90 @@ V10.4 批次覆盖 3 个方向：WebDAV 保存路由空值校验误拦截修复�
 | `templates/banquet_detail.html` | 批量删除条件修改 |
 | `templates/recycle_bin.html` | 移除 == 1 仅查看模式标签 |
 | `templates/admin_users.html` | 权限标签和下拉选项描述更新 |
+
+## 第十九章 V10.5 Webhook 推送系统增强（2026-09-16）
+
+### 19.1 需求总览
+
+V10.5 批次覆盖 3 个方向：监控范围增加管理员用户、基础事件与监控范围页面增加全选/清空按钮、Webhook 推送全覆盖审计与补全。
+
+| 编号 | 模块 | 类型 | 需求 |
+|------|------|------|------|
+| 1 | Webhook 监控 | 增强 | 监控范围用户列表仅含普通用户，管理员操作无法被监控推送 |
+| 2 | Webhook 配置 UI | 增强 | 基础事件开关 Tab 和监控范围 Tab 缺少全选/清空按钮（矩阵 Tab 已有） |
+| 3 | Webhook 推送覆盖 | 审计补全 | 全项目 131 个路由函数系统性审计，14 个写操作缺少推送调用 |
+
+### 19.2 方向一：监控范围增加管理员用户
+
+**问题**：`routes_ext.py` 行 3118 和 3593 的 `all_users` 查询使用 `filter_by(is_admin=False)`，管理员不在监控用户勾选列表中，导致管理员操作无法被监控推送（`_monitor_matches` 中 `operator_id not in monitor_uids → return False`）。
+
+**方案**：
+1. `routes_ext.py` 两处 `all_users` 查询改为 `User.query.order_by(User.is_admin.desc(), User.id).all()`（管理员排前面）
+2. `admin_webhooks.html` 新增/编辑模态框中，用户名后增加管理员标识 `{{ u.username }}{% if u.is_admin %}（管理员）{% endif %}`
+3. 空列表提示从"暂无普通用户"改为"暂无用户"
+
+### 19.3 方向二：基础事件与监控范围页面增加全选/清空按钮
+
+**问题**：Tab2 推送配置矩阵已有全选/清空按钮（`matrixSelectAll`/`matrixClearAll`），但 Tab1 基础事件开关（8 个复选框）和 Tab4 监控范围（监控用户+监控事件类型）缺少。
+
+**方案**：
+- Tab1 新增/编辑模态框：在事件开关区域上方添加全选/清空按钮，复选框添加 `event-switch-cb` class
+- Tab4 新增/编辑模态框：监控用户区域添加用户全选/清空按钮，监控事件类型区域添加事件全选/清空按钮
+- JS 新增 6 个函数：`eventSelectAll`、`eventClearAll`、`monitorUserSelectAll`、`monitorUserClearAll`、`monitorEventSelectAll`、`monitorEventClearAll`，均接收 prefix 参数区分 new/edit
+
+### 19.4 方向三：推送全覆盖审计与补全
+
+#### 审计总览
+
+| 文件 | 路由函数总数 | 已有推送 | 无需推送 | 缺少推送 |
+|------|------------|---------|---------|---------|
+| app.py | 36 | 23 | 6 | 7（含登录成功+失败2处） |
+| routes_ext.py | 82 | 62 | 16 | 6 |
+| routes_ai.py | 13 | 3 | 8 | 2 |
+| **合计** | **131** | **88** | **30** | **14** |
+
+#### app.py 补充 7 处推送
+
+| 路由 | event_type | page_key | 说明 |
+|------|------------|----------|------|
+| `login`（成功） | security | security | 登录成功安全事件 |
+| `login`（失败） | security | security | 登录失败安全事件 |
+| `register` | system | security | 新用户注册 |
+| `forgot_password` | security | security | 密保重置密码 |
+| `logout` | security | security | 退出登录 |
+| `admin_user_credentials` | security | admin_users | 查看用户明文密码+密保 |
+| `export_csv` | security | ledger | 批量数据导出 |
+
+#### routes_ext.py 补充 6 处推送
+
+| 路由 | event_type | page_key | 说明 |
+|------|------------|----------|------|
+| `toggle_share_ledger` | status_change | ledger | 切换共享链接启用/禁用 |
+| `banquet_export_excel` | security | banquets | 导出宴席台账CSV |
+| `admin_upload_attachment` | system | admin_backups | 上传附件文件 |
+| `admin_test_webdav` | system | admin_backups | 测试WebDAV连接 |
+| `admin_download_local_backup` | security | admin_backups | 下载本地数据库备份 |
+| `admin_restore_webdav_backup`（普通用户路径） | restore | admin_backups | 数据级合并恢复成功 |
+
+#### routes_ai.py 补充 2 处推送
+
+| 路由 | event_type | page_key | 说明 |
+|------|------------|----------|------|
+| `api_ai_session_create` | system | ai_assistant | 创建AI会话 |
+| `api_ai_session_rename` | system | ai_assistant | 重命名AI会话 |
+
+#### 不补充推送的函数（2 个，用户确认）
+
+| 路由 | 原因 |
+|------|------|
+| `admin_test_webhook` | 循环推送风险：测试推送本身即触发 webhook |
+| `api_ai_chat` | AI 聊天高频调用，推送会造成大量噪音 |
+
+### 19.5 涉及文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `routes_ext.py` | 2 处 all_users 查询含管理员；6 处补充 trigger_webhook_event |
+| `app.py` | 7 处补充 trigger_webhook_event（含登录成功+失败） |
+| `routes_ai.py` | 2 处补充 trigger_webhook_event |
+| `templates/admin_webhooks.html` | Tab1/Tab4 全选清空按钮；管理员标识；6 个 JS 函数 |
