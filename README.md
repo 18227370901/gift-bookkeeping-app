@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '5b7d3810-2500-43a0-b6d1-93ee36eda85b'
-  PropagateID: '5b7d3810-2500-43a0-b6d1-93ee36eda85b'
-  ReservedCode1: '45384f52-61a2-44f4-8e4b-be53e02ff152'
-  ReservedCode2: '45384f52-61a2-44f4-8e4b-be53e02ff152'
+  ProduceID: '67747d5e-541c-449f-ba1d-dd16ddabc6ef'
+  PropagateID: '67747d5e-541c-449f-ba1d-dd16ddabc6ef'
+  ReservedCode1: 'b3f3477e-c85b-442b-b6d9-a27bb92dac2b'
+  ReservedCode2: 'b3f3477e-c85b-442b-b6d9-a27bb92dac2b'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -461,6 +461,11 @@ AIGC:
 - 验证通过项（均有成功推送记录）：查看凭证、人情对账同步、用户管理重置密码/重置密保/禁用/查看凭证/启用、审计日志单选删除/批量删除、AI 授权授权/取消授权、Webhook 新增/编辑通道、WebDAV 下载备份、导出 CSV
 - 验证数据已清理：临时通道 #4 已删除、验证推送日志（id=42~48）已删除，基线恢复 max_id=41
 - 待用户自行验证：WebDAV 上传覆盖恢复（代码已确认含推送）
+
+#### 服务进程规范化（11443 端口双实例 → 单实例）
+- 现象：PID 12304（系统 Python）与 PID 41372（TeleAgent 运行时）同时 LISTENING 11443
+- 处理：杀掉两个 `app.py` 旧实例，统一用系统 Python 后台启动单实例（HTTP 200、监听唯一）
+- 重启规范见 `AI_ASSISTANT_DESIGN.md` 第二十章 20.4（先杀旧实例 → 确认无监听 → `Start-Process -WindowStyle Hidden` 启动 → 验证监听与页面）
 
 ## 📂 项目文件结构
 

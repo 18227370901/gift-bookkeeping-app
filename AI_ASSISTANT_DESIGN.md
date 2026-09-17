@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'a8465ea2-dad8-4996-ab9e-8321e8c3e190'
-  PropagateID: 'a8465ea2-dad8-4996-ab9e-8321e8c3e190'
-  ReservedCode1: 'fba5dcd9-25b2-427f-b165-891a06933612'
-  ReservedCode2: 'fba5dcd9-25b2-427f-b165-891a06933612'
+  ProduceID: '4a7d1e93-f5af-452a-8caf-b7baebbb69c2'
+  PropagateID: '4a7d1e93-f5af-452a-8caf-b7baebbb69c2'
+  ReservedCode1: '4eb2537b-1dba-4a94-b2b9-a1f588a6e483'
+  ReservedCode2: '4eb2537b-1dba-4a94-b2b9-a1f588a6e483'
 ---
 
 # AI 助手模块技术设计方案
@@ -1776,3 +1776,88 @@ V10.5 批次覆盖 3 个方向：监控范围增加管理员用户、基础事�
 | `app.py` | 7 处补充 trigger_webhook_event（含登录成功+失败） |
 | `routes_ai.py` | 2 处补充 trigger_webhook_event |
 | `templates/admin_webhooks.html` | Tab1/Tab4 全选清空按钮；管理员标识；6 个 JS 函数 |
+
+## 第二十章 V10.6 Webhook 推送修复与服务进程规范化（2026-09-17）
+
+### 20.1 需求总览
+
+本轮基于 V10.5（commit 858fb3e）处理两件事：
+1. **用户问题清单**：多项功能 Webhook 推送不生效；用户管理-查看凭证一直卡在"正在使用 AES-256-GCM 安全解密凭证..."
+2. **服务进程规范化**：11443 端口出现两个 python 进程同时监听（双实例），需统一为单实例。
+
+### 20.2 根因分析
+
+#### 20.2.1 查看凭证卡死（admin_users.html）
+
+`fetchAndRenderCredentials()` JS 引用不存在的元素 `credVerifySection`，抛 `TypeError` 后 loading 层永不消失。
+
+**修复**：在凭证弹窗中补全管理员二次验证界面（原密码/密保输入 + 验证按钮 + `submitAdminVerifyCred()` 提交逻辑）。
+
+#### 20.2.2 Webhook 推送不生效（webhook_utils.py）
+
+启用中的通道 #2 的 `notify_pages` 页面矩阵缺项，`_page_matches()` 把本应推送的事件过滤掉，导致多个页面的操作"静默不推送"。
+
+**修复**：`webhook_utils.py` 的 `PAGE_EVENT_MATRIX` 补全——
+
+| 页面 | 补全事件 |
+|------|----------|
+| `ledger` | + `security`（导出 CSV 等） |
+| `admin_users` | + `security`（重置密码/重置密保/查看凭证） |
+| `admin_logs` | + `security`（审计日志删除） |
+| `admin_backups` | + `security`、`restore`（下载备份/上传恢复） |
+| `ai_config` | + `status_change`（AI 授权开关） |
+| `admin_webhooks` | 保留 `system`（新增/编辑通道） |
+
+同时将数据库 `webhook_configs.notify_pages` 同步更新（通道 #2/#3），使存量数据与代码一致。
+
+### 20.3 浏览器逐项验证结果
+
+验证基线 `webhook_logs.max_id=41`，验证方式为浏览器实际操作 + 查推送日志（webhook_id=2、is_success=1）：
+
+| 验证项 | 事件类型 | 结果 |
+|--------|----------|------|
+| 查看凭证 | security | ✅ |
+| 人情对账-同步 | system | ✅ |
+| 用户管理-重置密码/重置密保/禁用/查看凭证/启用 | security/status_change | ✅ |
+| 审计日志-单选删除/批量删除 | security | ✅ |
+| AI 授权-授权/取消授权 | status_change | ✅ |
+| Webhook-新增通道/编辑通道 | system | ✅ |
+| WebDAV-下载备份 | security | ✅ |
+| 导出 CSV（两个入口） | security | ✅ |
+| WebDAV-上传覆盖恢复 | restore | ⏸ 用户自行测试（代码已确认含推送） |
+
+**验证期间发现**：导出 CSV 时浏览器出现同秒两条推送（IDM 下载拦截器对 `/export/csv` 重复发请求所致），服务端代码单次触发，非应用缺陷。
+
+### 20.4 服务进程规范化（双实例→单实例）
+
+**现象**：11443 端口被 PID 12304（系统 Python，昨日启动）与 PID 41372（TeleAgent 运行时，今日启动）同时 LISTENING。
+
+**处理**：杀掉两个 `app.py` 旧实例，统一用系统 Python（`C:\Users\cheng\AppData\Local\Programs\Python\Python312\python.exe`）后台启动单实例，验证 HTTP 200、监听唯一。
+
+**启动规范**（写入手册，后续重启只保留一个）：
+```powershell
+# 1. 先停止旧实例
+Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
+  Where-Object { $_.CommandLine -like '*app.py*' } |
+  ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+
+# 2. 确认 11443 无监听
+netstat -ano | findstr ":11443" | findstr "LISTENING"
+
+# 3. 后台启动单实例（勿用 -RedirectStandardOutput/-RedirectStandardError，会卡死）
+Start-Process -FilePath "C:\Users\cheng\AppData\Local\Programs\Python\Python312\python.exe" `
+  -ArgumentList "app.py" `
+  -WorkingDirectory "C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app" `
+  -WindowStyle Hidden
+
+# 4. 验证
+netstat -ano | findstr ":11443" | findstr "LISTENING"   # 应只有一行
+```
+
+### 20.5 涉及文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `templates/admin_users.html` | 补管理员二次验证界面（修复查看凭证卡死） |
+| `webhook_utils.py` | PAGE_EVENT_MATRIX 补 security/restore/status_change 事件 |
+| `README.md` | 新增 V10.6 变更日志 |
