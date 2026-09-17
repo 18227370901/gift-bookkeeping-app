@@ -1127,14 +1127,14 @@ def login():
         # 1. 检查锁定状态
         if is_locked:
             flash(f'账号 [{username}] 密码错误过多，触发安全保护！请等待 {lock_wait} 秒后再试。', 'danger')
-            return redirect(url_for('login', username=username))
+            return render_template('login.html', require_captcha=True, lock_wait=lock_wait, username=username)
 
         # 2. 检查验证码（如果达到最大尝试次数，强制校验验证码）
         if require_captcha:
             real_captcha = session.get('login_captcha_ans')
             if not user_captcha or user_captcha != real_captcha:
                 flash('验证码错误或未输入，请重新计算并输入！', 'danger')
-                return redirect(url_for('login', username=username))
+                return render_template('login.html', require_captcha=True, username=username)
 
         # 3. 校验账号密码
         user = User.query.filter_by(username=username).first()
@@ -1142,7 +1142,7 @@ def login():
             if not user.is_active:
                 log_action('登录失败', f'已被禁用的账号 [{username}] 尝试登录', user=user)
                 flash('该账号已被禁用/冻结，无法登录使用，请联系管理员处理！', 'danger')
-                return redirect(url_for('login', username=username))
+                return render_template('login.html', require_captcha=require_captcha, username=username)
             
             # 登录成功，清除该账号在服务端的失败计数与锁定状态
             LOGIN_FAIL_COUNTS.pop(username, None)
@@ -1208,14 +1208,14 @@ def login():
                     LOGIN_LOCK_UNTILS[username] = now + lock_duration
                     lock_desc = f"{lock_duration // 60} 分钟" if lock_duration >= 60 and lock_duration % 60 == 0 else f"{lock_duration} 秒"
                     flash(f'账号 [{username}] 密码错误次数达到 {new_fail_count} 次，需要验证码且必须等待 {lock_desc} 后才能再次尝试！', 'danger')
-                    return redirect(url_for('login', username=username))
+                    return render_template('login.html', require_captcha=True, lock_wait=lock_wait, username=username)
                 else:
                     flash(f'账号 [{username}] 密码错误次数达到 {new_fail_count} 次，请输入下方安全验证码！', 'danger')
-                    return redirect(url_for('login', username=username))
+                    return render_template('login.html', require_captcha=True, username=username)
             else:
                 remaining = max_attempts - new_fail_count
                 flash(f'用户名或密码错误，请重试。（账号 [{username}] 连续错误 {new_fail_count} 次，再错 {remaining} 次将触发验证码）', 'danger')
-                return redirect(url_for('login', username=username))
+                return render_template('login.html', require_captcha=require_captcha, username=username)
 
     # GET 请求处理
     username = request.args.get('username', '').strip()
@@ -1348,7 +1348,7 @@ def forgot_password():
             user = User.query.filter_by(username=username).first()
             if not user:
                 flash('找不到该用户名对应的账号！', 'danger')
-                return render_template('forgot_password.html', step='find_user')
+                return render_template('forgot_password.html', step='find_user', username=username)
 
             if not user.is_active:
                 flash('该账号已被锁定或禁用，无法找回密码！请联系系统管理员解锁账号。', 'danger')
@@ -1375,7 +1375,7 @@ def forgot_password():
             user = User.query.filter_by(username=username).first()
             if not user:
                 flash('用户不存在！', 'danger')
-                return redirect(url_for('forgot_password'))
+                return render_template('forgot_password.html', step='find_user', username=username)
 
             if not user.is_active:
                 flash('该账号已被锁定或禁用，无法重置密码！请联系系统管理员解锁账号。', 'danger')
@@ -1395,7 +1395,8 @@ def forgot_password():
                                        cur_fail_count=cur_fail_count, is_locked=True, lock_wait=lock_wait,
                                        max_security_attempts=max_security_attempts,
                                        remaining_attempts=0,
-                                       require_captcha=require_captcha)
+                                       require_captcha=require_captcha,
+                                       security_answer_1=security_answer_1, security_answer_2=security_answer_2)
 
             # 2. 检查验证码
             if require_captcha:
@@ -1406,7 +1407,8 @@ def forgot_password():
                                            cur_fail_count=cur_fail_count, is_locked=is_locked, lock_wait=lock_wait,
                                            max_security_attempts=max_security_attempts,
                                            remaining_attempts=max(0, max_security_attempts - cur_fail_count),
-                                           require_captcha=True)
+                                           require_captcha=True,
+                                           security_answer_1=security_answer_1, security_answer_2=security_answer_2)
 
             if not user.check_security_answers(security_answer_1, security_answer_2):
                 new_fail_count = FORGOT_SECURITY_FAIL_COUNTS.get(username, 0) + 1
@@ -1434,7 +1436,8 @@ def forgot_password():
                                            lock_wait=lock_duration,
                                            max_security_attempts=max_security_attempts,
                                            remaining_attempts=0,
-                                           require_captcha=True)
+                                           require_captcha=True,
+                                           security_answer_1=security_answer_1, security_answer_2=security_answer_2)
                 else:
                     remaining = max(0, max_security_attempts - new_fail_count)
                     flash(f'密保问题答案验证错误！您还剩 {remaining} 次尝试机会。', 'danger')
@@ -1442,7 +1445,8 @@ def forgot_password():
                                            cur_fail_count=new_fail_count, is_locked=False, lock_wait=0,
                                            max_security_attempts=max_security_attempts,
                                            remaining_attempts=remaining,
-                                           require_captcha=False)
+                                           require_captcha=False,
+                                           security_answer_1=security_answer_1, security_answer_2=security_answer_2)
 
             if new_password != confirm_password:
                 remaining = 0 if getattr(user, 'is_admin', False) and cur_fail_count >= max_security_attempts else max(0, max_security_attempts - cur_fail_count)
@@ -1451,7 +1455,8 @@ def forgot_password():
                                        cur_fail_count=cur_fail_count, is_locked=False, lock_wait=0,
                                        max_security_attempts=max_security_attempts,
                                        remaining_attempts=remaining,
-                                       require_captcha=require_captcha)
+                                       require_captcha=require_captcha,
+                                       security_answer_1=security_answer_1, security_answer_2=security_answer_2)
 
             # 验证新密码强度
             is_valid, msg = check_password_complexity(new_password)
@@ -1462,7 +1467,8 @@ def forgot_password():
                                        cur_fail_count=cur_fail_count, is_locked=False, lock_wait=0,
                                        max_security_attempts=max_security_attempts,
                                        remaining_attempts=remaining,
-                                       require_captcha=require_captcha)
+                                       require_captcha=require_captcha,
+                                       security_answer_1=security_answer_1, security_answer_2=security_answer_2)
 
             # 密保校验成功，清除该账号在找回密码服务端的失败计数与锁定状态
             FORGOT_SECURITY_FAIL_COUNTS.pop(username, None)

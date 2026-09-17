@@ -8,6 +8,7 @@ Webhook 与长连接通知工具模块
 
 import json
 import os
+import logging
 import urllib.parse
 import threading
 import time
@@ -16,6 +17,10 @@ import asyncio
 from datetime import datetime
 import requests
 import urllib3
+
+# Webhook 模块日志器
+logger = logging.getLogger('webhook_utils')
+logger.setLevel(logging.DEBUG)
 
 # 禁用 self-signed SSL 证书警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -110,8 +115,8 @@ def record_webhook_log(user_id, webhook_id, event_type, payload, status_code, re
         conn = sqlite3.connect(_resolve_db_file(), timeout=10)
         c = conn.cursor()
         c.execute(
-            """INSERT INTO webhook_logs 
-               (user_id, operator_id, webhook_id, event_type, payload, status_code, response_body, is_success, created_at) 
+            """INSERT INTO webhook_logs
+               (user_id, operator_id, webhook_id, event_type, payload, status_code, response_body, is_success, created_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 user_id or 1,
@@ -127,8 +132,8 @@ def record_webhook_log(user_id, webhook_id, event_type, payload, status_code, re
         )
         conn.commit()
         conn.close()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error("[Webhook] 写入推送日志失败: webhook_id=%s, event_type=%s, 错误: %s", webhook_id, event_type, e, exc_info=True)
 
 
 def validate_wecom_credentials(bot_id, bot_secret):
@@ -497,8 +502,8 @@ def _get_notify_pages(webhook):
         data = _json.loads(raw) if isinstance(raw, str) else raw
         if isinstance(data, dict):
             return data
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("[Webhook] 解析 notify_pages 失败: %s, 原始值: %s", e, raw[:200])
     return {}
 
 
@@ -524,8 +529,8 @@ def _get_monitor_user_ids(webhook):
         data = _json.loads(raw) if isinstance(raw, str) else raw
         if isinstance(data, list):
             return [int(uid) for uid in data if uid]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("[Webhook] 解析 monitor_user_ids 失败: %s, 原始值: %s", e, raw[:200])
     return []
 
 
@@ -537,8 +542,8 @@ def _get_monitor_event_types(webhook):
         data = _json.loads(raw) if isinstance(raw, str) else raw
         if isinstance(data, list):
             return data
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("[Webhook] 解析 monitor_event_types 失败: %s, 原始值: %s", e, raw[:200])
     return []
 
 
@@ -808,8 +813,16 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
 
                 s, c, b = _send_payload(url, payload, headers, timeout=12)
                 record_webhook_log(item.get("user_id"), item.get("id"), event_type, payload, c, b, s, operator_id=operator_id)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("[Webhook] 推送失败: channel_id=%s, event_type=%s, url=%s, 错误: %s",
+                             item.get("id"), event_type, item.get("url", "")[:100], e, exc_info=True)
+                # 尝试记录失败日志到数据库
+                try:
+                    record_webhook_log(item.get("user_id"), item.get("id"), event_type,
+                                       {"title": item.get("title", record_title), "error": str(e)},
+                                       0, f"推送异常: {e}", False, operator_id=operator_id)
+                except Exception:
+                    pass
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
@@ -884,11 +897,12 @@ def _wecom_listener_worker():
 
                 try:
                     _run_async(_run_bot_client(bot_id, bot_secret, wh_id, conn_type))
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error("[Webhook] 企微长连接监听异常: wh_id=%s, bot_id=%s, 错误: %s", wh_id, bot_id, e, exc_info=True)
 
             time.sleep(5)
-        except Exception:
+        except Exception as e:
+            logger.error("[Webhook] 监听线程异常: %s", e, exc_info=True)
             time.sleep(10)
 
 
