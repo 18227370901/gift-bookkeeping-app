@@ -8,6 +8,9 @@ WebDAV 客户端工具模块
 
 import os
 import io
+import time
+import shutil
+import tempfile
 import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -17,6 +20,13 @@ import urllib3
 
 # 禁用 self-signed SSL 证书警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# 尝试导入 pyzipper 用于 AES-256 加密 zip
+try:
+    import pyzipper
+    HAS_PYZIPPER = True
+except ImportError:
+    HAS_PYZIPPER = False
 
 
 def _normalize_url(url):
@@ -309,11 +319,15 @@ def list_backups(webdav_url_or_config, username=None, password=None, backup_path
 
 def download_backup(webdav_url_or_config, username=None, password=None, remote_filename=None, save_path=None, backup_path=None):
     """从 WebDAV 远端下载指定备份文件到本地"""
+    backup_subdir = None
     if hasattr(webdav_url_or_config, 'server_url') or hasattr(webdav_url_or_config, 'webdav_url'):
         cfg = webdav_url_or_config
-        if save_path is None and remote_filename is not None:
-            save_path = password
+        # 修正参数映射：当用 config 对象调用时，username 参数位实际传的是 remote_filename，password 位传的是 save_path
+        if remote_filename is None and username is not None:
             remote_filename = username
+            save_path = password
+            username = None
+            password = None
         webdav_url, username, password = _unpack_auth_params(cfg)
         if backup_path is None:
             backup_path = getattr(cfg, 'backup_path', None) or getattr(cfg, 'remote_dir', '')
@@ -322,6 +336,8 @@ def download_backup(webdav_url_or_config, username=None, password=None, remote_f
 
     if not webdav_url or not str(webdav_url).strip():
         return False, "未配置 WebDAV 服务器地址"
+    if not remote_filename:
+        return False, "未指定要下载的文件名"
 
     target_dir_url = _resolve_target_dir_url(webdav_url, backup_path)
     file_download_url = urllib.parse.urljoin(target_dir_url, urllib.parse.quote(remote_filename))
@@ -341,3 +357,200 @@ def download_backup(webdav_url_or_config, username=None, password=None, remote_f
         return False, "WebDAV 下载备份文件超时"
     except Exception as e:
         return False, f"WebDAV 下载异常: {str(e)}"
+
+
+def create_encrypted_zip(local_file_path, zip_password, output_path=None):
+    """
+    将本地文件创建为 AES-256 加密的 zip 包。
+    返回 (success, zip_path_or_error_msg)
+    """
+    if not HAS_PYZIPPER:
+        return False, "缺少 pyzipper 库，请运行 pip install pyzipper"
+    if not local_file_path or not os.path.exists(local_file_path):
+        return False, "本地文件不存在"
+    if not zip_password:
+        return False, "加密密码不能为空"
+
+    if output_path is None:
+        output_path = local_file_path + '.zip'
+
+    try:
+        with pyzipper.AESZipFile(output_path, 'w', compression=pyzipper.ZIP_LZMA, encryption=pyzipper.WZ_AES) as zf:
+            zf.setpassword(zip_password.encode('utf-8'))
+            zf.write(local_file_path, os.path.basename(local_file_path))
+        return True, output_path
+    except Exception as e:
+        return False, f"创建加密 zip 失败: {str(e)}"
+
+
+def upload_encrypted_backup(webdav_url_or_config, username=None, password=None, local_file_path=None, remote_filename=None, encrypt_password=None):
+    """
+    先将本地文件加密为 zip，再上传到 WebDAV。
+    encrypt_password 为 None 时不加密，直接上传原始文件。
+    """
+    if not local_file_path or not os.path.exists(local_file_path):
+        return False, "本地数据库文件不存在！"
+
+    if encrypt_password and HAS_PYZIPPER:
+        # 创建加密 zip 到临时目录
+        tmp_dir = tempfile.mkdtemp(prefix='gift_backup_')
+        tmp_zip = os.path.join(tmp_dir, os.path.basename(local_file_path) + '.zip')
+        ok, result = create_encrypted_zip(local_file_path, encrypt_password, tmp_zip)
+        if not ok:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            return False, result
+        try:
+            upload_path = tmp_zip
+            if not remote_filename:
+                remote_filename = f"gift_bookkeeping_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+            elif not remote_filename.endswith('.zip'):
+                remote_filename = remote_filename + '.zip'
+            success, msg = upload_backup(webdav_url_or_config, username, password, upload_path, remote_filename)
+            return success, msg
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+    else:
+        if not remote_filename:
+            remote_filename = f"gift_bookkeeping_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+        return upload_backup(webdav_url_or_config, username, password, local_file_path, remote_filename)
+
+
+def upload_file_to_webdav(webdav_url_or_config, username=None, password=None, local_file_path=None, remote_filename=None):
+    """
+    通用文件上传方法：上传任意本地文件到 WebDAV 远端。
+    如果 remote_filename 包含子目录（如 attachments/xxx），自动创建远端子目录。
+    """
+    # 如果文件名包含子目录路径，需要先确保远端子目录存在
+    if remote_filename and '/' in remote_filename:
+        backup_subdir = None
+        if hasattr(webdav_url_or_config, 'server_url') or hasattr(webdav_url_or_config, 'webdav_url'):
+            cfg = webdav_url_or_config
+            webdav_url, username, password = _unpack_auth_params(cfg)
+            backup_subdir = getattr(cfg, 'backup_subdir', None)
+        else:
+            webdav_url = webdav_url_or_config
+        # 确保 attachments 子目录存在
+        subdir_name = remote_filename.split('/')[0]
+        ensure_remote_dir(webdav_url, username, password, backup_subdir=backup_subdir)
+        # 在子目录下再创建 attachments 子目录
+        base_dir_url = _resolve_target_dir_url(webdav_url, backup_subdir)
+        subdir_url = urllib.parse.urljoin(base_dir_url, subdir_name + '/')
+        session = _get_session(username, password)
+        try:
+            resp = session.request('PROPFIND', subdir_url, headers={'Depth': '0'}, timeout=10, verify=False)
+            if resp.status_code not in (200, 207):
+                session.request('MKCOL', subdir_url, timeout=10, verify=False)
+        except Exception:
+            pass
+    return upload_backup(webdav_url_or_config, username, password, local_file_path, remote_filename)
+
+
+def delete_webdav_backup(webdav_url_or_config, username=None, password=None, remote_filename=None):
+    """
+    删除 WebDAV 远端指定备份文件。
+    支持传入 config 对象或 (url, username, password, filename) 传统入参。
+    返回 (success, message)
+    """
+    backup_subdir = None
+    if hasattr(webdav_url_or_config, 'server_url') or hasattr(webdav_url_or_config, 'webdav_url'):
+        cfg = webdav_url_or_config
+        # 修正参数映射：config 对象调用时 remote_filename 可能在 username 参数位
+        if remote_filename is None and username is not None:
+            remote_filename = username
+            username = None
+            password = None
+        webdav_url, username, password = _unpack_auth_params(cfg)
+        backup_subdir = getattr(cfg, 'backup_subdir', None)
+    else:
+        webdav_url = webdav_url_or_config
+    if not webdav_url or not str(webdav_url).strip():
+        return False, "未配置 WebDAV 服务器地址"
+    if not remote_filename:
+        return False, "未指定要删除的文件名"
+
+    # 修复：使用 _resolve_target_dir_url 而非 _normalize_url，确保包含 backup_subdir 子目录
+    target_dir_url = _resolve_target_dir_url(webdav_url, backup_subdir)
+    file_delete_url = urllib.parse.urljoin(target_dir_url, urllib.parse.quote(remote_filename))
+    session = _get_session(username, password)
+
+    try:
+        resp = session.delete(file_delete_url, timeout=30, verify=False)
+        if resp.status_code in (200, 204):
+            return True, f"成功删除远端文件：{remote_filename}"
+        if resp.status_code == 404:
+            return False, f"远端文件不存在：{remote_filename}"
+        return False, f"删除失败，HTTP 状态码: {resp.status_code}"
+    except requests.exceptions.Timeout:
+        return False, "WebDAV 删除文件超时"
+    except Exception as e:
+        return False, f"WebDAV 删除异常: {str(e)}"
+
+
+def decrypt_encrypted_zip(zip_file_path, zip_password, output_path=None):
+    """
+    解密 AES-256 加密的 zip 备份文件，提取其中的 .db 文件。
+    返回 (success, db_path_or_error_msg)
+    """
+    if not HAS_PYZIPPER:
+        return False, "缺少 pyzipper 库，请运行 pip install pyzipper"
+    if not zip_file_path or not os.path.exists(zip_file_path):
+        return False, "加密 zip 文件不存在"
+    if not zip_password:
+        return False, "解密密码不能为空"
+
+    if output_path is None:
+        # 默认输出到同目录下，用 .db 替换 .zip
+        output_path = zip_file_path.rsplit('.zip', 1)[0]
+        if output_path == zip_file_path:
+            output_path = zip_file_path + '.db'
+
+    try:
+        with pyzipper.AESZipFile(zip_file_path, 'r', compression=pyzipper.ZIP_LZMA, encryption=pyzipper.WZ_AES) as zf:
+            zf.setpassword(zip_password.encode('utf-8'))
+            # 获取 zip 内的第一个文件（应该是 .db 文件）
+            names = zf.namelist()
+            if not names:
+                return False, "加密 zip 内无文件"
+            # 读取第一个文件的内容并写入输出路径
+            data = zf.read(names[0])
+            with open(output_path, 'wb') as f:
+                f.write(data)
+        return True, output_path
+    except RuntimeError as e:
+        if 'password' in str(e).lower() or 'decrypt' in str(e).lower():
+            return False, "密码错误，无法解密备份文件"
+        return False, f"解密失败: {str(e)}"
+    except Exception as e:
+        return False, f"解密异常: {str(e)}"
+
+
+def download_and_decrypt_backup(webdav_url_or_config, username=None, password=None, remote_filename=None, save_path=None, decrypt_password=None):
+    """
+    从 WebDAV 下载备份文件并恢复到指定路径。
+    如果是 .zip 加密文件且提供了 decrypt_password，会自动解密。
+    返回 (success, message)
+    """
+    # 先下载到临时路径
+    tmp_dir = tempfile.mkdtemp(prefix='gift_restore_')
+    try:
+        if remote_filename and remote_filename.lower().endswith('.zip'):
+            # 加密 zip 文件：先下载到临时目录，解密后再复制到目标路径
+            tmp_zip = os.path.join(tmp_dir, remote_filename)
+            ok, msg = download_backup(webdav_url_or_config, username, password, remote_filename, tmp_zip)
+            if not ok:
+                return False, msg
+            if not decrypt_password:
+                return False, "该备份文件是加密的，请输入加密密码"
+            tmp_db = os.path.join(tmp_dir, 'restored.db')
+            ok, msg = decrypt_encrypted_zip(tmp_zip, decrypt_password, tmp_db)
+            if not ok:
+                return False, msg
+            # 复制解密后的 db 文件到目标路径
+            shutil.copy2(tmp_db, save_path)
+            return True, f"成功恢复加密备份：{remote_filename}"
+        else:
+            # 普通 .db 文件：直接下载到目标路径
+            ok, msg = download_backup(webdav_url_or_config, username, password, remote_filename, save_path)
+            return ok, msg
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)

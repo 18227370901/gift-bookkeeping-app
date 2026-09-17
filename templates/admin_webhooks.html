@@ -81,8 +81,12 @@
               <div class="d-flex flex-wrap gap-1">
                 {% if w.notify_on_add %}<span class="badge bg-light text-dark border small" title="新增记账">新增</span>{% endif %}
                 {% if w.notify_on_delete %}<span class="badge bg-light text-dark border small" title="删除记账">删除</span>{% endif %}
+                {% if w.notify_on_update %}<span class="badge bg-light text-dark border small" title="修改">修改</span>{% endif %}
                 {% if w.notify_on_reminder %}<span class="badge bg-light text-dark border small" title="纪念日">纪念日</span>{% endif %}
                 {% if w.notify_on_broadcast %}<span class="badge bg-light text-dark border small" title="广播">广播</span>{% endif %}
+                {% if w.notify_on_system %}<span class="badge bg-light text-dark border small" title="系统">系统</span>{% endif %}
+                {% if w.notify_on_security %}<span class="badge bg-light text-dark border small" title="安全">安全</span>{% endif %}
+                {% if w.notify_on_status_change %}<span class="badge bg-light text-dark border small" title="状态变更">状态</span>{% endif %}
               </div>
             </td>
             <td>
@@ -106,11 +110,19 @@
                       data-bot-secret="{{ w.bot_secret or '' }}"
                       data-url="{{ w.webhook_url or '' }}"
                       data-secret="{{ w.secret_token or '' }}"
-                      data-notify-add="{{ 1 if w.notify_on_add else 0 }}"
-                      data-notify-delete="{{ 1 if w.notify_on_delete else 0 }}"
-                      data-notify-reminder="{{ 1 if w.notify_on_reminder else 0 }}"
-                      data-notify-broadcast="{{ 1 if w.notify_on_broadcast else 0 }}"
-                      title="编辑配置">
+               data-notify-add="{{ 1 if w.notify_on_add else 0 }}"
+               data-notify-delete="{{ 1 if w.notify_on_delete else 0 }}"
+               data-notify-reminder="{{ 1 if w.notify_on_reminder else 0 }}"
+               data-notify-broadcast="{{ 1 if w.notify_on_broadcast else 0 }}"
+               data-notify-update="{{ 1 if w.notify_on_update else 0 }}"
+               data-notify-security="{{ 1 if w.notify_on_security else 0 }}"
+               data-notify-system="{{ 1 if w.notify_on_system else 0 }}"
+               data-notify-status="{{ 1 if w.notify_on_status_change else 0 }}"
+               data-notify-pages="{{ w.notify_pages or '{}' }}"
+               data-message-templates="{{ w.message_templates or '{}' }}"
+               data-monitor-user-ids="{{ w.monitor_user_ids or '[]' }}"
+               data-monitor-event-types="{{ w.monitor_event_types or '[]' }}"
+               title="编辑配置">
                 <i class="fa-solid fa-pen-to-square"></i>
               </button>
               <form action="{{ url_for('admin_toggle_webhook', webhook_id=w.id) }}" method="POST" class="d-inline">
@@ -215,9 +227,9 @@
         <button type="button" class="btn btn-outline-secondary btn-sm rounded-3 text-nowrap" onclick="resetLogFilters()" title="重置筛选">
           <i class="fa-solid fa-rotate-left"></i>
         </button>
-      </div>
-    </div>
-  </div>
+              </div>
+            </div>
+         </div>
 
   <!-- 日志表格 -->
   <div class="card-body p-0">
@@ -230,6 +242,7 @@
             </th>
             <th>时间</th>
             <th>触发通道</th>
+            <th>发起用户</th>
             <th>事件类型</th>
             <th>状态</th>
             <th>响应结果 / 状态码</th>
@@ -249,6 +262,7 @@
             </td>
             <td class="text-nowrap text-muted">{{ log.created_at.strftime('%Y-%m-%d %H:%M:%S') if log.created_at else '-' }}</td>
             <td class="fw-bold">#{{ log.webhook_id or '-' }}</td>
+            <td class="text-muted">{{ log.operator.username if log.operator else '系统' }}</td>
             <td>
               {% if log.event_type == 'test' %}
                 <span class="badge bg-info-subtle text-info border border-info-subtle">测试通知</span>
@@ -319,13 +333,17 @@
         <h5 class="modal-title fw-bold"><i class="fa-solid fa-satellite-dish text-primary me-2"></i>添加通知通道</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <form action="{{ url_for('admin_create_webhook') }}" method="POST">
+      <form id="newWebhookForm" action="{{ url_for('admin_create_webhook') }}" method="POST" novalidate>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="notify_pages" id="newNotifyPagesHidden" value="{}">
+        <input type="hidden" name="monitor_user_ids" id="newMonitorUserIdsHidden" value="[]">
+        <input type="hidden" name="monitor_event_types" id="newMonitorEventTypesHidden" value="[]">
         <div class="modal-body p-4">
+          <div id="newWebhookError"></div>
           <!-- 渠道名称 -->
           <div class="mb-3">
             <label class="form-label fw-bold">渠道名称 <span class="text-danger">*</span></label>
-            <input type="text" name="name" class="form-control rounded-3" placeholder="例如：企业微信长连接机器人 / 财务钉钉群" required>
+            <input type="text" name="name" id="newName" class="form-control rounded-3" placeholder="例如：企业微信长连接机器人 / 财务钉钉群" required>
           </div>
 
           <!-- 连接方式选择 -->
@@ -402,40 +420,149 @@
             </div>
           </div>
 
-          <!-- 触发事件配置 -->
-          <div class="mb-2">
-            <label class="form-label fw-bold">触发通知事件</label>
-            <div class="row g-2">
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_add" id="newNotifyAdd" checked>
-                  <label class="form-check-label small" for="newNotifyAdd">礼金记账新增通知</label>
+           <!-- V10.1: Tab 内嵌模式 — 基础事件开关 / 推送配置矩阵 / 消息模板 -->
+           <input type="hidden" name="message_templates" id="newMessageTemplatesHidden" value="{}">
+           <ul class="nav nav-tabs mb-3" id="newWebhookTabs" role="tablist">
+             <li class="nav-item" role="presentation">
+               <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#newTabEvents" type="button" role="tab"><i class="fa-solid fa-toggle-on me-1"></i>基础事件开关</button>
+             </li>
+             <li class="nav-item" role="presentation">
+               <button class="nav-link" data-bs-toggle="tab" data-bs-target="#newTabMatrix" type="button" role="tab"><i class="fa-solid fa-table-cells me-1"></i>推送配置矩阵</button>
+             </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#newTabTemplates" type="button" role="tab"><i class="fa-solid fa-comment-dots me-1"></i>消息模板</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#newTabMonitor" type="button" role="tab"><i class="fa-solid fa-shield-halved me-1"></i>监控范围</button>
+              </li>
+            </ul>
+           <div class="tab-content">
+              <!-- Tab 1: 基础事件开关 -->
+              <div class="tab-pane fade show active" id="newTabEvents" role="tabpanel">
+                <div class="d-flex justify-content-end align-items-center mb-1">
+                  <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="eventSelectAll('new')">全选</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="eventClearAll('new')">清空</button>
+                  </div>
                 </div>
-              </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_delete" id="newNotifyDelete" checked>
-                  <label class="form-check-label small" for="newNotifyDelete">礼金记录删除预警</label>
+                <div class="row g-2">
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_add" id="newNotifyAdd" checked><label class="form-check-label small" for="newNotifyAdd">新增操作</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_delete" id="newNotifyDelete" checked><label class="form-check-label small" for="newNotifyDelete">删除操作（含批量删除/清空）</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_update" id="newNotifyUpdate"><label class="form-check-label small" for="newNotifyUpdate">修改/编辑操作</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_reminder" id="newNotifyReminder" checked><label class="form-check-label small" for="newNotifyReminder">纪念日提醒</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_broadcast" id="newNotifyBroadcast" checked><label class="form-check-label small" for="newNotifyBroadcast">站内广播</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_security" id="newNotifySecurity"><label class="form-check-label small" for="newNotifySecurity">安全风控</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_system" id="newNotifySystem" checked><label class="form-check-label small" for="newNotifySystem">系统配置/同步</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_status_change" id="newNotifyStatusChange"><label class="form-check-label small" for="newNotifyStatusChange">状态变更/还原</label></div></div>
                 </div>
+                <div class="form-text small text-muted mt-1">勾选大类事件开关后，可在「推送配置矩阵」中精细控制每个页面的推送范围。</div>
               </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_reminder" id="newNotifyReminder" checked>
-                  <label class="form-check-label small" for="newNotifyReminder">亲友重要纪念日临期提醒</label>
-                </div>
+
+             <!-- Tab 2: 推送配置矩阵（页面×事件） -->
+             <div class="tab-pane fade" id="newTabMatrix" role="tabpanel">
+               <div class="d-flex justify-content-between align-items-center mb-2">
+                 <span class="small text-muted">勾选 = 该页面该事件触发推送；全选=全推，不勾=不推</span>
+                 <div class="btn-group btn-group-sm">
+                   <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="matrixSelectAll('new')">全选</button>
+                   <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="matrixClearAll('new')">清空</button>
+                 </div>
+               </div>
+               <div class="border rounded-3 bg-light p-2" style="max-height: 320px; overflow-y: auto;">
+                 <table class="table table-sm table-bordered table-hover mb-0" id="newMatrixTable">
+                   <thead class="table-light sticky-top">
+                     <tr>
+                       <th class="text-center" style="min-width: 100px;">页面</th>
+                       {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                       <th class="text-center text-nowrap small" title="{{ ev_label }}">{{ ev_label }}</th>
+                       {% endfor %}
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {% for page_key, page_label in ALL_PAGES.items() %}
+                     <tr>
+                       <td class="small fw-bold text-nowrap">{{ page_label }}</td>
+                       {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                       <td class="text-center">
+                         {% if ev_key in PAGE_EVENT_MATRIX[page_key] %}
+                         <input class="form-check-input matrix-cb" type="checkbox" data-page="{{ page_key }}" data-event="{{ ev_key }}" id="new_m_{{ page_key }}_{{ ev_key }}" checked>
+                         {% else %}
+                         <span class="text-muted" style="opacity:0.3;">—</span>
+                         {% endif %}
+                       </td>
+                       {% endfor %}
+                     </tr>
+                     {% endfor %}
+                   </tbody>
+                 </table>
+               </div>
+             </div>
+
+             <!-- Tab 3: 消息模板自定义 -->
+             <div class="tab-pane fade" id="newTabTemplates" role="tabpanel">
+               <div class="form-text small text-muted mb-2">
+                 <i class="fa-solid fa-circle-info me-1"></i>可为每个「页面×事件」自定义推送消息内容。留空则使用系统默认模板。
+                 支持占位符: <code>{user}</code> <code>{page}</code> <code>{action}</code> <code>{title}</code> <code>{detail}</code> <code>{time}</code> <code>{count}</code>
+               </div>
+               <div class="border rounded-3 bg-light p-2" style="max-height: 320px; overflow-y: auto;" id="newTemplateList">
+                 {% for page_key, page_label in ALL_PAGES.items() %}
+                 {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                 {% if ev_key in PAGE_EVENT_MATRIX[page_key] %}
+                 <div class="row g-1 mb-1 align-items-center">
+                   <div class="col-3"><span class="badge bg-secondary-subtle text-secondary small">{{ page_label }}·{{ ev_label }}</span></div>
+                   <div class="col-9"><input type="text" class="form-control form-control-sm template-input" data-page="{{ page_key }}" data-event="{{ ev_key }}" placeholder="{{ DEFAULT_TEMPLATES[ev_key] }}" title="{{ page_label }}·{{ ev_label }} 消息模板"></div>
+                 </div>
+                 {% endif %}
+                 {% endfor %}
+                 {% endfor %}
+               </div>
               </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="newNotifyBroadcast" checked>
-                  <label class="form-check-label small" for="newNotifyBroadcast">系统站内重要广播推送</label>
-                </div>
-              </div>
+
+               <!-- V10.3: Tab 4: 监控范围 -->
+               <div class="tab-pane fade" id="newTabMonitor" role="tabpanel">
+                 <div class="form-text small text-muted mb-2">
+                   <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。留空 = 不限制（推送全部）。
+                 </div>
+                 <div class="d-flex justify-content-between align-items-center mb-1">
+                   <h6 class="text-muted mb-0"><i class="fa-solid fa-user-shield me-1"></i>监控用户（可选）</h6>
+                   <div class="btn-group btn-group-sm">
+                     <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="monitorUserSelectAll('new')">全选</button>
+                     <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="monitorUserClearAll('new')">清空</button>
+                   </div>
+                 </div>
+                 <div class="border rounded-3 bg-light p-2 mb-3" style="max-height: 150px; overflow-y: auto;">
+                   {% if all_users %}
+                   {% for u in all_users %}
+                   <div class="form-check">
+                     <input class="form-check-input monitor-user-cb" type="checkbox" value="{{ u.id }}" id="new_monitor_user_{{ u.id }}">
+                     <label class="form-check-label small" for="new_monitor_user_{{ u.id }}">{{ u.username }}{% if u.is_admin %}（管理员）{% endif %}</label>
+                   </div>
+                   {% endfor %}
+                   {% else %}
+                   <span class="small text-muted">暂无用户</span>
+                   {% endif %}
+                 </div>
+                 <div class="d-flex justify-content-between align-items-center mb-1">
+                   <h6 class="text-muted mb-0"><i class="fa-solid fa-filter me-1"></i>监控事件类型（可选）</h6>
+                   <div class="btn-group btn-group-sm">
+                     <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="monitorEventSelectAll('new')">全选</button>
+                     <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="monitorEventClearAll('new')">清空</button>
+                   </div>
+                 </div>
+                 <div class="border rounded-3 bg-light p-2">
+                   {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                   <div class="form-check d-inline-block me-3">
+                     <input class="form-check-input monitor-event-cb" type="checkbox" value="{{ ev_key }}" id="new_monitor_ev_{{ ev_key }}">
+                     <label class="form-check-label small" for="new_monitor_ev_{{ ev_key }}">{{ ev_label }}</label>
+                   </div>
+                   {% endfor %}
+                 </div>
+                 <div class="form-text small text-muted mt-2">不勾选任何用户 = 推送所有用户的操作；不勾选任何事件 = 推送所有事件类型。</div>
+               </div>
             </div>
-          </div>
-        </div>
-        <div class="modal-footer border-light">
-          <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
-          <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">保存通道</button>
+         </div>
+         <div class="modal-footer border-light">
+           <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
+           <button type="submit" id="newWebhookSubmitBtn" class="btn btn-primary rounded-pill px-4 shadow-sm">保存配置</button>
         </div>
       </form>
     </div>
@@ -450,9 +577,13 @@
         <h5 class="modal-title fw-bold"><i class="fa-solid fa-pen-to-square text-primary me-2"></i>编辑通知通道</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-      <form id="editWebhookForm" action="" method="POST">
+      <form id="editWebhookForm" action="" method="POST" novalidate>
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="notify_pages" id="editNotifyPagesHidden" value="{}">
+        <input type="hidden" name="monitor_user_ids" id="editMonitorUserIdsHidden" value="[]">
+        <input type="hidden" name="monitor_event_types" id="editMonitorEventTypesHidden" value="[]">
         <div class="modal-body p-4">
+          <div id="editWebhookError"></div>
           <!-- 渠道名称 -->
           <div class="mb-3">
             <label class="form-label fw-bold">渠道名称 <span class="text-danger">*</span></label>
@@ -529,42 +660,151 @@
             </div>
           </div>
 
-          <!-- 触发事件配置 -->
-          <div class="mb-2">
-            <label class="form-label fw-bold">触发通知事件</label>
-            <div class="row g-2">
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_add" id="editNotifyAdd">
-                  <label class="form-check-label small" for="editNotifyAdd">礼金记账新增通知</label>
+           <!-- V10.1: Tab 内嵌模式 — 基础事件开关 / 推送配置矩阵 / 消息模板 -->
+           <input type="hidden" name="message_templates" id="editMessageTemplatesHidden" value="{}">
+           <ul class="nav nav-tabs mb-3" id="editWebhookTabs" role="tablist">
+             <li class="nav-item" role="presentation">
+               <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#editTabEvents" type="button" role="tab"><i class="fa-solid fa-toggle-on me-1"></i>基础事件开关</button>
+             </li>
+             <li class="nav-item" role="presentation">
+               <button class="nav-link" data-bs-toggle="tab" data-bs-target="#editTabMatrix" type="button" role="tab"><i class="fa-solid fa-table-cells me-1"></i>推送配置矩阵</button>
+             </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#editTabTemplates" type="button" role="tab"><i class="fa-solid fa-comment-dots me-1"></i>消息模板</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#editTabMonitor" type="button" role="tab"><i class="fa-solid fa-shield-halved me-1"></i>监控范围</button>
+              </li>
+            </ul>
+           <div class="tab-content">
+              <!-- Tab 1: 基础事件开关 -->
+              <div class="tab-pane fade show active" id="editTabEvents" role="tabpanel">
+                <div class="d-flex justify-content-end align-items-center mb-1">
+                  <div class="btn-group btn-group-sm">
+                    <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="eventSelectAll('edit')">全选</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="eventClearAll('edit')">清空</button>
+                  </div>
                 </div>
-              </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_delete" id="editNotifyDelete">
-                  <label class="form-check-label small" for="editNotifyDelete">礼金记录删除预警</label>
+                <div class="row g-2">
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_add" id="editNotifyAdd"><label class="form-check-label small" for="editNotifyAdd">新增操作</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_delete" id="editNotifyDelete"><label class="form-check-label small" for="editNotifyDelete">删除操作（含批量删除/清空）</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_update" id="editNotifyUpdate"><label class="form-check-label small" for="editNotifyUpdate">修改/编辑操作</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_reminder" id="editNotifyReminder"><label class="form-check-label small" for="editNotifyReminder">纪念日提醒</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_broadcast" id="editNotifyBroadcast"><label class="form-check-label small" for="editNotifyBroadcast">站内广播</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_security" id="editNotifySecurity"><label class="form-check-label small" for="editNotifySecurity">安全风控</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_system" id="editNotifySystem" checked><label class="form-check-label small" for="editNotifySystem">系统配置/同步</label></div></div>
+                  <div class="col-sm-6"><div class="form-check"><input class="form-check-input event-switch-cb" type="checkbox" name="notify_on_status_change" id="editNotifyStatusChange"><label class="form-check-label small" for="editNotifyStatusChange">状态变更/还原</label></div></div>
                 </div>
+                <div class="form-text small text-muted mt-1">勾选大类事件开关后，可在「推送配置矩阵」中精细控制每个页面的推送范围。</div>
               </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_reminder" id="editNotifyReminder">
-                  <label class="form-check-label small" for="editNotifyReminder">亲友重要纪念日临期提醒</label>
-                </div>
+
+             <!-- Tab 2: 推送配置矩阵（页面×事件） -->
+             <div class="tab-pane fade" id="editTabMatrix" role="tabpanel">
+               <div class="d-flex justify-content-between align-items-center mb-2">
+                 <span class="small text-muted">勾选 = 该页面该事件触发推送；全选=全推，不勾=不推</span>
+                 <div class="btn-group btn-group-sm">
+                   <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="matrixSelectAll('edit')">全选</button>
+                   <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="matrixClearAll('edit')">清空</button>
+                 </div>
+               </div>
+               <div class="border rounded-3 bg-light p-2" style="max-height: 320px; overflow-y: auto;">
+                 <table class="table table-sm table-bordered table-hover mb-0" id="editMatrixTable">
+                   <thead class="table-light sticky-top">
+                     <tr>
+                       <th class="text-center" style="min-width: 100px;">页面</th>
+                       {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                       <th class="text-center text-nowrap small" title="{{ ev_label }}">{{ ev_label }}</th>
+                       {% endfor %}
+                     </tr>
+                   </thead>
+                   <tbody>
+                     {% for page_key, page_label in ALL_PAGES.items() %}
+                     <tr>
+                       <td class="small fw-bold text-nowrap">{{ page_label }}</td>
+                       {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                       <td class="text-center">
+                         {% if ev_key in PAGE_EVENT_MATRIX[page_key] %}
+                         <input class="form-check-input matrix-cb" type="checkbox" data-page="{{ page_key }}" data-event="{{ ev_key }}" id="edit_m_{{ page_key }}_{{ ev_key }}">
+                         {% else %}
+                         <span class="text-muted" style="opacity:0.3;">—</span>
+                         {% endif %}
+                       </td>
+                       {% endfor %}
+                     </tr>
+                     {% endfor %}
+                   </tbody>
+                 </table>
+               </div>
+             </div>
+
+             <!-- Tab 3: 消息模板自定义 -->
+             <div class="tab-pane fade" id="editTabTemplates" role="tabpanel">
+               <div class="form-text small text-muted mb-2">
+                 <i class="fa-solid fa-circle-info me-1"></i>可为每个「页面×事件」自定义推送消息内容。留空则使用系统默认模板。
+                 支持占位符: <code>{user}</code> <code>{page}</code> <code>{action}</code> <code>{title}</code> <code>{detail}</code> <code>{time}</code> <code>{count}</code>
+               </div>
+               <div class="border rounded-3 bg-light p-2" style="max-height: 320px; overflow-y: auto;" id="editTemplateList">
+                 {% for page_key, page_label in ALL_PAGES.items() %}
+                 {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                 {% if ev_key in PAGE_EVENT_MATRIX[page_key] %}
+                 <div class="row g-1 mb-1 align-items-center">
+                   <div class="col-3"><span class="badge bg-secondary-subtle text-secondary small">{{ page_label }}·{{ ev_label }}</span></div>
+                   <div class="col-9"><input type="text" class="form-control form-control-sm template-input" data-page="{{ page_key }}" data-event="{{ ev_key }}" placeholder="{{ DEFAULT_TEMPLATES[ev_key] }}" title="{{ page_label }}·{{ ev_label }} 消息模板"></div>
+                 </div>
+                 {% endif %}
+                 {% endfor %}
+                 {% endfor %}
+               </div>
               </div>
-              <div class="col-sm-6">
-                <div class="form-check">
-                  <input class="form-check-input" type="checkbox" name="notify_on_broadcast" id="editNotifyBroadcast">
-                  <label class="form-check-label small" for="editNotifyBroadcast">系统站内重要广播推送</label>
-                </div>
-              </div>
-            </div>
+
+               <!-- V10.3: Tab 4: 监控范围 -->
+               <div class="tab-pane fade" id="editTabMonitor" role="tabpanel">
+                 <div class="form-text small text-muted mb-2">
+                   <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。留空 = 不限制（推送全部）。
+                 </div>
+                 <div class="d-flex justify-content-between align-items-center mb-1">
+                   <h6 class="text-muted mb-0"><i class="fa-solid fa-user-shield me-1"></i>监控用户（可选）</h6>
+                   <div class="btn-group btn-group-sm">
+                     <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="monitorUserSelectAll('edit')">全选</button>
+                     <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="monitorUserClearAll('edit')">清空</button>
+                   </div>
+                 </div>
+                 <div class="border rounded-3 bg-light p-2 mb-3" style="max-height: 150px; overflow-y: auto;">
+                   {% if all_users %}
+                   {% for u in all_users %}
+                   <div class="form-check">
+                     <input class="form-check-input monitor-user-cb" type="checkbox" value="{{ u.id }}" id="edit_monitor_user_{{ u.id }}">
+                     <label class="form-check-label small" for="edit_monitor_user_{{ u.id }}">{{ u.username }}{% if u.is_admin %}（管理员）{% endif %}</label>
+                   </div>
+                   {% endfor %}
+                   {% else %}
+                   <span class="small text-muted">暂无用户</span>
+                   {% endif %}
+                 </div>
+                 <div class="d-flex justify-content-between align-items-center mb-1">
+                   <h6 class="text-muted mb-0"><i class="fa-solid fa-filter me-1"></i>监控事件类型（可选）</h6>
+                   <div class="btn-group btn-group-sm">
+                     <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="monitorEventSelectAll('edit')">全选</button>
+                     <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="monitorEventClearAll('edit')">清空</button>
+                   </div>
+                 </div>
+                 <div class="border rounded-3 bg-light p-2">
+                   {% for ev_key, ev_label in EVENT_COLUMNS.items() %}
+                   <div class="form-check d-inline-block me-3">
+                     <input class="form-check-input monitor-event-cb" type="checkbox" value="{{ ev_key }}" id="edit_monitor_ev_{{ ev_key }}">
+                     <label class="form-check-label small" for="edit_monitor_ev_{{ ev_key }}">{{ ev_label }}</label>
+                   </div>
+                   {% endfor %}
+                 </div>
+                 <div class="form-text small text-muted mt-2">不勾选任何用户 = 推送所有用户的操作；不勾选任何事件 = 推送所有事件类型。</div>
+               </div>
+             </div>
           </div>
-        </div>
-        <div class="modal-footer border-light">
-          <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
-          <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">保存修改</button>
-        </div>
-      </form>
+         <div class="modal-footer border-light">
+           <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
+           <button type="submit" id="editWebhookSubmitBtn" class="btn btn-primary rounded-pill px-4 shadow-sm">保存修改</button>
+         </div>
+       </form>
     </div>
   </div>
 </div>
@@ -606,14 +846,284 @@ function togglePasswordVisibility(inputId, btn) {
   }
 }
 
+// V10.1: 矩阵全选/清空
+function matrixSelectAll(prefix) {
+  const table = document.getElementById(prefix + 'MatrixTable');
+  if (table) {
+    table.querySelectorAll('input.matrix-cb').forEach(cb => { cb.checked = true; });
+  }
+}
+function matrixClearAll(prefix) {
+  const table = document.getElementById(prefix + 'MatrixTable');
+  if (table) {
+    table.querySelectorAll('input.matrix-cb').forEach(cb => { cb.checked = false; });
+  }
+}
+
+// V10.5: 基础事件开关全选/清空
+function eventSelectAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabEvents');
+  if (tab) {
+    tab.querySelectorAll('input.event-switch-cb').forEach(cb => { cb.checked = true; });
+  }
+}
+function eventClearAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabEvents');
+  if (tab) {
+    tab.querySelectorAll('input.event-switch-cb').forEach(cb => { cb.checked = false; });
+  }
+}
+
+// V10.5: 监控范围 - 监控用户全选/清空
+function monitorUserSelectAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabMonitor');
+  if (tab) {
+    tab.querySelectorAll('input.monitor-user-cb').forEach(cb => { cb.checked = true; });
+  }
+}
+function monitorUserClearAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabMonitor');
+  if (tab) {
+    tab.querySelectorAll('input.monitor-user-cb').forEach(cb => { cb.checked = false; });
+  }
+}
+
+// V10.5: 监控范围 - 监控事件类型全选/清空
+function monitorEventSelectAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabMonitor');
+  if (tab) {
+    tab.querySelectorAll('input.monitor-event-cb').forEach(cb => { cb.checked = true; });
+  }
+}
+function monitorEventClearAll(prefix) {
+  const tab = document.getElementById(prefix + 'TabMonitor');
+  if (tab) {
+    tab.querySelectorAll('input.monitor-event-cb').forEach(cb => { cb.checked = false; });
+  }
+}
+
+// V10.1: 将矩阵勾选组装为 notify_pages JSON
+// 格式: {"create": ["ledger","banquets",...], "update": [...], ...}
+function assembleNotifyPages(prefix) {
+  const table = document.getElementById(prefix + 'MatrixTable');
+  if (!table) return '{}';
+  const result = {};
+  table.querySelectorAll('input.matrix-cb:checked').forEach(cb => {
+    const page = cb.dataset.page;
+    const event = cb.dataset.event;
+    if (!result[event]) result[event] = [];
+    result[event].push(page);
+  });
+  return JSON.stringify(result);
+}
+
+// V10.1: 将模板输入组装为 message_templates JSON
+// 格式: {"event:page": "自定义模板内容", ...}
+function assembleMessageTemplates(prefix) {
+  const container = document.getElementById(prefix + 'TemplateList');
+  if (!container) return '{}';
+  const result = {};
+  container.querySelectorAll('input.template-input').forEach(input => {
+    const val = input.value.trim();
+    if (val) {
+      const key = input.dataset.event + ':' + input.dataset.page;
+      result[key] = val;
+    }
+  });
+  return JSON.stringify(result);
+}
+
+// V10.3: 将监控用户和事件类型组装为 JSON
+function assembleMonitorData(prefix) {
+  // 组装用户 ID
+  var userIds = [];
+  document.querySelectorAll('#' + prefix + 'TabMonitor input.monitor-user-cb:checked').forEach(function(cb) {
+    userIds.push(parseInt(cb.value));
+  });
+  // 组装事件类型
+  var eventTypes = [];
+  document.querySelectorAll('#' + prefix + 'TabMonitor input.monitor-event-cb:checked').forEach(function(cb) {
+    eventTypes.push(cb.value);
+  });
+  return [JSON.stringify(userIds), JSON.stringify(eventTypes)];
+}
+
+// V10.3: 回填编辑监控数据
+function fillEditMonitor(userIdsJson, eventTypesJson) {
+  var userIds = [];
+  try { userIds = JSON.parse(userIdsJson || '[]'); } catch(e) {}
+  var eventTypes = [];
+  try { eventTypes = JSON.parse(eventTypesJson || '[]'); } catch(e) {}
+  document.querySelectorAll('#editTabMonitor input.monitor-user-cb').forEach(function(cb) {
+    cb.checked = userIds.includes(parseInt(cb.value));
+  });
+  document.querySelectorAll('#editTabMonitor input.monitor-event-cb').forEach(function(cb) {
+    cb.checked = eventTypes.includes(cb.value);
+  });
+}
+
+// V10.1: 从 notify_pages JSON 回填报编辑矩阵
+function fillEditMatrix(notifyPagesJson) {
+  let pagesData = {};
+  try { pagesData = JSON.parse(notifyPagesJson || '{}'); } catch(e) {}
+  const table = document.getElementById('editMatrixTable');
+  if (!table) return;
+  const allCbs = table.querySelectorAll('input.matrix-cb');
+  if (Object.keys(pagesData).length === 0) {
+    // 空配置 = 全选（不过滤）
+    allCbs.forEach(cb => { cb.checked = true; });
+  } else {
+    allCbs.forEach(cb => {
+      const page = cb.dataset.page;
+      const event = cb.dataset.event;
+      const pagesForEvent = pagesData[event] || [];
+      cb.checked = pagesForEvent.includes(page);
+    });
+  }
+}
+
+// V10.1: 从 message_templates JSON 回填报编辑模板
+function fillEditTemplates(templatesJson) {
+  let tplData = {};
+  try { tplData = JSON.parse(templatesJson || '{}'); } catch(e) {}
+  const container = document.getElementById('editTemplateList');
+  if (!container) return;
+  container.querySelectorAll('input.template-input').forEach(input => {
+    const key = input.dataset.event + ':' + input.dataset.page;
+    input.value = tplData[key] || tplData[input.dataset.event] || '';
+  });
+}
+
+// V7: 在 Modal 顶部显示错误提示横幅（替代浏览器原生气泡）
+function showWebhookFormError(errorDivId, message) {
+  const errorDiv = document.getElementById(errorDivId);
+  const html = `<div class="alert alert-danger alert-dismissible rounded-3 py-2 mb-0"><i class="fa-solid fa-circle-exclamation me-1"></i>${message}<button type="button" class="btn-close ms-2" onclick="this.parentElement.remove()"></button></div>`;
+  if (errorDiv) {
+    errorDiv.innerHTML = html;
+    errorDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } else {
+    alert(message);
+  }
+}
+
+// V7: 保存前显式必填校验（保存只保存、不校验凭证真实性，但必填项必须齐全）
+function validateWebhookForm(form, prefix) {
+  const missing = [];
+  const nameInput = form.querySelector('input[name="name"]');
+  if (!nameInput || !nameInput.value.trim()) missing.push('渠道名称');
+
+  const isLong = document.getElementById(prefix === 'new' ? 'connTypeLong' : 'editConnTypeLong').checked;
+  if (isLong) {
+    const botId = document.getElementById(prefix === 'new' ? 'newBotId' : 'editBotId');
+    const botSecret = document.getElementById(prefix === 'new' ? 'newBotSecret' : 'editBotSecret');
+    if (!botId || !botId.value.trim()) missing.push('Bot ID');
+    if (!botSecret || !botSecret.value.trim()) missing.push('Secret 凭证');
+  } else {
+    const urlInput = document.getElementById(prefix === 'new' ? 'newWebhookUrl' : 'editWebhookUrl');
+    if (!urlInput || !urlInput.value.trim()) missing.push('目标 URL');
+  }
+  return missing;
+}
+
+// V3: AJAX 提交 Webhook 表单，校验失败时在 Modal 内就地显示错误
+// V7 新增：
+//  - 保存按钮 loading 状态（禁用+转圈）防重复提交；
+//  - 保存成功后提示用户用「测试」按钮验证凭证（保存不再校验凭证）
+function submitWebhookFormAjax(form, modalId, errorDivId, submitBtn, successTip) {
+  const errorDiv = document.getElementById(errorDivId);
+  if (errorDiv) errorDiv.innerHTML = '';
+
+  // V7: 按钮置为 loading，防止重复提交
+  let origBtnHtml = null;
+  if (submitBtn) {
+    origBtnHtml = submitBtn.innerHTML;
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>正在保存...';
+  }
+
+  const formData = new FormData(form);
+  fetch(form.action, {
+    method: 'POST',
+    body: formData,
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  })
+  .then(res => res.json().catch(() => ({ success: false, message: '服务器返回非 JSON 响应' })))
+  .then(data => {
+    if (data.success) {
+      const modalEl = document.getElementById(modalId);
+      if (modalEl) {
+        const bsModal = bootstrap.Modal.getInstance(modalEl);
+        if (bsModal) bsModal.hide();
+      }
+      // V7: 保存只保存、不校验凭证，提示用「测试」按钮验证连通性
+      alert(successTip || data.message || '操作成功');
+      location.reload();
+    } else {
+      showWebhookFormError(errorDivId, data.message || '操作失败');
+    }
+  })
+  .catch(() => {
+    showWebhookFormError(errorDivId, '网络请求异常，请稍后重试');
+  })
+  .finally(() => {
+    if (submitBtn && origBtnHtml !== null) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = origBtnHtml;
+    }
+  });
+}
+
 // 初始化新增模态框字段状态
 document.addEventListener('DOMContentLoaded', function() {
   toggleConnTypeFields('new');
   onLogFilterChange();
 
 
+  // 提交前组装 notify_pages JSON - V3: 改为 AJAX 提交
+  const newForm = document.getElementById('newWebhookForm');
+  if (newForm) {
+    newForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      document.getElementById('newNotifyPagesHidden').value = assembleNotifyPages('new');
+      document.getElementById('newMessageTemplatesHidden').value = assembleMessageTemplates('new');
+      // V10.3: 组装监控数据
+      var monitorData = assembleMonitorData('new');
+      document.getElementById('newMonitorUserIdsHidden').value = monitorData[0];
+      document.getElementById('newMonitorEventTypesHidden').value = monitorData[1];
+      // V7: 显式必填校验，缺项时在 Modal 顶部明确提示
+      const missing = validateWebhookForm(newForm, 'new');
+      if (missing.length) {
+        showWebhookFormError('newWebhookError', '以下必填项未填写：' + missing.join('、'));
+        return;
+      }
+      submitWebhookFormAjax(newForm, 'newWebhookModal', 'newWebhookError', document.getElementById('newWebhookSubmitBtn'),
+        'Webhook 通道已保存。\n\n保存操作不会校验凭证有效性，请点击列表中的「测试」按钮验证连通性。');
+    });
+  }
+  const editForm = document.getElementById('editWebhookForm');
+  if (editForm) {
+    editForm.addEventListener('submit', function(e) {
+      e.preventDefault();
+      document.getElementById('editNotifyPagesHidden').value = assembleNotifyPages('edit');
+      document.getElementById('editMessageTemplatesHidden').value = assembleMessageTemplates('edit');
+      // V10.3: 组装监控数据
+      var editMonitorData = assembleMonitorData('edit');
+      document.getElementById('editMonitorUserIdsHidden').value = editMonitorData[0];
+      document.getElementById('editMonitorEventTypesHidden').value = editMonitorData[1];
+      // V7: 显式必填校验，缺项时在 Modal 顶部明确提示
+      const missing = validateWebhookForm(editForm, 'edit');
+      if (missing.length) {
+        showWebhookFormError('editWebhookError', '以下必填项未填写：' + missing.join('、'));
+        return;
+      }
+      submitWebhookFormAjax(editForm, 'editWebhookModal', 'editWebhookError', document.getElementById('editWebhookSubmitBtn'),
+      '修改已保存。\n\n如修改了凭证或地址，请点击列表中的「测试」按钮验证连通性。');
+    });
+  }
+
   // 编辑模态框填充
   document.querySelectorAll('.btn-edit-webhook').forEach(btn => {
+
     btn.addEventListener('click', function() {
       const data = this.dataset;
       const form = document.getElementById('editWebhookForm');
@@ -640,43 +1150,76 @@ document.addEventListener('DOMContentLoaded', function() {
       document.getElementById('editNotifyReminder').checked = (data.notifyReminder === '1');
       document.getElementById('editNotifyBroadcast').checked = (data.notifyBroadcast === '1');
 
+      // 扩展事件
+      document.getElementById('editNotifyUpdate').checked = (data.notifyUpdate === '1');
+      document.getElementById('editNotifySecurity').checked = (data.notifySecurity === '1');
+      document.getElementById('editNotifySystem').checked = (data.notifySystem === '1');
+      document.getElementById('editNotifyStatusChange').checked = (data.notifyStatus === '1');
+
+      // V10.1: 矩阵回填（替代旧的硬编码 allPageKeys 逻辑，修复 permission_tickets 缺失 bug）
+      fillEditMatrix(data.notifyPages);
+
+      // V10.1: 消息模板回填
+      fillEditTemplates(data.messageTemplates);
+
+      // V10.3: 监控数据回填
+      fillEditMonitor(data.monitorUserIds, data.monitorEventTypes);
+
       toggleConnTypeFields('edit');
       const editModal = new bootstrap.Modal(document.getElementById('editWebhookModal'));
       editModal.show();
     });
   });
 
-  // 测试 Webhook 发送
+  // 测试 Webhook 发送（V8: 增加超时保护 + toast 提示替换 alert）
   document.querySelectorAll('.btn-test-webhook').forEach(btn => {
     btn.addEventListener('click', function() {
       const id = this.dataset.id;
       const origHtml = this.innerHTML;
-      this.disabled = true;
-      this.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>测试中...';
+      const btnEl = this;
+      btnEl.disabled = true;
+      btnEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>测试中...';
+
+      // V8: AbortController 前端超时保护（后端已优化为 5s 超时）
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+
+      // 2 秒内未返回时追加提示，避免"看起来像无反应"
+      let slowTimer = null;
+      slowTimer = setTimeout(() => {
+        showToast('正在等待目标服务器响应，请稍候...', 'info');
+      }, 2000);
 
       fetch('/admin/webhook/test/' + id, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'X-CSRFToken': '{{ csrf_token }}'
-        }
+        },
+        signal: controller.signal
       })
       .then(res => res.json())
       .then(data => {
         if (data.success && (data.code === 200 || data.status_code === 200)) {
-          alert('【测试成功】\n' + (data.message || 'Webhook / 机器人通道测试响应正常！'));
-          // 局部刷新推送日志表格
-          window.location.reload();
+          showToast('【测试成功】' + (data.message || 'Webhook / 机器人通道测试响应正常！') + '（状态码 ' + (data.status_code || data.code || 200) + '）', 'success');
+          // V10: 延迟 2 秒刷新页面，确保 toast 提示可见后再刷新
+          setTimeout(() => { window.location.reload(); }, 2000);
         } else {
-          alert('【测试失败】\n' + (data.message || '连接失败，请检查企业微信机器人凭证或目标地址'));
+          showToast('【测试失败】' + (data.message || '连接失败，请检查企业微信机器人凭证或目标地址') + '（状态码 ' + (data.status_code || data.code || '?') + '）', 'danger');
         }
       })
       .catch(err => {
-        alert('请求异常: ' + err);
+        if (err && err.name === 'AbortError') {
+          showToast('测试超时：目标服务器响应超过 10 秒未返回，请检查 Webhook 地址与网络后重试', 'danger');
+        } else {
+          showToast('请求异常: ' + err, 'danger');
+        }
       })
       .finally(() => {
-        this.disabled = false;
-        this.innerHTML = origHtml;
+        clearTimeout(timeoutId);
+        if (slowTimer) clearTimeout(slowTimer);
+        btnEl.disabled = false;
+        btnEl.innerHTML = origHtml;
       });
     });
   });
@@ -951,6 +1494,33 @@ function submitClearAllLogs() {
     }
   })
   .catch(err => alert('网络异常: ' + err));
+}
+
+// V8: 通用 toast 提示容器 + 函数（全局可用，替换原生 alert 提升反馈体验）
+function ensureToastContainer() {
+  let container = document.getElementById('toastContainer');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toastContainer';
+    container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+    container.style.zIndex = '1080';
+    document.body.appendChild(container);
+  }
+  return container;
+}
+
+function showToast(message, type) {
+  const cls = type === 'success' ? 'text-bg-success' : (type === 'warning' ? 'text-bg-warning' : 'text-bg-danger');
+  const container = ensureToastContainer();
+  const toastEl = document.createElement('div');
+  toastEl.className = 'toast align-items-center border-0 ' + cls;
+  toastEl.setAttribute('role', 'alert');
+  toastEl.innerHTML = '<div class="d-flex"><div class="toast-body">' + message + '</div>' +
+    '<button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>';
+  container.appendChild(toastEl);
+  const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
+  toast.show();
+  toastEl.addEventListener('hidden.bs.toast', function() { toastEl.remove(); });
 }
 
 </script>

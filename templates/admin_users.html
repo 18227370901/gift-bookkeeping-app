@@ -282,7 +282,7 @@
               <span class="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill"><i class="fa-solid fa-crown me-1"></i>全局完全权限</span>
               {% else %}
               <div class="d-flex gap-1 flex-wrap align-items-center" style="max-width: 260px;">
-                {% set p_labels = {0: '仅自身', 1: '只读', 2: '协作', 3: '完全'} %}
+                {% set p_labels = {0: '仅自身', 1: '自身全权+查他人', 2: '查改他人', 3: '完全'} %}
                 {% set m_names = {'ledger': '账本', 'banquets': '宴席', 'reconciliation': '对账', 'reminders': '备忘', 'recycle_bin': '回收'} %}
                 {% for mk in ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin'] %}
                   {% set pv = u.get_menu_perm(mk) %}
@@ -453,17 +453,16 @@
                             <!-- 1. 礼金账本 -->
                             <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
                               <div class="form-check mb-0 d-flex align-items-center">
-                                <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="ledger" id="menu_ledger_{{ u.id }}" checked disabled>
-                                <input type="hidden" name="allowed_menus" value="ledger">
+                                <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="ledger" id="menu_ledger_{{ u.id }}" {% if u.can_access_menu('ledger') %}checked{% endif %}>
                                 <label class="form-check-label fw-semibold small text-dark" for="menu_ledger_{{ u.id }}">
-                                  <i class="fa-solid fa-list text-success me-1"></i>礼金账本 <span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size:0.7rem;">基础</span>
+                                  <i class="fa-solid fa-list text-success me-1"></i>礼金账本
                                 </label>
                               </div>
                               <div style="min-width: 210px;">
                                 {% set p_ledger = u.get_menu_perm('ledger') %}
                                 <select class="form-select form-select-sm" name="menu_perm_ledger">
                                   <option value="0" {% if p_ledger == 0 %}selected{% endif %}>仅管理自身数据</option>
-                                  <option value="1" {% if p_ledger == 1 %}selected{% endif %}>仅查看他人数据</option>
+                                  <option value="1" {% if p_ledger == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
                                   <option value="2" {% if p_ledger == 2 %}selected{% endif %}>查看+修改他人数据</option>
                                   <option value="3" {% if p_ledger == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
                                 </select>
@@ -482,7 +481,7 @@
                                 {% set p_banquets = u.get_menu_perm('banquets') %}
                                 <select class="form-select form-select-sm" name="menu_perm_banquets">
                                   <option value="0" {% if p_banquets == 0 %}selected{% endif %}>仅管理自身数据</option>
-                                  <option value="1" {% if p_banquets == 1 %}selected{% endif %}>仅查看他人数据</option>
+                                  <option value="1" {% if p_banquets == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
                                   <option value="2" {% if p_banquets == 2 %}selected{% endif %}>查看+修改他人数据</option>
                                   <option value="3" {% if p_banquets == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
                                 </select>
@@ -501,7 +500,7 @@
                                 {% set p_recon = u.get_menu_perm('reconciliation') %}
                                 <select class="form-select form-select-sm" name="menu_perm_reconciliation">
                                   <option value="0" {% if p_recon == 0 %}selected{% endif %}>仅管理自身数据</option>
-                                  <option value="1" {% if p_recon == 1 %}selected{% endif %}>仅查看他人数据</option>
+                                  <option value="1" {% if p_recon == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
                                   <option value="2" {% if p_recon == 2 %}selected{% endif %}>查看+修改他人数据</option>
                                   <option value="3" {% if p_recon == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
                                 </select>
@@ -520,7 +519,7 @@
                                 {% set p_reminders = u.get_menu_perm('reminders') %}
                                 <select class="form-select form-select-sm" name="menu_perm_reminders">
                                   <option value="0" {% if p_reminders == 0 %}selected{% endif %}>仅管理自身数据</option>
-                                  <option value="1" {% if p_reminders == 1 %}selected{% endif %}>仅查看他人数据</option>
+                                  <option value="1" {% if p_reminders == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
                                   <option value="2" {% if p_reminders == 2 %}selected{% endif %}>查看+修改他人数据</option>
                                   <option value="3" {% if p_reminders == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
                                 </select>
@@ -539,12 +538,62 @@
                                 {% set p_recycle = u.get_menu_perm('recycle_bin') %}
                                 <select class="form-select form-select-sm" name="menu_perm_recycle_bin">
                                   <option value="0" {% if p_recycle == 0 %}selected{% endif %}>仅管理自身数据</option>
-                                  <option value="1" {% if p_recycle == 1 %}selected{% endif %}>仅查看他人数据</option>
+                                  <option value="1" {% if p_recycle == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
                                   <option value="2" {% if p_recycle == 2 %}selected{% endif %}>查看+修改他人数据</option>
                                   <option value="3" {% if p_recycle == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
                                 </select>
                               </div>
                             </div>
+                          </div>
+                        </div>
+
+                        <!-- 备份功能授权 -->
+                        <div class="mb-3">
+                          <label class="form-label fw-bold small text-dark mb-2">
+                            <i class="fa-solid fa-cloud-arrow-up text-warning me-1"></i>备份功能授权：
+                          </label>
+                          <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="backup_authorized" value="1" id="backup_auth_{{ u.id }}" {% if u.backup_authorized %}checked{% endif %}>
+                            <label class="form-check-label small text-muted" for="backup_auth_{{ u.id }}">
+                              授权该用户使用 WebDAV 备份与恢复功能
+                            </label>
+                          </div>
+                          <!-- V6: 备份数据权限级别 -->
+                          {% set p_backups = u.get_menu_perm('backups') %}
+                          <div class="mt-2">
+                            <label class="form-label small text-muted mb-1">备份数据跨用户权限级别：</label>
+                            <select class="form-select form-select-sm" name="menu_perm_backups">
+                              <option value="0" {% if p_backups == 0 %}selected{% endif %}>仅管理自身数据</option>
+                              <option value="1" {% if p_backups == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
+                              <option value="2" {% if p_backups == 2 %}selected{% endif %}>查看+修改他人数据</option>
+                              <option value="3" {% if p_backups == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <!-- V6: 定时任务授权 -->
+                        <div class="mb-3">
+                          <label class="form-label fw-bold small text-dark mb-2">
+                            <i class="fa-solid fa-clock text-success me-1"></i>定时任务授权：
+                          </label>
+                          <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="scheduled_task_authorized" value="1" id="task_auth_{{ u.id }}" {% if u.scheduled_task_authorized %}checked{% endif %}>
+                            <label class="form-check-label small text-muted" for="task_auth_{{ u.id }}">
+                              授权该用户使用定时备份任务功能
+                            </label>
+                          </div>
+                        </div>
+
+                        <!-- V3: AI 助手授权 -->
+                        <div class="mb-3">
+                          <label class="form-label fw-bold small text-dark mb-2">
+                            <i class="fa-solid fa-robot text-info me-1"></i>AI 助手授权：
+                          </label>
+                          <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="ai_authorized" value="1" id="ai_auth_{{ u.id }}" {% if u.ai_authorized %}checked{% endif %}>
+                            <label class="form-check-label small text-muted" for="ai_auth_{{ u.id }}">
+                              授权该用户使用 AI 助手功能
+                            </label>
                           </div>
                         </div>
 
@@ -918,6 +967,31 @@ function copyCredPassword() {
         </div>
         <div id="credError" class="alert alert-danger d-none mb-0"></div>
 
+        <!-- 管理员二次验证界面（查看管理员账号凭证时需先验证原密码或原密保） -->
+        <div id="credVerifySection" class="d-none">
+          <div class="alert alert-warning-subtle border border-warning-subtle py-2 px-3 small rounded-3 mb-3">
+            <i class="fa-solid fa-triangle-exclamation me-1 text-warning"></i>
+            <strong>安全验证：</strong>管理员账号的凭证受保护，请先验证原密码或原密保答案。
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold text-secondary">原密码</label>
+            <div class="input-group input-group-sm">
+              <input type="password" id="credVerifyPwdInput" class="form-control" placeholder="输入当前账号原密码">
+              <button class="btn btn-outline-secondary" type="button" onclick="togglePassVisibility('credVerifyPwdInput', this)"><i class="fa-regular fa-eye"></i></button>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small fw-bold text-secondary">密保答案 <span id="credVerifyQuestionLabel" class="text-muted fw-normal"></span></label>
+            <input type="text" id="credVerifyAnsInput" class="form-control form-control-sm" placeholder="输入密保答案（若配置了双密保请同时输入）">
+          </div>
+          <div id="credVerifyError" class="alert alert-danger d-none py-1 px-2 small mb-2"></div>
+          <div class="text-end">
+            <button type="button" class="btn btn-primary btn-sm rounded-pill px-4" onclick="submitAdminVerifyCred()">
+              <i class="fa-solid fa-shield-halved me-1"></i>验证并查看
+            </button>
+          </div>
+        </div>
+
         <div id="credContent" class="d-none">
           <div class="alert alert-warning-subtle border border-warning-subtle py-2 px-3 small rounded-3 mb-3">
             <i class="fa-solid fa-triangle-exclamation me-1 text-warning"></i>
@@ -998,10 +1072,9 @@ function copyCredPassword() {
               <!-- 1. 礼金账本 -->
               <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
                 <div class="form-check mb-0 d-flex align-items-center">
-                  <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="ledger" id="batch_menu_ledger" checked disabled>
-                  <input type="hidden" name="allowed_menus" value="ledger">
+                  <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="ledger" id="batch_menu_ledger" checked>
                   <label class="form-check-label fw-semibold small text-dark" for="batch_menu_ledger">
-                    <i class="fa-solid fa-list text-success me-1"></i>礼金账本 <span class="badge bg-success-subtle text-success border border-success-subtle" style="font-size:0.7rem;">基础</span>
+                    <i class="fa-solid fa-list text-success me-1"></i>礼金账本
                   </label>
                 </div>
                 <div style="min-width: 210px;">
@@ -1085,6 +1158,61 @@ function copyCredPassword() {
                   </select>
                 </div>
               </div>
+
+              <!-- 6. WebDAV备份 -->
+              <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
+                <div class="form-check mb-0 d-flex align-items-center">
+                  <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="backups" id="batch_menu_backups">
+                  <label class="form-check-label fw-semibold small text-dark" for="batch_menu_backups">
+                    <i class="fa-solid fa-cloud-arrow-up text-warning me-1"></i>WebDAV备份
+                  </label>
+                </div>
+                <div style="min-width: 210px;">
+                  <select class="form-select form-select-sm" name="menu_perm_backups">
+                    <option value="0" selected>仅管理自身数据</option>
+                    <option value="1">仅查看他人数据</option>
+                    <option value="2">查看+修改他人数据</option>
+                    <option value="3">查看+修改+删除他人数据</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- V6: 批量备份功能授权 -->
+          <div class="mb-3">
+            <label class="form-label fw-bold small text-dark mb-2">
+              <i class="fa-solid fa-cloud-arrow-up text-warning me-1"></i>备份功能授权：
+            </label>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="backup_authorized" value="1" id="batch_backup_auth">
+              <label class="form-check-label small text-muted" for="batch_backup_auth">
+                勾选后批量授权选中用户使用 WebDAV 备份与恢复功能
+              </label>
+            </div>
+          </div>
+
+          <!-- V6: 批量定时任务授权 -->
+          <div class="mb-3">
+            <label class="form-label fw-bold small text-dark mb-2">
+              <i class="fa-solid fa-clock text-success me-1"></i>定时任务授权：
+            </label>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="scheduled_task_authorized" value="1" id="batch_task_auth">
+              <label class="form-check-label small text-muted" for="batch_task_auth">
+                勾选后批量授权选中用户使用定时备份任务功能
+              </label>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold small text-dark mb-2">
+              <i class="fa-solid fa-robot text-info me-1"></i>AI 助手授权：
+            </label>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="ai_authorized" value="1" id="batch_ai_auth">
+              <label class="form-check-label small text-muted" for="batch_ai_auth">
+                勾选后批量授权选中用户使用 AI 助手功能
+              </label>
             </div>
           </div>
 

@@ -19,7 +19,9 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from models import (
     db, User, GiftRecord, OperationLog, SystemSetting, RegistrationToken,
     LoginRisk, SecurityRisk, Broadcast, BroadcastRead, WebhookConfig, WebhookLog,
-    SharedLedgerLink, BackupConfig, Banquet, AnniversaryReminder
+    SharedLedgerLink, BackupConfig, Banquet, AnniversaryReminder,
+    ChatSession, ChatMessage, AIQueryLog,
+    ScheduledBackupTask, BackupAttachment, PermissionTicket
 )
 from webhook_utils import trigger_webhook_event
 from webdav_utils import (
@@ -318,6 +320,47 @@ def purge_expired_logs(days=90):
             pass
         print(f"[Purge Logs Error] 自动清理失效日志异常: {e}")
 
+import json as _json_module
+
+# V10: 审计日志模块过滤映射——按 action 关键词归组
+AUDIT_MODULE_MAP = {
+    'ledger': ['记录', '极简记账', '导入', '导出', '查询记录'],
+    'banquets': ['大账本', '宴席', '分享链接'],
+    'reconciliation': ['对账'],
+    'reminders': ['纪念日', '提醒'],
+    'recycle_bin': ['回收站'],
+    'admin_users': ['用户', '权限', '账号', '密码', '密保'],
+    'webhooks': ['Webhook', 'webhook', '推送日志'],
+    'backups': ['WebDAV', '备份', '恢复', '定时任务', '附件'],
+    'permission_tickets': ['工单', '权限申请'],
+    'broadcasts': ['广播'],
+    'ai_assistant': ['AI', '会话', '配置更新', '授权管理'],
+    'auth': ['登录', '注册', '退出', '找回', '风控', '锁定'],
+    'system': ['系统配置', '注册策略', '邀请', '日志'],
+}
+
+def _get_audit_module(action_text):
+    """根据 action 文本判断所属模块，返回模块标识或 None"""
+    for module_key, keywords in AUDIT_MODULE_MAP.items():
+        for kw in keywords:
+            if kw in action_text:
+                return module_key
+    return 'system'  # 未匹配的默认归入 system
+
+def _should_log_module(action_text):
+    """检查当前模块是否在管理员配置的审计日志白名单中"""
+    try:
+        config_val = SystemSetting.get_val('audit_log_modules', None)
+        if not config_val:
+            return True  # 未配置 = 默认全部记录
+        modules = _json_module.loads(config_val)
+        if not modules or 'all' in modules:
+            return True  # 空列表或包含 'all' = 全部记录
+        module_key = _get_audit_module(action_text)
+        return module_key in modules
+    except Exception:
+        return True  # 出错时默认记录
+
 def log_action(action, detail="", user=None):
     # 每次写入日志时顺便触发清理超过3个月的超期日志
     purge_expired_logs(days=90)
@@ -342,6 +385,10 @@ def log_action(action, detail="", user=None):
             else:
                 u_id = None
                 u_name = "未登录/系统"
+
+        # V10: 模块级过滤——若该模块未在白名单中则跳过写入
+        if not _should_log_module(actual_action):
+            return
 
         ip_addr = request.remote_addr if request else ""
         if request and request.headers.get("X-Forwarded-For"):
@@ -467,7 +514,7 @@ def can_user_view_entity(user, entity, menu_key=None):
     return bool(getattr(user, 'can_view_others', False))
 
 def can_user_edit_entity(user, entity, menu_key=None):
-    """判断用户是否有权修改指定实体（级别1为仅查看全只读模式，普通用户不得修改管理员创建的实体）"""
+    """判断用户是否有权修改指定实体（级别1：自身可改、他人只读）"""
     if not user or not user.is_authenticated:
         return False
     if getattr(user, 'is_admin', False):
@@ -476,17 +523,14 @@ def can_user_edit_entity(user, entity, menu_key=None):
         return False
     mk = _infer_entity_menu(entity, menu_key)
     perm = user.get_menu_perm(mk) if hasattr(user, 'get_menu_perm') else 0
-    # 级别 1 为仅查看全只读模式，不可进行任何修改
-    if perm == 1:
-        return False
-    # 实体属于自身：权限 0(自管)、2(查+改)、3(查+改+删) 均可修改
+    # 实体属于自身：级别 0(自管)、1(查他人)、2(查+改)、3(查+改+删) 均可修改
     if getattr(entity, 'user_id', None) == user.id:
         return True
     # 他人实体：需要级别 >= 2 (查看+修改他人数据)
     return perm >= 2
 
 def can_user_delete_entity(user, entity, menu_key=None):
-    """判断用户是否有权删除指定实体（级别1与级别2严禁删除，普通用户不得删除管理员创建的实体）"""
+    """判断用户是否有权删除指定实体（级别1自身可删、他人不可删；级别2严禁任何删除）"""
     if not user or not user.is_authenticated:
         return False
     if getattr(user, 'is_admin', False):
@@ -495,12 +539,9 @@ def can_user_delete_entity(user, entity, menu_key=None):
         return False
     mk = _infer_entity_menu(entity, menu_key)
     perm = user.get_menu_perm(mk) if hasattr(user, 'get_menu_perm') else 0
-    # 级别 1 (仅查看) 与 级别 2 (查+改) 严禁任何删除
-    if perm in (1, 2):
-        return False
-    # 实体属于自身：权限 0(自管)、3(查+改+删) 可删除
+    # 实体属于自身：级别 0(自管)、1(查他人)、3(查+改+删) 可删除；级别 2 不可删
     if getattr(entity, 'user_id', None) == user.id:
-        return True
+        return perm != 2
     # 他人实体：需要级别 >= 3 (查看+修改+删除他人数据)
     return perm >= 3
 
@@ -654,8 +695,102 @@ def init_database():
             "UPDATE users SET allowed_menus = 'ledger,banquets,reconciliation,reminders,recycle_bin' WHERE is_admin = 1",
             "UPDATE users SET allowed_menus = 'ledger' WHERE allowed_menus IS NULL",
             "UPDATE users SET security_question_1 = security_question, security_answer_hash_1 = security_answer_hash WHERE security_question_1 IS NULL AND security_question IS NOT NULL",
-            "UPDATE gift_records SET record_type = 'receive' WHERE record_type IS NULL"
+            "UPDATE gift_records SET record_type = 'receive' WHERE record_type IS NULL",
+            # --- AI 助手模块迁移 ---
+            "ALTER TABLE users ADD COLUMN ai_api_key VARCHAR(512)",
+            "ALTER TABLE users ADD COLUMN ai_base_url VARCHAR(255) DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN ai_model VARCHAR(100) DEFAULT ''",
+            "ALTER TABLE users ADD COLUMN ai_configs TEXT DEFAULT '[]'",
+            "ALTER TABLE users ADD COLUMN ai_authorized BOOLEAN DEFAULT 0",
+            # --- Webhook 推送矩阵新字段 ---
+            "ALTER TABLE webhook_configs ADD COLUMN notify_on_update BOOLEAN DEFAULT 0",
+            "ALTER TABLE webhook_configs ADD COLUMN notify_on_security BOOLEAN DEFAULT 0",
+            "ALTER TABLE webhook_configs ADD COLUMN notify_on_system BOOLEAN DEFAULT 1",
+            "ALTER TABLE webhook_configs ADD COLUMN notify_on_status_change BOOLEAN DEFAULT 0",
+            "ALTER TABLE webhook_configs ADD COLUMN notify_pages TEXT DEFAULT '{}'",
+            "ALTER TABLE webhook_configs ADD COLUMN message_templates TEXT DEFAULT '{}'",
+            # --- 备份加密与授权字段 ---
+            "ALTER TABLE users ADD COLUMN backup_authorized BOOLEAN DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN scheduled_task_authorized BOOLEAN DEFAULT 0",
+            "ALTER TABLE backup_configs ADD COLUMN backup_encrypt_password VARCHAR(512)",
+            # --- 新模型建表 ---
+            """CREATE TABLE IF NOT EXISTS scheduled_backup_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name VARCHAR(100) NOT NULL DEFAULT '定时备份',
+                cron_expr VARCHAR(50) NOT NULL DEFAULT '0 2 * * *',
+                is_enabled BOOLEAN DEFAULT 0,
+                encrypt_enabled BOOLEAN DEFAULT 0,
+                last_run_time DATETIME,
+                last_run_status VARCHAR(255),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS backup_attachments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename VARCHAR(255) NOT NULL,
+                file_size INTEGER DEFAULT 0,
+                file_type VARCHAR(50) DEFAULT 'application/octet-stream',
+                is_encrypted BOOLEAN DEFAULT 0,
+                uploaded_by INTEGER REFERENCES users(id),
+                storage_path VARCHAR(500),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+            """CREATE TABLE IF NOT EXISTS permission_tickets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                requested_menus VARCHAR(256) NOT NULL,
+                reason TEXT,
+                status VARCHAR(20) DEFAULT 'pending',
+                reviewed_by INTEGER REFERENCES users(id),
+                reviewed_at DATETIME,
+                review_comment TEXT,
+                granted_menus VARCHAR(256),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )"""
         ]
+        # --- V2 修复：新增字段迁移 ---
+        migration_sqls.extend([
+            "ALTER TABLE webhook_logs ADD COLUMN operator_id INTEGER REFERENCES users(id)",
+            "ALTER TABLE backup_configs ADD COLUMN backup_subdir VARCHAR(100) DEFAULT 'gift_backups'",
+            "ALTER TABLE scheduled_backup_tasks ADD COLUMN task_type VARCHAR(20) DEFAULT 'db_backup'",
+            "ALTER TABLE scheduled_backup_tasks ADD COLUMN target_files TEXT",
+            "ALTER TABLE scheduled_backup_tasks ADD COLUMN custom_script TEXT",
+        ])
+        # --- V3 修复：新增字段与新表迁移 ---
+        migration_sqls.extend([
+            # BackupConfig 支持多用户隔离
+            "ALTER TABLE backup_configs ADD COLUMN user_id INTEGER",
+            "ALTER TABLE backup_configs ADD COLUMN allow_view_others_tasks BOOLEAN DEFAULT 0",
+            # ScheduledBackupTask 新增创建者
+            "ALTER TABLE scheduled_backup_tasks ADD COLUMN created_by INTEGER REFERENCES users(id)",
+            # 定时任务执行历史日志表
+            """CREATE TABLE IF NOT EXISTS scheduled_task_execution_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id INTEGER NOT NULL REFERENCES scheduled_backup_tasks(id) ON DELETE CASCADE,
+                start_time DATETIME,
+                end_time DATETIME,
+                status VARCHAR(20) DEFAULT 'running',
+                output_log TEXT,
+                executed_by VARCHAR(100),
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+        ])
+        # --- V9 修复：WebDAV 配置别称与引用标记 ---
+        migration_sqls.extend([
+            "ALTER TABLE backup_configs ADD COLUMN config_alias VARCHAR(100)",
+            "ALTER TABLE backup_configs ADD COLUMN adopted_from_admin BOOLEAN DEFAULT 0",
+        ])
+        # --- V10.2 新增：定时任务操作权限细化字段 ---
+        migration_sqls.extend([
+            "ALTER TABLE backup_configs ADD COLUMN allow_edit_others_tasks BOOLEAN DEFAULT 0",
+            "ALTER TABLE backup_configs ADD COLUMN allow_delete_others_tasks BOOLEAN DEFAULT 0",
+        ])
+        # --- V10.3 新增：Webhook 用户级监控过滤字段 ---
+        migration_sqls.extend([
+            "ALTER TABLE webhook_configs ADD COLUMN monitor_user_ids TEXT DEFAULT '[]'",
+            "ALTER TABLE webhook_configs ADD COLUMN monitor_event_types TEXT DEFAULT '[]'",
+        ])
         with db.engine.connect() as conn:
             for sql in migration_sqls:
                 try:
@@ -727,6 +862,12 @@ except Exception as _e:
 @app.route('/')
 @login_required
 def index():
+    # V7 修复：无礼金账本权限的用户直接访问首页（/）时，
+    # 跳转权限工单页引导申请权限，避免在无权限状态下渲染账本页面
+    if not getattr(current_user, 'is_admin', False) and hasattr(current_user, 'can_access_menu'):
+        if not current_user.can_access_menu('ledger'):
+            flash('您暂无权限访问【礼金账本】功能模块，请在下方提交权限申请工单，待管理员审批通过后即可使用。', 'warning')
+            return redirect(url_for('permission_tickets_view'))
     query_str = request.args.get('search', '').strip() or request.args.get('q', '').strip()
     reason_filter = request.args.get('reason', '').strip()
     sort_by = request.args.get('sort', 'created_at_desc').strip()
@@ -1016,6 +1157,16 @@ def login():
             session['login_time'] = datetime.now().timestamp()
             session['last_activity'] = datetime.now().timestamp()
             log_action('用户登录', f'用户成功登录系统', user=user)
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                    f'用户登录',
+                    f'操作人：{user.username} | 页面：系统安全 | 结果：登录成功',
+                    page_key='security', user_name=user.username,
+                    operator_id=user.id
+                )
+            except Exception:
+                pass
             flash(f'欢迎回来，{user.username}！', 'success')
             # 登录时主动检测是否有当前用户未读的有效广播并提示
             try:
@@ -1040,6 +1191,16 @@ def login():
             new_fail_count = cur_fail_count + 1
             LOGIN_FAIL_COUNTS[username] = new_fail_count
             log_action('登录失败', f'尝试登录用户名 [{username}] 失败（连续失败{new_fail_count}次）')
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                    f'登录失败',
+                    f'操作人：{username} | 页面：系统安全 | 结果：登录失败（连续{new_fail_count}次）',
+                    page_key='security', user_name=username,
+                    operator_id=None
+                )
+            except Exception:
+                pass
 
             if new_fail_count >= max_attempts:
                 lock_duration = lockout_seconds
@@ -1134,6 +1295,7 @@ def register():
         user = User(username=username)
         user.set_password(password)
         user.set_security_answers(q1, a1, q2, a2)
+        user.allowed_menus = ''  # 新注册用户默认无任何菜单权限，需通过工单申请
 
         # 增加 token 使用次数，达到上限标记为已使用（自由注册模式下 reg_token 可能为 None）
         if reg_token:
@@ -1146,7 +1308,17 @@ def register():
         db.session.commit()
 
         log_action('用户注册', f'新用户 [{username}] 识别邀请码成功注册账号', user=user)
-        flash('注册成功，请使用新账号登录！', 'success')
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                f'新用户注册',
+                f'操作人：{username} | 页面：系统安全 | 新用户ID：{user.id}',
+                page_key='security', user_name=username,
+                operator_id=user.id
+            )
+        except Exception:
+            pass
+        flash('注册成功！当前账号暂无功能页面权限，登录后请在「权限申请」页面提交权限申请工单，等待管理员审批后即可使用各功能模块。', 'success')
         return redirect(url_for('login'))
 
     return render_template('register.html', token=token_str, invalid_token=False, registration_mode=reg_mode)
@@ -1300,6 +1472,16 @@ def forgot_password():
             db.session.commit()
 
             log_action('重置密码', f'用户成功重置个人密码', user=user)
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                    f'找回密码重置',
+                    f'操作人：{user.username} | 页面：系统安全 | 结果：密码重置成功',
+                    page_key='security', user_name=user.username,
+                    operator_id=user.id
+                )
+            except Exception:
+                pass
             flash('密码重置成功！请使用新密码重新登录。', 'success')
             return redirect(url_for('login'))
 
@@ -1309,6 +1491,16 @@ def forgot_password():
 def logout():
     if current_user.is_authenticated:
         log_action('退出登录', f'用户退出系统登录')
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'用户退出登录',
+                f'操作人：{current_user.username} | 页面：系统安全',
+                page_key='security', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         current_user.session_token = None
         db.session.commit()
     logout_user()
@@ -1328,11 +1520,7 @@ def logout():
 @login_required
 def add_record():
     is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
-    if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('ledger') == 1:
-        if is_ajax:
-            return jsonify({'code': 403, 'message': '当前页面为仅查看权限，无权新增礼金记录！'}), 403
-        flash('当前页面为仅查看权限，无权新增礼金记录！', 'danger')
-        return redirect(url_for('index'))
+    # V10.4: 级别1可正常新增自身记录，移除 == 1 拦截
     name = request.form.get('name', '').strip()
     age_str = request.form.get('age', '').strip()
     address = request.form.get('address', '').strip()
@@ -1405,6 +1593,16 @@ def add_record():
 
     type_str = "随礼(出礼)" if record_type == 'send' else "收礼(入礼)"
     log_action('新增记录', f'新增{type_str}: [{name}]，金额: {amount}元，事由: {event_reason}')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
+            f'{current_user.username} 新增{type_str}：客人「{name}」，金额 {amount:.2f}元，事由：{event_reason}',
+            f'操作人：{current_user.username} | 页面：礼金账本 | 类型：{type_str} | 客人：{name} | 金额：{amount:.2f}元 | 事由：{event_reason}',
+            page_key='ledger', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     if is_ajax:
         return jsonify({'code': 200, 'message': f'成功保存 [{name}] 的礼金记录！', 'record_id': record.id})
     flash(f'成功保存 [{name}] 的礼金记录！', 'success')
@@ -1488,6 +1686,16 @@ def edit_record(record_id):
 
     db.session.commit()
     log_action('修改记录', f'修改记录 ID #{record_id}: 姓名 [{name}]，金额: {amount}元，事由: {event_reason}')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_update',
+            f'{current_user.username} 修改记录：客人「{name}」，金额 {amount:.2f}元，事由：{event_reason}',
+            f'操作人：{current_user.username} | 页面：礼金账本 | 客人：{name} | 金额：{amount:.2f}元 | 事由：{event_reason}',
+            page_key='ledger', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     if is_ajax:
         return jsonify({'code': 200, 'message': f'记录 [{name}] 修改成功！'})
     flash(f'记录 [{name}] 修改成功！', 'success')
@@ -1511,10 +1719,17 @@ def delete_record(record_id):
         return redirect(url_for('index'))
 
     record_name = record.name
+    record_amount = record.amount
     record.deleted_at = datetime.now()
     db.session.commit()
     try:
-        trigger_webhook_event(WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete', record_name, {'id': record.id})
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
+            f'{current_user.username} 删除记录：客人「{record_name}」，金额 {record_amount:.2f}元',
+            f'操作人：{current_user.username} | 页面：礼金账本 | 客人：{record_name} | 金额：{record_amount:.2f}元 | 状态：已移入回收站',
+            page_key='ledger', user_name=current_user.username,
+            operator_id=current_user.id
+        )
     except Exception:
         pass
     log_action('删除记录至回收站', f'删除记录 ID #{record_id}: 姓名 [{record_name}] 进入回收站')
@@ -1527,7 +1742,7 @@ def delete_record(record_id):
 @login_required
 def batch_delete_records():
     is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
-    if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('ledger') in (1, 2):
+    if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('ledger') in (2,):
         if is_ajax:
             return jsonify({'code': 403, 'message': '当前页面权限不允许删除记录！'}), 403
         flash('当前页面权限不允许删除记录！', 'danger')
@@ -1554,7 +1769,13 @@ def batch_delete_records():
     db.session.commit()
     if deleted_count > 0:
         try:
-            trigger_webhook_event(WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete', f'{deleted_count} 条记录', {'count': deleted_count})
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
+                f'{current_user.username} 批量删除 {deleted_count} 条记录',
+                f'操作人：{current_user.username} | 页面：礼金账本 | 数量：{deleted_count} 条 | 状态：已移入回收站',
+                page_key='ledger', user_name=current_user.username,
+                operator_id=current_user.id
+            )
         except Exception:
             pass
     log_action('批量删除记录至回收站', f'成功批量将 {deleted_count} 条礼金记录移入回收站')
@@ -1585,7 +1806,13 @@ def delete_all_records():
     db.session.commit()
     if deleted_count > 0:
         try:
-            trigger_webhook_event(WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete', f'全部 {deleted_count} 条记录', {'count': deleted_count})
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'clear',
+                f'{current_user.username} 清空 {deleted_count} 条记录',
+                f'操作人：{current_user.username} | 页面：礼金账本 | 数量：全部 {deleted_count} 条 | 状态：已移入回收站',
+                page_key='ledger', user_name=current_user.username,
+                operator_id=current_user.id
+            )
         except Exception:
             pass
     log_action('全部删除记录至回收站', f'成功将 {deleted_count} 条礼金记录移入回收站')
@@ -1612,6 +1839,16 @@ def change_password():
         db.session.commit()
 
         log_action('修改密码', f'用户成功修改个人密码')
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'修改密码 [{current_user.username}]',
+                f'操作人：{current_user.username} | 页面：系统安全',
+                page_key='security', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash('密码修改成功，请使用新密码重新登录！', 'success')
         return redirect(url_for('login'))
 
@@ -1696,6 +1933,17 @@ def update_session_timeout():
             SystemSetting.set_val('max_security_attempts', sec_attempts)
             SystemSetting.set_val('login_lockout_seconds', lockout_sec)
             log_action('更新系统配置', f'设置超时时间为 {minutes} 分钟，密码最大尝试次数为 {attempts} 次，密保最大尝试次数为 {sec_attempts} 次，锁定时长为 {lockout_sec} 秒')
+            # V10.3: 补充系统安全配置推送
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                    f'{current_user.username} 更新安全配置',
+                    f'操作人：{current_user.username} | 页面：用户管理 | 操作：更新系统安全配置',
+                    page_key='admin_users', user_name=current_user.username,
+                    operator_id=current_user.id
+                )
+            except Exception:
+                pass
             flash('系统安全与登录设置修改成功！', 'success')
     except (ValueError, TypeError):
         flash('无效的配置参数！', 'danger')
@@ -1742,13 +1990,36 @@ def admin_logs():
         query = query.order_by(col.desc())
 
     logs = query.paginate(page=page, per_page=per_page)
+
+    # V10: 读取审计日志模块配置
+    audit_modules_raw = SystemSetting.get_val('audit_log_modules', None)
+    audit_modules_enabled = []
+    audit_modules_all = [
+        ('ledger', '礼金账本'), ('banquets', '专属宴席'), ('reconciliation', '人情对账'),
+        ('reminders', '纪念日备忘'), ('recycle_bin', '回收站'), ('admin_users', '用户管理'),
+        ('webhooks', 'Webhook'), ('backups', '备份管理'), ('permission_tickets', '权限工单'),
+        ('broadcasts', '系统广播'), ('ai_assistant', 'AI助手'), ('auth', '认证安全'),
+        ('system', '系统配置'),
+    ]
+    if not audit_modules_raw:
+        audit_modules_enabled = [m[0] for m in audit_modules_all]  # 默认全部启用
+    else:
+        try:
+            audit_modules_enabled = _json_module.loads(audit_modules_raw)
+            if not audit_modules_enabled or 'all' in audit_modules_enabled:
+                audit_modules_enabled = [m[0] for m in audit_modules_all]
+        except Exception:
+            audit_modules_enabled = [m[0] for m in audit_modules_all]
+
     return render_template(
         'admin_logs.html',
         logs=logs,
         q=search_q,
         sort_by=sort_by,
         sort_order=sort_order,
-        per_page=per_page
+        per_page=per_page,
+        audit_modules_all=audit_modules_all,
+        audit_modules_enabled=audit_modules_enabled
     )
 
 @app.route('/admin/logs/batch_delete', methods=['POST'])
@@ -1768,6 +2039,15 @@ def admin_batch_delete_logs():
         deleted_count = OperationLog.query.filter(OperationLog.id.in_(log_ids_int)).delete(synchronize_session=False)
         db.session.commit()
         log_action('批量删除日志', f'管理员勾选删除了 {deleted_count} 条操作日志')
+        # V10: 补充审计日志删除推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'管理员 {current_user.username} 批量删除了 {deleted_count} 条操作审计日志',
+                page_key='admin_logs', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'成功批量删除 {deleted_count} 条审计日志！', 'success')
     except Exception as e:
         db.session.rollback()
@@ -1806,6 +2086,16 @@ def generate_invite_link():
     db.session.commit()
 
     log_action('生成注册邀请', f'生成有效时间为 {expire_hours} 小时、可用次数为 {max_uses} 次的注册链接')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+            f'生成注册邀请链接',
+            f'操作人：{current_user.username} | 页面：邀请链接 | 有效期：{expire_hours}小时 | 可用次数：{max_uses}',
+            page_key='invites', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash(f'注册邀请链接已成功生成（可使用 {max_uses} 次）！', 'success')
     return redirect(url_for('admin_users'))
 
@@ -1822,6 +2112,16 @@ def admin_delete_invite_link(token_id):
     db.session.commit()
 
     log_action('删除注册邀请链接', f'管理员删除了邀请链接前缀为 [{token_val}] 的链接')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
+            f'删除注册邀请链接',
+            f'操作人：{current_user.username} | 页面：邀请链接 | 前缀：{token_val}',
+            page_key='invites', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash('邀请链接已成功删除！', 'success')
     return redirect(url_for('admin_users'))
 
@@ -1845,6 +2145,16 @@ def admin_batch_delete_invite_links():
             db.session.delete(t)
         db.session.commit()
         log_action('批量删除注册邀请链接', f'管理员批量删除了 {deleted_count} 个注册邀请链接')
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
+                f'批量删除 {deleted_count} 个邀请链接',
+                f'操作人：{current_user.username} | 页面：邀请链接 | 数量：{deleted_count}',
+                page_key='invites', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'成功批量删除 {deleted_count} 个注册邀请链接！', 'success')
     except Exception as e:
         db.session.rollback()
@@ -1865,6 +2175,15 @@ def admin_delete_log(log_id):
     db.session.commit()
 
     log_action('删除日志', f'管理员删除了操作日志ID #{log_id} ({action_info})')
+    # V10: 补充审计日志删除推送
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+            f'管理员 {current_user.username} 删除了操作日志 #{log_id} ({action_info})',
+            page_key='admin_logs', user_name=current_user.username, operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash('日志记录已成功删除！', 'success')
     return redirect(url_for('admin_logs'))
 
@@ -1879,7 +2198,45 @@ def admin_clear_logs():
     db.session.commit()
 
     log_action('清空日志', f'管理员清空了所有操作日志（共删除 {deleted_count} 条）')
+    # V10: 补充审计日志清空推送
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'clear',
+            f'管理员 {current_user.username} 清空了所有操作审计日志（共 {deleted_count} 条）',
+            page_key='admin_logs', user_name=current_user.username, operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash(f'已成功清空所有审计日志（共 {deleted_count} 条）！', 'success')
+    return redirect(url_for('admin_logs'))
+
+# V10: 审计日志模块配置保存
+@app.route('/admin/audit-log-config', methods=['POST'])
+@login_required
+def admin_save_audit_log_config():
+    if not current_user.is_admin:
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
+    modules = request.form.getlist('audit_modules')
+    if not modules:
+        SystemSetting.set_val('audit_log_modules', '[]')
+    elif 'all' in modules:
+        SystemSetting.set_val('audit_log_modules', '["all"]')
+    else:
+        SystemSetting.set_val('audit_log_modules', _json_module.dumps(modules))
+    log_action('更新系统配置', f'管理员更新了审计日志记录模块配置: {", ".join(modules) if modules else "全部禁用"}')
+    # V10.3: 补充审计日志配置推送
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+            f'{current_user.username} 更新审计日志配置',
+            f'操作人：{current_user.username} | 页面：审计日志 | 操作：更新模块配置',
+            page_key='admin_logs', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
+    flash('审计日志记录配置已保存成功！', 'success')
     return redirect(url_for('admin_logs'))
 
 @app.route('/admin/settings/registration_mode', methods=['POST'])
@@ -1895,6 +2252,17 @@ def admin_set_registration_mode():
     SystemSetting.set_val('registration_mode', mode)
     mode_name = '自由开放注册' if mode == 'free' else '仅邀请链接注册'
     log_action('修改注册策略', f"管理员将系统注册模式调整为: [{mode_name}]")
+    # V10.3: 补充注册模式变更推送
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+            f'{current_user.username} 修改注册模式',
+            f'操作人：{current_user.username} | 页面：用户管理 | 操作：修改注册模式 | 模式：{mode_name}',
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash(f'注册模式已成功调整为：【{mode_name}】！', 'success')
     return redirect(url_for('admin_users'))
 
@@ -1913,11 +2281,9 @@ def admin_batch_user_permissions():
         return redirect(url_for('admin_users'))
 
     menus_list = request.form.getlist('allowed_menus') or request.form.getlist('allowed_menus[]')
-    if 'ledger' not in menus_list:
-        menus_list.insert(0, 'ledger')
     allowed_menus_str = ",".join(menus_list)
 
-    ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin']
+    ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
     menu_perms = {}
     for m in ALL_MENUS:
         val = request.form.get(f'menu_perm_{m}')
@@ -1928,6 +2294,14 @@ def admin_batch_user_permissions():
         else:
             legacy_p = request.form.get('perm_level', '0')
             menu_perms[m] = int(legacy_p) if str(legacy_p).isdigit() else 0
+
+    # V3: 批量 AI 助手授权
+    ai_auth = request.form.get('ai_authorized', '')
+    ai_auth_val = (ai_auth == '1' or ai_auth == 'on')
+
+    # V6: 批量定时任务授权
+    task_auth = request.form.get('scheduled_task_authorized', '')
+    task_auth_val = (task_auth == '1' or task_auth == 'on')
 
     count = 0
     for uid_str in user_ids:
@@ -1941,6 +2315,10 @@ def admin_batch_user_permissions():
                 u.can_view_others = (ledger_p >= 1)
                 u.can_edit_others = (ledger_p >= 2)
                 u.can_delete_others = (ledger_p >= 3)
+                # V3: 批量 AI 授权
+                u.ai_authorized = ai_auth_val
+                # V6: 批量定时任务授权
+                u.scheduled_task_authorized = task_auth_val
                 count += 1
         except Exception:
             continue
@@ -1948,6 +2326,17 @@ def admin_batch_user_permissions():
     if count > 0:
         db.session.commit()
         log_action('批量配置权限', f"管理员批量更新了 {count} 位用户的菜单与各菜单独立数据权限")
+        # V10.3: 补充批量配置权限推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'update',
+                f'{current_user.username} 批量配置 {count} 位用户权限',
+                f'操作人：{current_user.username} | 页面：用户管理 | 操作：批量配置权限 | 数量：{count}',
+                page_key='admin_users', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'成功批量更新了 {count} 位用户的菜单访问与各菜单独立数据权限！', 'success')
     else:
         flash('未找到符合批量更新条件的普通用户！', 'warning')
@@ -1971,22 +2360,21 @@ def admin_update_user_permissions(user_id):
     if not menus_list:
         menus_raw = request.form.get('allowed_menus', '').strip()
         menus_list = [m.strip() for m in menus_raw.split(',') if m.strip()]
-    if 'ledger' not in menus_list:
-        menus_list.insert(0, 'ledger')
     user.allowed_menus = ",".join(menus_list)
 
     # 2. 各菜单独立数据权限更新
-    ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin']
+    ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
     MENU_NAMES = {
         'ledger': '礼金账本',
         'banquets': '专属宴席',
         'reconciliation': '人情对账',
         'reminders': '纪念日备忘',
-        'recycle_bin': '回收站'
+        'recycle_bin': '回收站',
+        'backups': 'WebDAV备份'
     }
     PERM_LABELS = {
         0: '仅自身',
-        1: '查他人',
+        1: '自身全权+查他人',
         2: '查改他人',
         3: '查改删他人'
     }
@@ -2011,6 +2399,18 @@ def admin_update_user_permissions(user_id):
     user.can_edit_others = (ledger_p >= 2)
     user.can_delete_others = (ledger_p >= 3)
 
+    # 3. 备份功能授权
+    backup_auth = request.form.get('backup_authorized', '')
+    user.backup_authorized = (backup_auth == '1' or backup_auth == 'on')
+
+    # V6: 定时任务功能授权
+    task_auth = request.form.get('scheduled_task_authorized', '')
+    user.scheduled_task_authorized = (task_auth == '1' or task_auth == 'on')
+
+    # V3: AI 助手授权
+    ai_auth = request.form.get('ai_authorized', '')
+    user.ai_authorized = (ai_auth == '1' or ai_auth == 'on')
+
     db.session.commit()
 
     summary_parts = []
@@ -2020,6 +2420,16 @@ def admin_update_user_permissions(user_id):
     perm_summary = "，".join(summary_parts)
 
     log_action('修改用户权限', f'管理员修改了用户 [{user.username}] 的各菜单独立数据权限: {perm_summary}')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
+            f'修改用户权限 [{user.username}]',
+            f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username} | 权限：{perm_summary}',
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash(f'用户 [{user.username}] 的各菜单独立数据权限已更新：{perm_summary}', 'success')
     return redirect(url_for('admin_users'))
 
@@ -2060,6 +2470,17 @@ def admin_reset_user_security(user_id):
         FORGOT_SECURITY_LOCK_UNTILS.pop(user.username, None)
         db.session.commit()
         log_action('重置密保问题', f'管理员重置了用户 [{user.username}] 的密保问题与答案')
+        # V10.3: 补充重置密保推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'{current_user.username} 重置用户密保',
+                f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username} | 操作：重置密保问题',
+                page_key='admin_users', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'用户 [{user.username}] 的密保问题与答案已重置成功！', 'success')
     else:
         flash('密保问题和密保答案均不能为空！', 'warning')
@@ -2092,6 +2513,16 @@ def admin_toggle_user_status(user_id):
 
     status_str = "启用" if user.is_active else "禁用"
     log_action('修改账号状态', f'管理员{status_str}了用户账号 [{user.username}]')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'status_change',
+            f'{status_str}用户 [{user.username}]',
+            f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username} | 状态：{status_str}',
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash(f'用户 [{user.username}] 已成功{status_str}！', 'success')
     return redirect(url_for('admin_users'))
 
@@ -2136,6 +2567,16 @@ def admin_reset_user_pass(user_id):
     LOGIN_LOCK_UNTILS.pop(user.username, None)
     db.session.commit()
     log_action('重置用户密码', f'管理员重置了用户 [{user.username}] 的密码')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+            f'重置用户密码 [{user.username}]',
+            f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username}',
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash(f'用户 [{user.username}] 的密码已重置成功！', 'success')
 
     return redirect(url_for('admin_users'))
@@ -2162,6 +2603,8 @@ def admin_user_credentials(user_id):
             verified = True
 
         if not verified:
+            # V10.7 修复：未验证通过时 HTTP 状态码改为 200（JSON code 仍为 401），
+            # 避免 base.html 全局 Fetch 拦截器把业务性 401 误判为登录失效而强制跳转首页
             return jsonify({
                 'code': 401,
                 'need_verify': True,
@@ -2170,12 +2613,22 @@ def admin_user_credentials(user_id):
                 'q1': user.security_question_1 or user.security_question or '未设置',
                 'q2': user.security_question_2 or '',
                 'message': '管理员账号的安全凭证受保护，必须先验证当前账号的原密码或原密保答案！'
-            }), 401
+            }), 200
 
     plain_password = user.get_decrypted_password()
     security_qa = user.get_decrypted_security_answers()
 
     log_action('查看安全凭证', f'超级管理员查看了用户 [{user.username}] 的安全凭证详情')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+            f'查看安全凭证',
+            f'操作人：{current_user.username} | 页面：用户管理 | 目标用户：{user.username}',
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     return jsonify({
         'code': 200,
         'message': 'success',
@@ -2205,6 +2658,16 @@ def admin_delete_user(user_id):
     db.session.delete(user)
     db.session.commit()
     log_action('删除用户', f'管理员删除了用户账号 [{deleted_username}]')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
+            f'删除用户 [{deleted_username}]',
+            f'操作人：{current_user.username} | 页面：用户管理 | 用户：{deleted_username}',
+            page_key='admin_users', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     flash(f'用户 [{deleted_username}] 及其关联数据已成功删除！', 'success')
     return redirect(url_for('admin_users'))
 
@@ -2241,6 +2704,17 @@ def admin_batch_delete_users():
         db.session.commit()
 
         log_action('批量删除用户', f'管理员批量删除了 {deleted_count} 个用户: {", ".join(deleted_usernames)}')
+        # V10.3: 补充批量删除用户推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
+                f'{current_user.username} 批量删除 {deleted_count} 个用户',
+                f'操作人：{current_user.username} | 页面：用户管理 | 用户：{", ".join(deleted_usernames)} | 数量：{deleted_count}',
+                page_key='admin_users', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'成功批量删除 {deleted_count} 个用户及其关联数据：{", ".join(deleted_usernames)}', 'success')
     except Exception as e:
         db.session.rollback()
@@ -2352,6 +2826,16 @@ def export_csv():
     response = Response(output.getvalue(), mimetype='text/csv; charset=utf-8')
     response.headers['Content-Disposition'] = 'attachment; filename=gift_records.csv'
     log_action('导出数据', f'用户导出了 {len(records)} 条礼金记录 CSV 文件')
+    try:
+        trigger_webhook_event(
+            WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+            f'导出礼金数据',
+            f'操作人：{current_user.username} | 页面：礼金账本 | 导出记录数：{len(records)}',
+            page_key='ledger', user_name=current_user.username,
+            operator_id=current_user.id
+        )
+    except Exception:
+        pass
     return response
 
 
@@ -2374,9 +2858,7 @@ def download_import_template():
 @app.route('/import/csv', methods=['POST'])
 @login_required
 def import_csv():
-    if hasattr(current_user, 'get_menu_perm') and current_user.get_menu_perm('ledger') == 1:
-        flash('当前页面为仅查看权限，无权批量导入记录！', 'danger')
-        return redirect(url_for('index'))
+    # V10.4: 级别1可正常导入自身记录，移除 == 1 拦截
     file = request.files.get('file')
     if not file or file.filename == '':
         flash('请选择要导入的 CSV 文件！', 'danger')
@@ -2500,6 +2982,16 @@ def import_csv():
 
         db.session.commit()
         log_action('导入数据', f'成功导入 {success_count} 条礼金记录（忽略 {skip_count} 条）')
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
+                f'{current_user.username} 导入 {success_count} 条记录',
+                f'操作人：{current_user.username} | 页面：礼金账本 | 导入成功：{success_count} 条 | 忽略：{skip_count} 条',
+                page_key='ledger', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         flash(f'批量导入完成！成功导入 {success_count} 条记录' + (f'，忽略 {skip_count} 条无效数据。' if skip_count > 0 else '。'), 'success')
     except Exception as e:
         db.session.rollback()
@@ -2521,6 +3013,10 @@ register_routes_ext(
     clear_login_risk=clear_login_risk,
     clear_forgot_security_risk=clear_forgot_security_risk
 )
+
+# 注册 AI 助手路由
+from routes_ai import register_ai_routes
+register_ai_routes(app, log_action=log_action)
 
 
 if __name__ == '__main__':

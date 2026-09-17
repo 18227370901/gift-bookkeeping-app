@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '4dd1732e-d111-44fa-861c-c3ed44eec0b3'
+  PropagateID: '4dd1732e-d111-44fa-861c-c3ed44eec0b3'
+  ReservedCode1: '763ab816-04a0-4cba-a751-a8942dc3e877'
+  ReservedCode2: '763ab816-04a0-4cba-a751-a8942dc3e877'
+---
+
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
@@ -124,6 +135,32 @@
 - 💬 **操作反馈与自动淡出**：所有操作提示消息增加自动淡出与关闭机制，优化视觉体验。
 - 🔔 **登录主动广播通知**：普通用户或管理员登录系统时，自动弹出当前正在上线的系统公告通知。
 
+### 10. AI 助手 (AI Assistant) `feature/ai-assistant 分支新增`
+- 🤖 **多会话 AI 聊天**：支持多会话管理（创建/重命名/删除），侧边栏会话列表 + 消息气泡对话区，推荐问题引导。
+- 🔑 **四级 AI 配置优先级容错**：用户多配置 → 用户旧版单配置 → 全局环境变量配置 → 管理员共享配置（仅被授权用户），逐级尝试直至成功。
+- 🌐 **联网搜索增强**：自动检测关键词（天气、新闻、最新等），通过 DuckDuckGo 搜索后结合 AI 生成摘要。
+- 🏠 **本地兜底引擎**：所有 AI 配置均不可用时，内置本地问答引擎提供基础回复。
+- 🛡️ **AI 授权管理**：管理员可授权/撤销普通用户的 AI 使用权限，未授权用户不可见入口。
+- 📝 **管理员多配置管理**：支持配置多个 AI 服务（API Key + Base URL + Model），可启用/禁用、调整优先级。
+
+### 11. Webhook 推送增强 (Webhook Enhancement) `feature/ai-assistant 分支新增`
+- 🎯 **页面事件矩阵**：15 个页面 × 12 个事件类型的二维矩阵配置（Tab 内嵌），每格勾选 = "该页面该事件是否推送"；支持全选/清空。
+- 📋 **扩展事件类型**：在原有新增/删除/纪念日/广播基础上，新增修改/批量删除/清空/同步/还原/状态变更/安全/系统配置 8 种事件类型。
+- 🔒 **敏感页面内容脱敏**：安全相关页面（AI 助手、AI 配置、系统安全、Webhook、备份等）推送内容按事件类型细化脱敏。
+- 📝 **场景化消息模板**：系统默认 12 种场景化提示词；支持按"页面×事件"维度自定义推送消息内容，支持 7 个占位符（`{user}`/`{page}`/`{action}`/`{title}`/`{detail}`/`{time}`/`{count}`）。
+- 🔍 **全项目推送补全**：约 40 处 webhook 推送点补全（礼金账本、宴席、对账、纪念日、回收站、用户管理、AI 助手、定时任务等）。
+
+### 12. 权限申请工单 (Permission Ticket) `feature/ai-assistant 分支新增`
+- 📋 **工单审批流程**：新注册用户默认无任何菜单权限，需通过工单申请并由管理员审批后方可使用。
+- ✅ **管理员审批/驳回**：管理员可查看所有工单，审批通过时勾选授权菜单写入用户权限，驳回时附驳回理由。
+- 🚪 **无权限提示引导**：无权限用户在首页看到友好的权限申请引导卡片，导航栏提供「权限申请」入口。
+
+### 13. 加密备份与定时备份 (Encrypted & Scheduled Backup) `feature/ai-assistant 分支新增`
+- 🔐 **AES-256 加密备份**：使用 `pyzipper` 库实现 AES-256 加密 zip 备份，自动任务用管理员预设密码加密，手动操作可自由选择是否加密并输入密码。
+- ⏰ **定时备份调度器**：支持 Cron 表达式配置定时备份任务，后台守护线程每 60 秒检查并自动执行加密备份上传到 WebDAV。
+- 👥 **备份功能授权**：管理员可授权普通用户使用备份功能（参照 AI 授权模式），被授权用户可执行备份操作。
+- 📊 **定时任务管理**：支持创建/编辑/删除/启用/禁用定时备份任务，查看最近执行时间和状态。
+
 ---
 
 
@@ -138,41 +175,372 @@
 - **ORM 透明加解密**：上层业务通过 Python ORM `@property` 自动透明解密与加密，对业务逻辑零入侵，并内置旧版本明文数据的平滑回退兼容。
 - **日志全自动递归脱敏**：写入系统数据库 `webhook_logs` 与 `operation_logs` 的请求载荷（Payload）与响应体（Response）均经过全自动递归脱敏扫描，所有涉及 `secret`、`token`、`pass`、`key`、`credential`、`auth` 的字段值均强制替换为 `***MASKED***`，保障运维审计日志绝对安全。
 
+### V2 修复与优化（2026-09-10）
+
+#### Webhook 通知
+- 修复新增通道 Modal 缺少保存按钮的问题
+- 修复编辑按钮无响应问题
+- 推送日志新增"发起用户"列，记录操作发起人
+- Webhook CRUD 操作全部写入审计日志
+
+#### 权限管理
+- 权限申请页已申请/已有权限的菜单自动禁用勾选，防止重复申请
+
+#### WebDAV 备份
+- WebDAV 配置对普通用户隐藏敏感信息（仅管理员可编辑）
+- 授权用户可查看定时任务列表（只读）
+- 修复 WebDAV 上传到根目录 404 问题（递归创建子目录）
+- 新增"备份存储子目录"配置项，默认 gift_backups
+- 恢复数据库后自动释放连接池，确保数据即时生效
+- 本地上传分拆为"数据库恢复"和"附件恢复"两个独立功能
+
+#### 定时任务
+- 定时任务从仅支持数据库备份扩展为三种类型：数据库备份/文件备份/自定义脚本
+- 任务 Modal 新增类型选择下拉框，按类型动态显示配置区域
+
+### V3 修复与优化（2026-09-10）
+
+#### 权限工单
+- 新增工单撤销功能：管理员可撤销已批准的权限工单，自动回收已授予的菜单权限
+
+#### WebDAV 备份增强
+- 新增 WebDAV 备份文件删除功能（支持单文件/批量删除）
+- 加密密码回显：备份配置区显示"已设置/未设置"徽章，无需输入即可查看状态
+- 定时任务支持加密备份：创建定时任务时可勾选加密选项
+- 定时任务新增创建人列和执行历史查看
+- 多用户 WebDAV 配置隔离：普通用户可编辑自己的私有 WebDAV 配置
+- 备份文件名增加用户标识，列表显示创建者，恢复/删除按权限控制
+- 修复恢复备份时 500 错误（增加异常处理）
+
+#### Webhook 管理
+- Webhook 新增/编辑表单改为 AJAX 提交，校验失败在 Modal 内就地显示错误，不再关闭弹窗
+
+#### 用户管理
+- 用户管理页权限配置 Modal 新增 AI 授权 checkbox
+- 批量权限配置 Modal 新增 AI 授权 checkbox
+
+#### 附件备份
+- 附件上传后自动同步到 WebDAV `attachments/` 子目录（失败不阻断本地保存）
+
+### V4 修复与优化（2026-09-11）
+
+#### WebDAV 安全恢复机制（核心修复）
+- 修复恢复备份后全站 500 Internal Server Error 的严重问题
+- 恢复流程改为安全替换：先释放连接池 → 下载到临时文件 → 完整性校验 → 替换数据库 → 清理 WAL/SHM → 重新执行迁移 SQL
+- `init_database()` 通过延迟导入调用，避免循环导入问题
+
+#### 加密 zip 恢复修复
+- 修复 `download_backup` 函数参数映射条件写反导致 `quote_from_bytes() expected bytes` 错误
+- 新增 `decrypt_encrypted_zip()` 和 `download_and_decrypt_backup()` 函数支持 AES-256 加密 zip 解密
+- 前端 .zip 文件恢复时弹窗输入加密密码
+
+#### WebDAV 文件删除/下载修复
+- `delete_webdav_backup` 和 `download_backup` 改用 `_resolve_target_dir_url`，修复 URL 缺少 `backup_subdir` 子目录路径导致"远端文件不存在"
+
+#### 附件上传修复
+- 附件上传直接放到 WebDAV 备份根目录，去掉 `attachments/` 子目录前缀，修复 409 Conflict 错误
+- `upload_file_to_webdav` 增加自动创建远端子目录逻辑（MKCOL）
+
+### V5/V6/V7 修复与优化（2026-09-11）
+
+#### Webhook 保存与前端优化
+- 保存按钮不再校验企业微信凭证，凭证校验由"测试"按钮独立承担
+- 前端增加 loading 状态、必填字段校验和成功提示
+- 清理重复的 JS 函数定义
+
+#### WebDAV 备份安全隔离
+- **加密密码不回显明文**：密码框改为动态 placeholder，新增"清除加密密码"checkbox 联动
+- **WebDAV 配置隔离**：移除普通用户自动复制管理员配置的逻辑，普通用户首次访问创建空白私有配置
+- **备份越权修复**：普通用户备份/下载使用仅包含自己数据的临时隔离库，管理员使用完整库
+- 前端普通用户 WebDAV 配置区增加"请填写您自己的 WebDAV 服务器信息"提示横幅
+- 备份列表 checkbox 按权限控制，普通用户只能操作自己创建的备份文件
+
+#### 菜单权限循环跳转修复
+- 移除 `menu_map` 中 `'index': 'ledger'` 映射，首页增加独立权限检查
+- 管理员访问首页正常显示，无权限用户被引导至权限申请页
+
+#### 备份页面布局优化
+- 定时任务卡片从左栏移到右栏顶部，与备份列表同栏，逻辑更紧凑
+- 定时任务表格从 8 列精简为 4 列（任务名称+状态、类型+Cron、上次执行+创建人、操作+历史）
+- 备份授权按钮从纯图标改为图标+文字（"授权备份"/"撤销备份"、"授权任务"/"撤销任务"）
+- 撤销操作增加二次确认弹窗
+- 授权卡片增加"授权状态与「用户管理」页面实时同步"说明
+- 备份列表时间列从 GMT 转为本地时间显示
+
+### V8 修复与优化（2026-09-11）
+
+#### 权限工单页面增强
+- 新增列表排序功能：支持按"提交时间"等字段升序/降序排序，表头可点击切换
+- 筛选功能扩展：补充"已撤销"状态筛选选项
+- 新增工单删除功能：仅管理员可删除工单（带二次确认弹窗）
+- 新增分页功能：默认 10 条/页，支持自定义每页条数（5/10/20/50/100）
+- 页面排版优化：列表卡片顶部增加"共 N 条 / 当前页"统计信息
+
+#### Webhook 测试优化
+- 修复测试按钮"无反应"问题：根因为后端超时 12s 过长 + 前端无超时提示
+- 后端测试超时从 12s 缩短至 5s
+- 前端增加 AbortController 10s 超时保护
+- 测试结果改用 toast 提示（替代原生 alert）：成功绿色、失败红色，含状态码与错误信息
+- 修复 admin_webhooks.html 中两处重复 JS 代码块导致的语法错误
+
+#### WebDAV 备份页面增强
+- **加密密码回显**：仅当未勾选"清除已保存的加密密码"时回显明文密码；勾选则置空
+- **定时任务按钮置灰**：非创建者且非管理员的用户，编辑/删除/启停按钮 disabled
+- **备份范围隔离**（方案 B）：普通用户备份文件仅含 3 张业务表（gift_records/banquets/anniversary_reminders），19 张全局敏感表（users/backup_configs/webhook_configs 等）被 DROP，恢复时 `init_database()` 自动补建
+- **一键引用管理员配置**：普通用户可一键复制管理员的 WebDAV 服务器地址/账号/子目录（密码不返回），支持"一键更新"获取最新配置
+- **本地备份/附件卡片不隐藏**：普通用户可备份/恢复自己创建的数据和配置，仅系统全局配置不入库
+- **WebDAV 备份列表权限隔离**：普通用户只能操作自己创建的备份文件，管理员创建的备份恢复按钮 disabled
+
+### V9 修复与优化（2026-09-11）
+
+#### 核心修复：普通用户恢复 .db 备份导致全站崩溃
+- **根因**：普通用户备份是"过滤库"（19 张全局表被 DROP、仅含本人 3 张业务表），但恢复流程却用该文件**文件级替换**整个主库 → `users` 表等核心表丢失 → 全站 500
+- **方案**：普通用户恢复改为**数据级合并**（`merge_user_scoped_backup()`，ATTACH DATABASE 跨库合并，只恢复本人三张业务表数据），管理员保持文件级替换
+- 覆盖两个恢复入口：本地 .db 上传恢复 + WebDAV 云端恢复，均含完整性预校验
+
+#### 连带发现并修复的两个隐藏 Bug
+- **database is locked**：合并函数原顺序 `DETACH → commit`，SQLite 不允许 DETACH 存在未提交事务的数据库；调整为 `commit → DETACH`，并加 busy_timeout 与连接释放
+- **WAL 备份丢数据**：`build_user_scoped_backup_db()` 原用 `shutil.copy2` 复制主库，WAL 模式下最新数据在 `-wal` 文件未落盘，备份是过时快照；改用 SQLite 在线备份 API（`Connection.backup()`）获得一致性快照
+
+#### 一键引用升级为"别称 + 服务端密文复制"
+- `BackupConfig` 新增 `config_alias`（别称）与 `adopted_from_admin`（引用标记）字段
+- 管理员配置 WebDAV 时可设置**配置别称**（推荐填写，如"坚果云家庭备份盘"）
+- 普通用户「一键采用管理员配置」全程只看到**别称**——地址、账号、密码一律不返回前端，密码由服务端密文直传
+- 引用后页面仅显示别称状态卡片 + 「一键更新」/「停用引用，自行配置」按钮；停用引用需二次确认
+- 普通用户手动保存自己的配置时自动脱离引用状态
+
+### V10 修复与优化（2026-09-14）
+
+#### Webhook 推送修复
+- 修复测试成功后 toast 被立即刷新销毁不可见的问题（改为延迟 2 秒刷新）
+- 修复 6 处 `trigger_webhook_event` 调用缺少 `webhooks` 参数导致推送静默失败
+- 补充对账同步路由、审计日志删除/清空/批量删除路由的 webhook 推送
+- 页面推送矩阵与 PAGE_NAMES 补充 `permission_tickets`（权限工单）选项
+
+#### 审计日志可配置记录
+- 新增 13 模块可配置记录：管理员可在审计日志页面勾选需要记录的模块
+- `log_action` 函数按模块过滤，未勾选模块的操作不写入审计日志
+- 新增 `POST /admin/audit-log-config` 保存配置路由
+
+#### WebDAV 备份页面布局优化
+- 备份页面整体布局重排：从左右两栏改为四行布局（WebDAV 配置→定时任务→云端备份→本地备份+附件并排）
+- 普通用户本地备份卡片增加差异化提示横幅，下载按钮文案改为"下载我的数据备份"
+- 修复合并函数空库导致数据被清空的隐患（DELETE 前 COUNT 检查保护）
+
+#### 权限工单增强
+- 新增关键词搜索：支持按申请人用户名、申请理由模糊搜索
+- 新增申请模块筛选下拉框：可按特定模块筛选工单
+- 扩展排序列：新增按申请人、申请理由排序
+- 新增多选批量删除：管理员可勾选多条工单一键删除
+- ID 列改为分页行序号，不受删除影响
+- 修复排序时 JS 丢失筛选/搜索参数的问题
+
+### V10.1 Webhook 推送系统全面重构（2026-09-14）
+
+#### 推送配置 UI 重构为"页面×事件"矩阵
+- 原三段式配置（触发事件 + 扩展事件 + 页面矩阵）合并为 Tab 内嵌三面板：基础事件开关 / 推送配置矩阵 / 消息模板
+- 矩阵 15 行（页面）× 12 列（事件类型），每格勾选 = "该页面该事件是否推送"
+- 不适用的事件列显示"—"，只有适用组合才出现勾选框
+- 消息模板 Tab 支持按"页面×事件"维度自定义推送内容，支持 7 个占位符
+
+#### 推送覆盖补全
+- 补充宴席同步、宴席批量移出明细、回收站手动过期清理的推送
+- 补充定时任务保存/删除/启用禁用的推送
+
+#### 提示词优化与自定义模板
+- 新增 12 种场景化默认提示词（按事件类型），支持占位符自动填充
+- 自定义模板渲染优先级：页面×事件级 > 事件级 > 系统默认
+- 敏感页面（AI/安全/Webhook/备份）按事件类型细化脱敏描述
+
+#### WebDAV 定时任务查看权限修复
+- 解耦"查看开关"与"备份数据权限"的强绑定：查看仅由 `allow_view_others_tasks` 开关控制，编辑/删除由创建者隔离控制
+
+#### 编辑回显 Bug 修复
+- 修复 `allPageKeys` 硬编码 14 项缺少 `permission_tickets` 导致编辑回显不完整的 bug
+- 矩阵和模板改为后端动态注入，前端不再硬编码
+- 新增 `fillEditMatrix()`/`fillEditTemplates()` 函数从 JSON 自动回填
+
+### V10.2 WebDAV 权限细化与 Webhook 模板修复（2026-09-15）
+
+#### WebDAV 定时任务权限细化
+- 新增「允许编辑他人任务」「允许删除他人任务」两个全局开关，与原「允许查看他人任务」形成查看/编辑/删除三维度独立控制
+- User 模型新增 `can_view_others_scheduled_tasks`/`can_edit_others_scheduled_tasks`/`can_delete_others_scheduled_tasks` 方法
+- 4 处定时任务路由（保存/删除/启停/执行历史）权限校验更新为细粒度判断
+- 新增 AJAX 路由 `admin_save_task_permissions` 供前端开关即时保存
+
+#### 备份授权模块排版优化
+- 原「备份功能授权」卡片拆分为「WebDAV 备份授权」和「定时任务授权与权限」两张独立卡片
+- 备份授权卡片紧邻 WebDAV 配置区，定时任务授权卡片紧邻定时任务列表
+- 定时任务授权卡片顶部新增 3 列全局开关（查看/编辑/删除他人任务），AJAX 即时保存
+- 定时任务列表按钮权限细化：编辑和删除按钮各自独立判断，无权限逐个置灰
+
+#### Webhook 自定义模板渲染修复
+- 修复自定义消息模板命中后详情被置空导致推送显示"无"的问题
+- 自定义模板现在仅覆盖标题，详情保留原始内容（敏感页面仍脱敏）
+
+#### 推送事件类型分类修正
+- 单条还原：`status_change` → `restore`（对应矩阵"还原"列）
+- 批量还原：`status_change` → `restore`（同上）
+- 清空回收站：`batch_delete` → `clear`（对应矩阵"清空"列）
+
+#### 补充缺失推送
+- `admin_toggle_task_auth`（定时任务授权切换）补充 `status_change` 类型 Webhook 推送
+
+### V10.3 推送全覆盖与用户级监控（2026-09-15）
+
+#### 普通用户 WebDAV 配置体验对齐
+- 普通用户 WebDAV 表单新增密码回显、查看密码眼睛图标、测试连接按钮、加密密码配置区
+- 地址和账号输入框添加 `required` 属性，后端新增空值校验防止保存空配置
+- 新增 `toggleClearEncryptPwdUser()` / `btnTestWebdavUser` JS 函数
+
+#### 推送事件类型分类修正
+- 礼金账本"全部删除"：`batch_delete` → `clear`（清空≠批量删除）
+- 审计日志"清空"：`security` → `clear`（清空操作应归 clear 类）
+- 宴席移出明细：无推送 → 新增 `update` 类型推送
+
+#### 全面补充缺失推送（18 处）
+- PAGE_EVENT_MATRIX 补充 4 个页面：admin_broadcasts(+delete/status_change)、admin_webhooks(+clear)、admin_users(+batch_delete)、admin_backups(+clear)
+- app.py 补充 6 处：批量删除用户、批量配置权限、重置密保、系统安全配置、审计日志配置、注册模式变更
+- routes_ext.py 补充 12 处：广播状态切换/删除、宴席分享配置/删除、推送日志删除/批量删除/清空、WebDAV备份删除、上传恢复(普通用户+管理员)、回收站策略、定时任务权限、采用管理员配置
+
+#### 用户级 Webhook 监控过滤
+- WebhookConfig 新增 `monitor_user_ids`/`monitor_event_types` 字段（JSON 数组）
+- `trigger_webhook_event` 在事件开关+页面过滤之后新增用户 ID 和事件类型双重过滤
+- 新增/编辑 Modal 新增第 4 个 Tab「监控范围」，含用户多选列表和事件类型多选
+- 空 = 不限制（推送全部）；非空 = 仅推送匹配的操作
+- 数据库迁移新增 2 条 ALTER TABLE
+
+### V10.4 权限粒度优化与 Webhook 监控修复（2026-09-16）
+
+#### WebDAV 保存路由空值校验修复
+- 移除 `admin_save_webdav_config` 后端空值校验（允许普通用户保存空配置以"停用引用、自行配置"）
+- 移除普通用户 WebDAV 表单 `webdav_url`、`webdav_username`、`webdav_password` 的 `required` 属性
+
+#### 权限级别 1 语义修正
+- 权限级别 1 从"全只读"修正为"自身全权 + 仅查看他人数据"
+- `can_user_edit_entity`：级别 1 对自身实体可编辑，他人实体需级别 >= 2
+- `can_user_delete_entity`：级别 1 对自身实体可删除（perm != 2），他人实体需级别 >= 3
+- `add_record` / `import_csv`：移除级别 1 拦截
+- `batch_delete_records`：`in (1, 2)` → `in (2,)`（级别 1 可删除自身记录）
+- routes_ext.py 17 处拦截点修正（回收站 3 处、宴席 8 处、纪念日 5 处、对账 1 处无需改）
+- 模板 12 处修正：移除 `== 1` 仅查看模式标签和按钮限制，`can_view_others` → `can_view_others_for('ledger')`
+- admin_users.html 权限下拉选项标签更新为"自身全权 + 仅查看他人数据"
+
+#### Webhook 监控过滤修复
+- app.py 14 处 `trigger_webhook_event` 调用补充 `operator_id=current_user.id`
+- routes_ai.py 3 处 `trigger_webhook_event` 调用补充 `operator_id=current_user.id`
+- 修复前 `_monitor_matches` 因 `operator_id` 为 None 跳过用户过滤，导致监控配置形同虚设
+- 1 处合理缺失（`check_and_trigger_due_reminders` 后台定时任务，无 current_user 上下文）
+
+### V10.5 Webhook 推送系统增强（2026-09-16）
+
+#### 监控范围增加管理员用户
+- `routes_ext.py` 两处 `all_users` 查询从 `filter_by(is_admin=False)` 改为包含全部用户（管理员排前）
+- `admin_webhooks.html` 监控用户列表显示管理员标识"（管理员）"
+
+#### 基础事件与监控范围页面增加全选/清空按钮
+- Tab1 基础事件开关：新增全选/清空按钮（`eventSelectAll`/`eventClearAll`）
+- Tab4 监控范围：监控用户和监控事件类型分别新增全选/清空按钮（4 个 JS 函数）
+- 与 Tab2 推送配置矩阵的全选/清空按钮保持一致
+
+#### Webhook 推送全覆盖审计与补全（14 处）
+- **app.py 7 处**：login（成功+失败）、register、forgot_password、logout、admin_user_credentials、export_csv
+- **routes_ext.py 6 处**：toggle_share_ledger、banquet_export_excel、admin_upload_attachment、admin_test_webdav、admin_download_local_backup、admin_restore_webdav_backup（普通用户数据级合并路径）
+- **routes_ai.py 2 处**：api_ai_session_create、api_ai_session_rename
+- **不补充 2 处**：admin_test_webhook（循环推送风险）、api_ai_chat（高频调用噪音）
+
+### V10.6 Webhook 推送修复与查看凭证卡死修复（2026-09-17）
+
+#### 用户管理-查看凭证卡死修复
+- 根因：`admin_users.html` 的 `fetchAndRenderCredentials()` JS 引用不存在的元素 `credVerifySection`，抛 `TypeError` 导致 loading 永不消失
+- 修复：补充管理员二次验证界面（原密码/密保输入 + 验证按钮），凭证展示正常
+
+#### Webhook 推送不生效修复（PAGE_EVENT_MATRIX 补全）
+- 根因：启用中通道的 `notify_pages` 页面矩阵缺项，`_page_matches` 过滤掉本应推送的事件
+- 修复：`webhook_utils.py` 补全矩阵——ledger/admin_users/admin_logs 增加 `security`、admin_backups 增加 `security`+`restore`、ai_config 增加 `status_change`；数据库通道 `notify_pages` 同步更新
+- 覆盖问题清单：人情对账同步、用户管理启用/重置密码/重置密保/查看凭证、审计日志删除、AI 授权开关、Webhook 新增/编辑、WebDAV 下载备份/上传恢复、导出数据 CSV
+
+#### 浏览器逐项验证结果（webhook_logs 基线 max_id=41）
+- 验证通过项（均有成功推送记录）：查看凭证、人情对账同步、用户管理重置密码/重置密保/禁用/查看凭证/启用、审计日志单选删除/批量删除、AI 授权授权/取消授权、Webhook 新增/编辑通道、WebDAV 下载备份、导出 CSV
+- 验证数据已清理：临时通道 #4 已删除、验证推送日志（id=42~48）已删除，基线恢复 max_id=41
+- 待用户自行验证：WebDAV 上传覆盖恢复（代码已确认含推送）
+
+#### 服务进程规范化（11443 端口双实例 → 单实例）
+- 现象：PID 12304（系统 Python）与 PID 41372（TeleAgent 运行时）同时 LISTENING 11443
+- 处理：杀掉两个 `app.py` 旧实例，统一用系统 Python 后台启动单实例（HTTP 200、监听唯一）
+- 重启规范见 `AI_ASSISTANT_DESIGN.md` 第二十章 20.4（先杀旧实例 → 确认无监听 → `Start-Process -WindowStyle Hidden` 启动 → 验证监听与页面）
+
+### V10.7 凭证验证跳转修复与备份恢复安全加固（2026-09-17）
+
+#### 问题1：管理员查看凭证验证失败后跳转首页
+- 根因：`admin_user_credentials` 接口验证失败时返回 HTTP 401，`base.html` 全局 Fetch 拦截器把任何 401 当作"登录失效"强制跳转 `/login`，已登录用户被重定向到首页
+- 修复：后端将"未验证通过"的 HTTP 状态码由 401 改为 200（JSON `code` 仍为 401），前端按 `res.code` 判断不受影响；全局拦截器增加 `need_verify` 豁免双保险
+- 涉及文件：`app.py`（2604行）、`templates/base.html`（232-251行）
+
+#### 问题2：普通用户上传他人/异常 db 导致系统崩溃（500）
+- 根因1：`_is_full_restore` 判定允许 `can_view_others_for('ledger')` 的普通用户走文件级替换主库路径，上传结构不一致的 .db 覆盖主库后 users 等全局表丢失 → 全站 500
+- 根因2：本地上传入口无文件归属/命名校验，任意 .db 均可上传
+- 修复：
+  - 收紧文件级替换判定为仅 `is_admin`（本地 + WebDAV 两处同步改），普通用户一律走数据级合并
+  - 本地上传增加文件命名规则校验 + 归属校验（兼容 `YYYYMMDD_HHMMSS_用户名_db_backup.db` 与 `gift_bookkeeping_backup_YYYYMMDD_HHMMSS.db` 两种格式）
+  - `merge_user_scoped_backup` 加固：完整库拦截（含 users 表拒绝）、结构兼容性校验（缺 user_id 列报错）、列对齐取交集（防止 schema 差异 INSERT 异常）、SELECT 前置 user_id 过滤
+- 涉及文件：`routes_ext.py`（`merge_user_scoped_backup` 113-188行、`admin_upload_local_backup` 3966-4099行、`admin_restore_webdav_backup` 4237-4253行）
+
+#### 数据库恢复
+- 修复过程中发现主库已因问题2 漏洞损坏（malformed database schema），用自动备份 `gift_bookkeeping.db.bak_1789623762` 恢复（22 张表、6 个用户、业务数据完整）
+- 损坏库副本保留为 `gift_bookkeeping.db.corrupted_20260917` 供分析
+
+#### 浏览器验证结果
+- 问题1：错误密码 → 停留在 Modal 显示"验证失败"不跳首页 ✅；正确密码 → 正常显示凭证 ✅
+- 问题2场景1（任意命名 test.db）→ 命名规则拒绝 ✅
+- 问题2场景2（他人文件名 zhangsan）→ 归属校验拒绝 ✅
+- 问题2场景3（自己文件名但含完整库）→ 完整库拦截拒绝 ✅
+- 问题2场景4（本人正常过滤备份）→ 合并成功 ✅
+- 问题2场景5（下载→上传闭环）→ 合并成功 ✅
+- 全站无崩溃、其他用户数据不受影响 ✅
+
 ## 📂 项目文件结构
 
 ```text
 gift_bookkeeping_app/
 ├── app.py                      # Flask 核心路由、中间件、权限校验与主应用程序
-├── models.py                   # SQLAlchemy 数据模型 (用户/账本/宴席/备忘/回收站/日志/Webhook等)
+├── models.py                   # SQLAlchemy 数据模型 (用户/账本/宴席/备忘/回收站/日志/Webhook/AI/备份/工单等)
 ├── gift_utils.py               # 自然语言记账多条复合分词、中文大写数字转换、对账衍生聚合工具库
-├── routes_ext.py               # 业务扩展路由 (专属宴席、人情对账、纪念日、回收站、系统广播等)
+├── routes_ext.py               # 业务扩展路由 (宴席/对账/纪念日/回收站/广播/备份/工单/定时备份调度器)
+├── routes_ai.py                # [新增] AI 助手路由 (聊天/会话/配置/授权)
+├── ai_service.py               # [新增] AI 核心服务层 (多配置优先级/联网搜索/本地兜底)
+├── web_search.py               # [新增] 联网搜索模块 (DuckDuckGo)
 ├── webhook_utils.py            # Webhook 多渠道推送、官方 WeCom aibot SDK 长连接与 @ 机器人捕获
-├── webdav_utils.py             # 基于 requests 的高稳 WebDAV 客户端、云端备份与还原管理
+├── webdav_utils.py             # WebDAV 客户端、加密 zip 备份与还原管理
 ├── requirements.txt            # 项目 Python 依赖库列表
 ├── gift_bookkeeping.db         # SQLite 数据库文件 (支持 WAL 模式与并发读写)
 ├── run.sh                      # Linux 后台服务管理与虚拟环境自动创建/启动脚本
 ├── nginx_ssl.conf              # Nginx 自定义 HTTPS 端口反向代理配置文件
 ├── generate_ssl_certs.py       # 自签名 SSL 证书快速生成脚本
-├── Project_Survey.md           # 系统架构设计规范与 35 项架构决策记录 (ADR-01 ~ ADR-35)
+├── AI_ASSISTANT_DESIGN.md      # [新增] AI 助手与综合增强功能技术设计文档
+├── Project_Survey.md           # 系统架构设计规范与 38 项架构决策记录 (ADR-01 ~ ADR-38)
 ├── README.md                   # 系统使用说明与运维开发手册
 ├── static/                     # 静态资源目录 (Bootstrap, FontAwesome, Chart.js, 自定义脚本)
 └── templates/                  # Jinja2 HTML 模板目录
-    ├── base.html               # 基础模板 (导航栏、菜单权限控制、通用样式与脚本)
-    ├── index.html              # 礼金账本首页 (复合智能录入、数据列表、搜索统计、CSV导出)
-    ├── login.html              # 用户登录页面 (PRG 防重放、算术验证码、阶梯风控锁定)
-    ├── register.html           # 用户注册页面 (邀请码准入、自由注册模式动态适配)
-    ├── forgot_password.html    # 忘记密码与重置凭证页面 (两道密保问题验证)
-    ├── change_password.html    # 修改密码页面 (复杂度强校验、旧密码二次核验)
-    ├── banquets.html           # 专属宴席列表 (大账本汇总、来源归属标识、免刷新分享、批量删除)
+    ├── base.html               # 基础模板 (导航栏、菜单权限控制、AI/备份/工单入口)
+    ├── index.html              # 礼金账本首页 (复合智能录入、数据列表、无权限提示卡片)
+    ├── login.html              # 用户登录页面
+    ├── register.html           # 用户注册页面
+    ├── forgot_password.html    # 忘记密码与重置凭证页面
+    ├── change_password.html    # 修改密码页面
+    ├── banquets.html           # 专属宴席列表
     ├── banquet_detail.html     # 专属宴席明细管理页面
-    ├── reconciliation.html     # 人情对账页面 (明细抽屉、往来收支统计、分页与自定义条数)
-    ├── reminders.html          # 亲友纪念日备忘页面 (文案预览编辑、多通道、多轮推送、批量操作)
-    ├── recycle_bin.html        # 全系统统一回收站 (跨模块软删除管理、标签来源、批量还原/删除)
-    ├── admin_users.html        # 用户管理与各菜单独立权限配置页面
-    ├── admin_logs.html         # 操作审计日志页面 (多维过滤、分页与批量删除)
-    ├── admin_broadcasts.html   # 系统广播管理页面 (异步无感上下线、操作提示自动消失)
-    ├── admin_webhooks.html     # Webhook 与企业微信机器人配置与日志治理页面
-    ├── admin_backups.html      # WebDAV 云端备份与还原页面 (密码显隐切换、连接池通信)
+    ├── reconciliation.html     # 人情对账页面
+    ├── reminders.html          # 亲友纪念日备忘页面
+    ├── recycle_bin.html        # 全系统统一回收站
+    ├── admin_users.html        # 用户管理与权限配置页面 (含备份授权勾选)
+    ├── admin_logs.html         # 操作审计日志页面
+    ├── admin_broadcasts.html   # 系统广播管理页面
+    ├── admin_webhooks.html     # Webhook 配置页面 (页面×事件矩阵+消息模板)
+    ├── admin_backups.html      # WebDAV 备份页面 (加密配置+定时任务+授权管理)
+    ├── ai_assistant.html        # [新增] AI 助手聊天页面
+    ├── admin_ai_config.html     # [新增] 管理员 AI 配置页面
+    ├── permission_tickets.html  # [新增] 权限申请工单管理页面
     └── shared_ledger.html      # 免登录专属宴席只读分享前端视图
 ```
 
@@ -322,3 +690,5 @@ git stash pop
 ## 📄 开源许可证
 
 本项目基于 [MIT License](LICENSE) 开源许可协议发布。
+
+> AI生成

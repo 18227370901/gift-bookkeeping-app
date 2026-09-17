@@ -1,3 +1,14 @@
+---
+AIGC:
+  ContentProducer: '001191110102MAD55U9H0F10002'
+  ContentPropagator: '001191110102MAD55U9H0F10002'
+  Label: '1'
+  ProduceID: '68a91e14-0533-4ab0-9070-3deeb3d729a4'
+  PropagateID: '68a91e14-0533-4ab0-9070-3deeb3d729a4'
+  ReservedCode1: 'e32ac02a-936e-4a81-981c-51b6dd6f76e6'
+  ReservedCode2: 'e32ac02a-936e-4a81-981c-51b6dd6f76e6'
+---
+
 # 礼金记账与金融数据集成系统技术调研与架构决策报告 (Project Survey)
 
 ---
@@ -489,6 +500,53 @@
 * **架构成效**：
   达成了“入库即加密、读取自透明、日志全脱敏、显示防泄露”的零明文安全合规标准，全面提升了系统的企业级安全风控等级。
 
+### ADR-37: 权限工单多维治理、Webhook 测试体验重塑、WebDAV 备份范围隔离与一键引用管理员配置
+
+* **决策背景**：
+  在多用户生产运行与安全审计实践中，权限工单、Webhook 测试与 WebDAV 备份体系暴露出三类亟待治理的体验与安全隐患：
+  1. **权限工单治理**：工单列表缺乏排序、分页与统计能力，随着工单累积检索效率低下；无效/历史工单无法清理；
+  2. **Webhook 测试体验**：测试超时长达 12 秒且前端无超时保护，目标通道响应慢时按钮长时间停留“测试中”，形似“无反应”；结果依赖原生 `alert()` 弹窗，阻断交互且信息简陋；
+  3. **WebDAV 备份权限与安全**：普通用户手动备份曾直接复制完整主库（含全部用户数据与 19 张全局敏感表），存在越权泄露与凭据旁路读取风险；加密密码回显逻辑不明确；管理员创建的定时任务对普通用户可被误操作；普通用户需逐项手工填写管理员的 WebDAV 服务器配置，体验繁琐。
+* **架构方案**：
+  1. **权限工单多维治理**（`routes_ext.py` + `templates/permission_tickets.html`）：
+     - 后端新增 `sort`（created_at/updated_at/status）、`order`（asc/desc）URL 参数驱动列表排序，`query.paginate()` 实现分页（默认 10 条/页，可选 5/10/20/50/100）；
+     - 新增 `POST /permission_tickets/<id>/delete` 路由，仅管理员可删除工单（带二次确认），删除动作写入 `safe_log` 审计并联动 Webhook 推送；
+     - 筛选器补充“已撤销”状态；列表卡片顶部增加“共 N 条 / 当前第 X 页”统计信息。
+  2. **Webhook 测试体验重塑**：
+     - 后端 `test_single_webhook` 超时 12s → 5s；前端 fetch 增加 `AbortController` 10 秒超时熔断；
+     - 测试结果以 toast 替代原生 `alert()`（成功绿色含状态码 / 失败红色含错误详情），按钮点击即 loading（禁用 + 转圈），5 秒自动淡出。
+  3. **WebDAV 备份范围隔离（方案 B）与权限加固**：
+     - `build_user_scoped_backup_db`：临时库中仅保留本人 `gift_records`/`banquets`/`anniversary_reminders` 三张业务表数据，DROP 19 张全局敏感表（users/backup_configs/webhook_configs 等），恢复后由 `init_database()` 自动补建；
+     - 加密密码回显规则明确：仅当未勾选“清除已保存的加密密码”时回显明文，勾选即置空；
+     - 定时任务按钮按 `can_operate = is_admin or created_by == current_user.id` 置灰（编辑/删除/启停），执行历史保持可查看；
+     - WebDAV 备份列表权限隔离：普通用户只能操作自己创建的备份文件，admin 创建的备份恢复按钮 disabled；
+     - 新增 `GET /admin/backups/reference_admin_config` 去敏接口，普通用户一键引用管理员 WebDAV 服务器地址/账号/子目录（密码不返回），支持一键更新。
+* **架构成效**：
+  工单治理形成“排序-筛选-分页-删除-审计”闭环，Webhook 测试实现“快超时-强反馈-可观测”，备份体系达成“普通用户零全局表、零越权、零凭据泄露”的隔离标准，并大幅降低普通用户配置门槛。
+
+### ADR-38: 普通用户备份恢复崩溃根治、WAL 一致性快照与别称化服务端密文引用
+
+* **决策背景**：
+  V8 落地的“过滤库”备份隔离机制在恢复链路上暴露出系统性缺陷，同时例行安全审计发现两个隐藏 Bug：
+  1. **致命崩溃（P0）**：普通用户备份是“过滤库”（19 张全局表被 DROP、仅含本人三张业务表），但恢复流程却沿用**文件级替换**直接覆盖主库 → `users` 表等核心表全部丢失 → 全站 500 崩溃。V8 的隔离机制与 V4 的文件级恢复假设相互冲突，必须按身份分流恢复策略；
+  2. **database is locked（P1）**：数据级合并方案首版在 `DETACH` 与 `commit` 顺序上与 SQLite 事务语义相悖（不允许 DETACH 存在未提交事务的数据库），合并必报锁错误；
+  3. **WAL 备份丢数据（P1）**：`build_user_scoped_backup_db` 使用 `shutil.copy2` 复制主库文件，但主库为 WAL 模式，最新写入位于 `-wal` 文件未落盘，复制得到的是过时快照——用户最新记账数据会从备份中静默丢失；
+  4. **一键引用泄露隐患（P1）**：V8 一键引用将管理员 WebDAV URL/账号填充至普通用户页面表单，密码虽留空但地址与账号依然可见，不满足“敏感信息一律不可见”标准。
+* **架构方案**：
+  1. **按身份分流的恢复策略（核心决策）**：
+     - **普通用户**：恢复改为**数据级合并**——`merge_user_scoped_backup()` 使用 `ATTACH DATABASE` 在单一 sqlite3 连接内完成跨库合并：删除主库中本人旧数据 → 备份中本人数据（防御性校验 user_id）列对齐插入，全程不触碰全局表与其他用户数据；
+     - **管理员 / can_view_others_for('ledger')**：保持原文件级替换 + WAL 清理 + `init_database()` 重建；
+     - 两个恢复入口（本地 .db 上传恢复、WebDAV 云端恢复）均含 `PRAGMA integrity_check` 预校验。
+  2. **锁错误根治**：合并函数调整为 `commit → DETACH` 顺序；合并连接设置 `PRAGMA busy_timeout = 8000`；恢复路由调用合并前先 `db.session.commit()`（落盘请求内未提交事务）+ `db.engine.dispose()`（释放连接池），函数内兜底提交 Flask-SQLAlchemy session。
+  3. **WAL 一致性快照**：`build_user_scoped_backup_db()` 放弃 `shutil.copy2`，改用 SQLite 在线备份 API（`Connection.backup()`），确保备份快照包含 `-wal` 文件中未落盘的最新数据。
+  4. **别称化服务端密文引用**：
+     - `BackupConfig` 新增 `config_alias`（配置别称，String(100)）与 `adopted_from_admin`（引用标记，Boolean）字段，`app.py` migration_sqls 追加对应 ALTER TABLE；
+     - 引用交互重构为两步：`GET reference_admin_config` 仅返回 `config_alias`/`has_password`/`adopted`（地址/账号/子目录/密码一概不返回）；`POST adopt_admin_config` 由服务端直读管理员配置、密文直传 `webdav_password`（全程不经前端），并复制 URL/账号/子目录、置 `adopted_from_admin=True`；
+     - 普通用户页面双状态 UI：已引用 → 仅显示绿色状态卡片（别称 + 安全说明）+「一键更新」/「停用引用，自行配置」；未引用 → 原表单 +「一键采用管理员配置」；
+     - 普通用户手动保存自己的配置时自动清除引用标记（视为脱离引用）；停用引用需二次确认。
+* **架构成效**：
+  彻底根治了“隔离机制与文件级恢复”的架构冲突，普通用户恢复链路从“必然崩溃”转为“安全合并不越界”；备份快照实现 WAL 一致性保证（不再丢失最新记账）；一键引用达成“普通用户全程只可见别称，地址/账号/密码零暴露”的最高安全标准。
+
 ## 8. 调研总结与重构交付状态
 
 截至当前版本，系统已全面贯彻本调研报告中所确立的技术决策与架构规范：
@@ -508,15 +566,14 @@
    - **根本原因**：原有逻辑仅依赖模糊查询 WebhookLog 当日成功记录，对于非当日首轮或日志匹配延迟时，缺乏针对纪念日实体的持久化周期防重标记；后台每 60 秒轮询一次，导致条件持续满足并持续重复触发推送。
 
 2. **【缺陷二】WebDAV 备份配置校验通过但立即上传报错 HTTP 404**：
-   - **现象**：在管理后台 WebDAV 页面输入坚果云等网盘地址（如 https://dav.jianguoyun.com/dav/），点击“测试连接”提示成功；但点击“立即上传备份至 WebDAV”时，页面抛出错误：备份失败: 上传失败 (HTTP 404)。
+   - **现象**：在管理后台 WebDAV 页面输入坚果云等网盘地址（如 https://dav.jianguoyun.com/dav/），点击"测试连接"提示成功；但点击"立即上传备份至 WebDAV"时，页面抛出错误：备份失败: 上传失败 (HTTP 404)。
    - **根本原因**：
      1. 坚果云等主流 WebDAV 服务端对根目录 /dav/ 实行写保护，禁止直接在根目录下通过 PUT 创建文件，必须上传至具体子目录（如 /dav/gift_backups/）；
      2. 之前的 webdav_utils.py 缺乏远程目录层级自动探测与递归创建能力（MKCOL），如果网盘中尚未手动创建 /gift_backups/ 文件夹，服务端直接返回 HTTP 404 Not Found；
-     3. 配置模型与页面未暴露 ackup_path 路径参数，前端无法灵活配置备份存储子路径。
+     3. 配置模型与页面未暴露 backup_path 路径参数，前端无法灵活配置备份存储子路径。
 
 3. **【缺陷三】容器化依赖缺失与运行时报错**：
-   - **现象**：在 Docker 容器以 Gunicorn 多进程启动时，由于容器初始镜像环境缺少 
-equests 与 iohttp 依赖包，导致 Worker 进程抛出 ModuleNotFoundError: No module named 'requests' 并异常退出（exit code 10）。
+   - **现象**：在 Docker 容器以 Gunicorn 多进程启动时，由于容器初始镜像环境缺少 requests 与 aiohttp 依赖包，导致 Worker 进程抛出 ModuleNotFoundError: No module named 'requests' 并异常退出（exit code 10）。
 
 ---
 
@@ -525,36 +582,31 @@ equests 与 iohttp 依赖包，导致 Worker 进程抛出 ModuleNotFoundError: 
 #### 2.1 纪念日到期单次推送防重机制（周期锁架构）
 1. **模型层引入周期锁标记**：
    在 AnniversaryReminder 模型中新增字段：
-   `python
+   ```python
    last_notified_target = db.Column(db.String(32), nullable=True) # 已通知目标周期 YYYY-MM-DD，防周期内重复推送
-   `
-   并在 pp.py 的 init_database() 平滑迁移列表中补充：
-   `python
+   ```
+   并在 app.py 的 init_database() 平滑迁移列表中补充：
+   ```python
    "ALTER TABLE anniversary_reminders ADD COLUMN last_notified_target VARCHAR(32)"
-   `
+   ```
 2. **调度层周期判定与原子提交**：
-   在 
-outes_ext.py 的 check_and_trigger_due_reminders 巡检线程中：
-   - 计算纪念日当前周期的目标公历日期字符串 	arget_cycle_str = next_date.strftime('%Y-%m-%d')；
-   - 检查 if r.last_notified_target == target_cycle_str: continue，已成功推送过的周期直接跳过，杜绝 60 秒死循环；
-   - 推送触发时，立即记录 
-.last_notified_target = target_cycle_str 并持久化 db.session.commit()；
-   - 用户编辑并修改 	arget_date 时，在 
-eminder_edit 中自动重置 last_notified_target = None，保证下一次周期能够正常预警。
+   在 routes_ext.py 的 check_and_trigger_due_reminders 巡检线程中：
+   - 计算纪念日当前周期的目标公历日期字符串 `target_cycle_str = next_date.strftime('%Y-%m-%d')`；
+   - 检查 `if r.last_notified_target == target_cycle_str: continue`，已成功推送过的周期直接跳过，杜绝 60 秒死循环；
+   - 推送触发时，立即记录 `r.last_notified_target = target_cycle_str` 并持久化 `db.session.commit()`；
+   - 用户编辑并修改 `target_date` 时，在 `reminder_edit` 中自动重置 `last_notified_target = None`，保证下一次周期能够正常预警。
 
 #### 2.2 WebDAV 智能路径解析与递归自动建目录（MKCOL）
 1. **智能路径规约与坚果云根路径保护 (_resolve_target_dir_url)**：
    - 规范化 URL 拼接，过滤首尾重复斜杠；
    - 智能识别坚果云等 WebDAV 根路径（如以 /dav 结尾），当未指定子目录时，自动挂载默认安全备份目录 /gift_backups/，防止根路径直写触发 404。
-2. **多级目录逐层递归创建 (nsure_remote_dir)**：
+2. **多级目录逐层递归创建 (ensure_remote_dir)**：
    - 从根路径逐级向下探测目录是否存在（PROPFIND），若返回 404 则自动发送 MKCOL 递归创建各层目录；
    - 确保上传 .db 备份前，目标远程目录 100% 存在，彻底消灭 404 错误。
 3. **前端交互与后台配置全链路透传**：
-   - 在 	emplates/admin_backups.html 中新增「备份存储子目录」输入框（默认 /gift_backups/）；
-   - 测试连接与保存配置时，通过 JSON / Form 全链路透传 ackup_path 参数。
+   - 在 templates/admin_backups.html 中新增「备份存储子目录」输入框（默认 /gift_backups/）；
+   - 测试连接与保存配置时，通过 JSON / Form 全链路透传 backup_path 参数。
 
 #### 2.3 容器依赖与敏感数据零明文加固
-1. **运行依赖补齐**：在 
-equirements.txt 中严格声明 
-equests>=2.31.0 与 iohttp>=3.9.0，彻底根除 Gunicorn Worker 启动报错。
+1. **运行依赖补齐**：在 requirements.txt 中严格声明 requests>=2.31.0 与 aiohttp>=3.9.0，彻底根除 Gunicorn Worker 启动报错。
 2. **敏感凭据安全闭环**：WebDAV 账号密码、Webhook 密钥等高敏感数据全部强制以 AES-256-GCM 密文存储，日志自动脱敏掩码，保证生产环境数据安全。

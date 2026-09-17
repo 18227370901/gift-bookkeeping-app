@@ -7,6 +7,7 @@ Webhook 与长连接通知工具模块
 """
 
 import json
+import os
 import urllib.parse
 import threading
 import time
@@ -24,11 +25,6 @@ try:
     HAS_AIBOT_SDK = True
 except ImportError:
     HAS_AIBOT_SDK = False
-
-try:
-    import websocket
-except ImportError:
-    websocket = None
 
 
 def _run_async(coro):
@@ -108,17 +104,18 @@ def _resolve_db_file():
             return c
     return candidates[0] if os.path.isdir(os.path.join(base, 'data')) else candidates[1]
 
-def record_webhook_log(user_id, webhook_id, event_type, payload, status_code, response_body, is_success):
+def record_webhook_log(user_id, webhook_id, event_type, payload, status_code, response_body, is_success, operator_id=None):
     """线程安全写入 Webhook 推送日志表"""
     try:
         conn = sqlite3.connect(_resolve_db_file(), timeout=10)
         c = conn.cursor()
         c.execute(
             """INSERT INTO webhook_logs 
-               (user_id, webhook_id, event_type, payload, status_code, response_body, is_success, created_at) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               (user_id, operator_id, webhook_id, event_type, payload, status_code, response_body, is_success, created_at) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 user_id or 1,
+                operator_id,
                 webhook_id,
                 event_type or "notify",
                 json.dumps(_sanitize_log_data(payload), ensure_ascii=False)[:2000] if isinstance(payload, (dict, list)) else str(_sanitize_log_data(payload))[:2000],
@@ -410,13 +407,282 @@ def test_single_webhook(wh, sender_name="admin"):
             "group": "礼金记账"
         }
 
-    success, code, body = _send_payload(url, payload, headers, timeout=12)
+    success, code, body = _send_payload(url, payload, headers, timeout=5)
     record_webhook_log(wh.user_id, wh.id, "test", payload, code, body, success)
     return success, code, body
 
 
-def trigger_webhook_event(webhooks, event_type, record_title, details=None, force_channels=False):
-    """异步多线程触发 Webhook 与长连接机器人通知"""
+# === 页面标识与事件类型映射 (V10.1 矩阵重构) ===
+
+PAGE_NAMES = {
+    'ledger': '礼金账本', 'banquets': '专属宴席', 'reminders': '纪念日备忘',
+    'reconciliation': '人情对账', 'recycle_bin': '回收站', 'admin_users': '用户管理',
+    'admin_logs': '操作审计日志', 'admin_broadcasts': '系统广播', 'admin_webhooks': 'Webhook通知',
+    'admin_backups': 'WebDAV备份', 'ai_assistant': 'AI助手', 'ai_config': 'AI助手配置',
+    'security': '系统安全', 'invites': '邀请链接', 'permission_tickets': '权限工单',
+}
+
+ALL_PAGES = list(PAGE_NAMES.keys())
+
+# 矩阵列定义：事件类型 → 显示名称
+EVENT_COLUMNS = {
+    'create': '新增', 'update': '修改/编辑', 'delete': '删除',
+    'batch_delete': '批量删除', 'clear': '清空', 'sync': '同步',
+    'restore': '还原', 'status_change': '状态变更',
+    'reminder': '提醒', 'broadcast': '广播',
+    'security': '安全风控', 'system': '系统配置',
+}
+
+# 页面 × 事件适用矩阵（每页面支持哪些事件列）
+PAGE_EVENT_MATRIX = {
+    'ledger':            ['create', 'update', 'delete', 'batch_delete', 'clear', 'security'],
+    'banquets':          ['create', 'update', 'delete', 'batch_delete', 'sync'],
+    'reminders':         ['create', 'update', 'delete', 'batch_delete', 'reminder'],
+    'reconciliation':    ['sync'],
+    'recycle_bin':       ['restore', 'delete', 'batch_delete', 'clear'],
+    'admin_users':       ['create', 'update', 'delete', 'batch_delete', 'status_change', 'security'],
+    'admin_logs':        ['delete', 'clear', 'security'],
+    'admin_broadcasts':  ['create', 'delete', 'status_change', 'broadcast'],
+    'admin_webhooks':    ['create', 'update', 'delete', 'clear', 'status_change', 'system'],
+    'admin_backups':     ['create', 'update', 'delete', 'clear', 'status_change', 'system', 'security', 'restore'],
+    'ai_assistant':      ['create'],
+    'ai_config':         ['update', 'system', 'status_change'],
+    'security':          ['security'],
+    'invites':           ['create', 'delete', 'status_change'],
+    'permission_tickets': ['create', 'status_change', 'delete'],
+}
+
+# 事件类型 → 开关字段名映射
+# batch_delete/clear 归 delete 组开关；sync 归 system 组开关；restore 归 status_change 组开关
+EVENT_SWITCH_MAP = {
+    'create': 'notify_on_add', 'record_create': 'notify_on_add',
+    'update': 'notify_on_update', 'record_update': 'notify_on_update',
+    'delete': 'notify_on_delete', 'record_delete': 'notify_on_delete',
+    'batch_delete': 'notify_on_delete',
+    'clear': 'notify_on_delete',
+    'sync': 'notify_on_system',
+    'restore': 'notify_on_status_change',
+    'status_change': 'notify_on_status_change',
+    'reminder': 'notify_on_reminder', 'auto_reminder': 'notify_on_reminder',
+    'broadcast': 'notify_on_broadcast',
+    'security': 'notify_on_security',
+    'system': 'notify_on_system',
+}
+
+# 需要脱敏的页面（推送消息中不包含敏感数据详情）
+SENSITIVE_PAGES = {'ai_assistant', 'ai_config', 'security', 'admin_webhooks', 'admin_backups'}
+
+# 场景化默认提示词模板（支持占位符: {user}/{page}/{action}/{title}/{detail}/{time}/{count}）
+DEFAULT_MESSAGE_TEMPLATES = {
+    'create':        '【{page}·新增】操作人 {user} 在{page}新增了「{title}」',
+    'update':        '【{page}·修改】操作人 {user} 更新了「{title}」的信息',
+    'delete':        '【{page}·删除】操作人 {user} 删除了「{title}」（已移入回收站）',
+    'batch_delete':  '【{page}·批量删除】操作人 {user} 批量删除了 {count} 条记录',
+    'clear':         '【{page}·清空】操作人 {user} 清空了{page}数据（共 {count} 条）',
+    'sync':          '【{page}·同步】操作人 {user} 执行了同步操作：{detail}',
+    'restore':       '【{page}·还原】操作人 {user} 还原了「{title}」',
+    'status_change': '【{page}·状态变更】操作人 {user} 变更了「{title}」的状态',
+    'reminder':      '【{page}·提醒】{detail}',
+    'broadcast':     '【{page}·广播】{detail}',
+    'security':      '【{page}·安全】操作人 {user} 触发了安全操作',
+    'system':        '【{page}·系统配置】操作人 {user} 更新了系统配置',
+}
+
+
+def _get_notify_pages(webhook):
+    """获取 Webhook 配置的页面过滤列表，返回 {event_category: [page_keys]} 或空 dict"""
+    import json as _json
+    raw = getattr(webhook, 'notify_pages', None) or '{}'
+    try:
+        data = _json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {}
+
+
+def _page_matches(webhook, event_type, page_key):
+    """检查该 Webhook 通道是否配置了当前页面的当前事件类型
+    V10.1: notify_pages 为空时不过滤（对全部页面放行）
+    """
+    if not page_key:
+        return True
+    notify_pages = _get_notify_pages(webhook)
+    if not notify_pages:
+        return True  # V10.1: 未配置矩阵 = 不过滤，对全部页面放行
+    event_category = _get_event_category(event_type)
+    pages_for_event = notify_pages.get(event_category, [])
+    return page_key in pages_for_event
+
+
+def _get_monitor_user_ids(webhook):
+    """V10.3: 获取 Webhook 监控的用户 ID 列表，空列表=不限制"""
+    import json as _json
+    raw = getattr(webhook, 'monitor_user_ids', None) or '[]'
+    try:
+        data = _json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(data, list):
+            return [int(uid) for uid in data if uid]
+    except Exception:
+        pass
+    return []
+
+
+def _get_monitor_event_types(webhook):
+    """V10.3: 获取 Webhook 监控的事件大类列表，空列表=不限制"""
+    import json as _json
+    raw = getattr(webhook, 'monitor_event_types', None) or '[]'
+    try:
+        data = _json.loads(raw) if isinstance(raw, str) else raw
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+
+def _monitor_matches(webhook, event_type, operator_id):
+    """V10.3: 检查该 Webhook 通道的监控范围是否匹配当前操作
+    - monitor_user_ids 为空 = 不限制用户（全部通过）
+    - monitor_event_types 为空 = 不限制事件类型（全部通过）
+    - 两者都配置时需同时满足
+    """
+    # 用户过滤
+    monitor_uids = _get_monitor_user_ids(webhook)
+    if monitor_uids and operator_id is not None:
+        if operator_id not in monitor_uids:
+            return False
+    # 事件类型过滤（按大类匹配）
+    monitor_types = _get_monitor_event_types(webhook)
+    if monitor_types:
+        event_cat = _get_event_category(event_type)
+        if event_cat not in monitor_types and event_type not in monitor_types:
+            return False
+    return True
+
+
+def _get_event_category(event_type):
+    """将具体事件类型归入大类 — V10.1: batch_delete/clear/sync/restore 独立为大类"""
+    if event_type in ('create', 'record_create'):
+        return 'create'
+    if event_type in ('update', 'record_update'):
+        return 'update'
+    if event_type in ('delete', 'record_delete'):
+        return 'delete'
+    if event_type in ('batch_delete',):
+        return 'batch_delete'
+    if event_type in ('clear',):
+        return 'clear'
+    if event_type in ('sync',):
+        return 'sync'
+    if event_type in ('restore',):
+        return 'restore'
+    if event_type in ('status_change',):
+        return 'status_change'
+    if event_type in ('reminder', 'auto_reminder'):
+        return 'reminder'
+    if event_type in ('broadcast',):
+        return 'broadcast'
+    if event_type in ('security',):
+        return 'security'
+    if event_type in ('system',):
+        return 'system'
+    return event_type
+
+
+def _render_message(webhook, event_type, page_key, default_title, default_details, user_name):
+    """渲染推送消息 — V10.1: 场景化默认提示词 + 页面×事件自定义模板"""
+    import json as _json
+    import re as _re
+    page_name = PAGE_NAMES.get(page_key, page_key or '系统')
+    event_cat = _get_event_category(event_type)
+    action_label = EVENT_COLUMNS.get(event_cat, EVENT_COLUMNS.get(event_type, '操作'))
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # 从 default_details 中提取 count（如果有）
+    count = ''
+    count_match = _re.search(r'数量[：:]\s*(\d+)', default_details or '')
+    if count_match:
+        count = count_match.group(1)
+    else:
+        count_match2 = _re.search(r'(\d+)\s*(条|个|笔)', default_details or '')
+        if count_match2:
+            count = count_match2.group(1)
+
+    # 占位符上下文
+    fmt_ctx = {
+        'user': user_name, 'page': page_name, 'action': action_label,
+        'title': default_title or '', 'detail': default_details or '',
+        'time': now_str, 'count': count,
+    }
+
+    # 先尝试自定义模板（页面×事件级别优先，再事件级别）
+    raw_templates = getattr(webhook, 'message_templates', None) or '{}'
+    try:
+        templates = _json.loads(raw_templates) if isinstance(raw_templates, str) else raw_templates
+        if isinstance(templates, dict):
+            template_key = f'{event_cat}:{page_key}'
+            tpl = templates.get(template_key) or templates.get(event_cat) or templates.get(event_type)
+            if tpl and isinstance(tpl, str) and tpl.strip():
+                title = tpl.format(**fmt_ctx)
+                # V10.2 修复: 自定义模板仅覆盖标题，详情保留原始内容（敏感页面仍脱敏）
+                details = default_details or ''
+                if page_key in SENSITIVE_PAGES:
+                    details = _sanitize_details(page_key, event_type, user_name, details)
+                return title, details
+    except Exception:
+        pass
+
+    # 使用场景化默认模板
+    default_tpl = DEFAULT_MESSAGE_TEMPLATES.get(event_cat) or DEFAULT_MESSAGE_TEMPLATES.get(event_type)
+    if default_tpl:
+        try:
+            title = default_tpl.format(**fmt_ctx)
+        except Exception:
+            title = f'【{page_name}·{action_label}】{default_title}'
+    else:
+        title = f'【{page_name}·{action_label}】{default_title}'
+
+    details = default_details or ''
+
+    # 敏感页面脱敏
+    if page_key in SENSITIVE_PAGES:
+        details = _sanitize_details(page_key, event_type, user_name, details)
+
+    return title, details
+
+
+def _sanitize_details(page_key, event_type, user_name, details):
+    """对敏感页面的推送内容进行脱敏 — V10.1: 按事件类型细化描述"""
+    event_cat = _get_event_category(event_type)
+    action_label = EVENT_COLUMNS.get(event_cat, '操作')
+    if page_key == 'ai_assistant':
+        return f'{user_name} 在 AI 助手执行了{action_label}操作（内容已脱敏）'
+    if page_key == 'ai_config':
+        return f'{user_name} {action_label}了 AI 配置（密钥等敏感信息已脱敏）'
+    if page_key == 'security':
+        return f'{user_name} 触发了安全风控{action_label}操作（详细信息已脱敏）'
+    if page_key == 'admin_webhooks':
+        return f'{user_name} {action_label}了 Webhook 通道配置（Token等敏感信息已脱敏）'
+    if page_key == 'admin_backups':
+        return f'{user_name} 执行了备份{action_label}操作（密码等敏感信息已脱敏）'
+    return details
+
+
+def trigger_webhook_event(webhooks, event_type, record_title, details=None, force_channels=False, page_key=None, user_name=None, operator_id=None):
+    """异步多线程触发 Webhook 与长连接机器人通知
+    
+    参数:
+        webhooks: WebhookConfig 对象列表
+        event_type: 事件类型（create/update/delete/batch_delete/reminder/broadcast/security/system/status_change）
+        record_title: 推送标题（不含前缀）
+        details: 详情内容
+        force_channels: 是否强制推送（跳过开关过滤）
+        page_key: 来源页面标识（ledger/banquets/reminders 等），用于页面级过滤
+        user_name: 操作人用户名，用于消息内容
+        operator_id: 操作发起人ID，用于推送日志记录
+    """
     if not webhooks:
         return
 
@@ -425,13 +691,15 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
         if not getattr(w, "is_enabled", True):
             continue
         if not force_channels:
-            if event_type in ("create", "record_create") and not getattr(w, "notify_on_add", False):
+            # 事件开关过滤
+            switch_field = EVENT_SWITCH_MAP.get(event_type)
+            if switch_field and not getattr(w, switch_field, False):
                 continue
-            if event_type in ("delete", "record_delete", "batch_delete") and not getattr(w, "notify_on_delete", False):
+            # 页面级过滤
+            if not _page_matches(w, event_type, page_key):
                 continue
-            if event_type == "reminder" and getattr(w, "notify_on_reminder", True) in (False, 0, "0", "false"):
-                continue
-            if event_type == "broadcast" and not getattr(w, "notify_on_broadcast", False):
+            # V10.3: 用户级监控过滤
+            if not _monitor_matches(w, event_type, operator_id):
                 continue
 
         hook_data_list.append({
@@ -442,44 +710,35 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
             "connection_type": getattr(w, "connection_type", "webhook_url") or "webhook_url",
             "bot_platform": getattr(w, "bot_platform", "wecom") or "wecom",
             "bot_id": getattr(w, "bot_id", None),
-            "bot_secret": getattr(w, "bot_secret", None)
+            "bot_secret": getattr(w, "bot_secret", None),
+            "_webhook_obj": w  # 保留引用用于模板渲染
         })
 
     if not hook_data_list:
         return
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    type_names = {
-        "create": "【记账新增提醒】",
-        "record_create": "【记账新增提醒】",
-        "update": "【记账变更提醒】",
-        "record_update": "【记账变更提醒】",
-        "delete": "【记账删除提醒】",
-        "record_delete": "【记账删除提醒】",
-        "batch_delete": "【批量删除提醒】",
-        "security": "【安全风控警告】",
-        "reminder": "【亲友重要纪念日提醒】",
-        "auto_reminder": "【亲友重要纪念日提醒】",
-        "broadcast": "【系统站内广播】",
-        "test": "【Webhook 测试推送】"
-    }
-    prefix = type_names.get(event_type, "【礼金记账通知】")
-    if record_title.startswith("【"):
-        title = record_title
-    else:
-        title = f"{prefix} {record_title}"
+    
+    # 为每个通道渲染消息（可能各自有不同模板）
+    rendered_items = []
+    for item in hook_data_list:
+        wh = item.pop("_webhook_obj", None)
+        title, msg_details = _render_message(wh, event_type, page_key, record_title, details, user_name or '系统')
+        rendered_items.append({**item, "title": title, "details": msg_details})
 
     def _worker():
-        for item in hook_data_list:
+        for item in rendered_items:
             try:
                 conn_type = item.get("connection_type", "webhook_url")
+                title = item.get("title", record_title)
+                msg_details = item.get("details", details)
                 if conn_type == "long_connection":
                     b_id = item.get("bot_id", "")
                     b_sec = item.get("bot_secret", "")
                     c_id = extract_chatid_from_url(item.get("url", "")) or _cached_chatids.get(b_id)
                     if b_id and b_sec:
-                        s, c, b = send_wecom_long_connection_message(b_id, b_sec, title, details, now_str, event_type, chatid=c_id)
-                        record_webhook_log(item.get("user_id"), item.get("id"), event_type, {"title": title, "bot_id": b_id, "chatid": c_id, "details": details}, c, b, s)
+                        s, c, b = send_wecom_long_connection_message(b_id, b_sec, title, msg_details, now_str, event_type, chatid=c_id)
+                        record_webhook_log(item.get("user_id"), item.get("id"), event_type, {"title": title, "bot_id": b_id, "chatid": c_id, "details": msg_details}, c, b, s, operator_id=operator_id)
                     continue
 
                 url = item.get("url", "")
@@ -491,21 +750,21 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                         "msgtype": "markdown",
                         "markdown": {
                             "title": title,
-                            "text": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {details or '无'}\n\n> 礼金记账系统通知"
+                            "text": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {msg_details or '无'}\n\n> 礼金记账系统通知"
                         }
                     }
                 elif "feishu.cn" in url or "larksuite.com" in url:
                     payload = {
                         "msg_type": "text",
                         "content": {
-                            "text": f"{title}\n时间: {now_str}\n\n{details or '无'}"
+                            "text": f"{title}\n时间: {now_str}\n\n{msg_details or '无'}"
                         }
                     }
                 elif "qyapi.weixin.qq.com" in url:
-                    if details and ("\\n" in details or chr(10) in details):
-                        md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n\n{details}"
+                    if msg_details and ("\\n" in msg_details or chr(10) in msg_details):
+                        md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n\n{msg_details}"
                     else:
-                        md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n> 详情：<font color=\"info\">{details or '无'}</font>"
+                        md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n> 详情：<font color=\"info\">{msg_details or '无'}</font>"
                     payload = {
                         "msgtype": "markdown",
                         "markdown": {"content": md_cnt}
@@ -516,7 +775,7 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                         parsed = urllib.parse.urlparse(url)
                         qs = urllib.parse.parse_qs(parsed.query)
                         token = qs.get("token", [""])[0]
-                    html_details = details.replace(chr(10), "<br>").replace("\\n", "<br>") if details else "无"
+                    html_details = msg_details.replace(chr(10), "<br>").replace("\\n", "<br>") if msg_details else "无"
                     payload = {
                         "token": token,
                         "title": title,
@@ -526,12 +785,12 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                 elif "ftqq.com" in url:
                     payload = {
                         "title": title,
-                        "desp": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {details or '无'}"
+                        "desp": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {msg_details or '无'}"
                     }
                 elif "api.day.app" in url:
                     payload = {
                         "title": title,
-                        "body": f"{details or '无'}\n时间: {now_str}",
+                        "body": f"{msg_details or '无'}\n时间: {now_str}",
                         "group": "礼金记账"
                     }
                 else:
@@ -539,7 +798,7 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                         "event": event_type,
                         "title": title,
                         "time": now_str,
-                        "details": details,
+                        "details": msg_details,
                         "source": "gift_bookkeeping_app"
                     }
 
@@ -548,7 +807,7 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
                     headers["Authorization"] = f"Bearer {item.get('secret')}"
 
                 s, c, b = _send_payload(url, payload, headers, timeout=12)
-                record_webhook_log(item.get("user_id"), item.get("id"), event_type, payload, c, b, s)
+                record_webhook_log(item.get("user_id"), item.get("id"), event_type, payload, c, b, s, operator_id=operator_id)
             except Exception:
                 pass
 

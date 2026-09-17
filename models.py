@@ -103,8 +103,22 @@ class User(UserMixin, db.Model):
     can_view_others = db.Column(db.Boolean, default=False)
     can_edit_others = db.Column(db.Boolean, default=False)
     can_delete_others = db.Column(db.Boolean, default=False)
-    allowed_menus = db.Column(db.String(256), default='ledger')  # 允许访问的菜单列表（如 ledger,banquets 等）
-    menu_permissions = db.Column(db.Text, default='{}')  # 各菜单独立数据权限配置 JSON (如 {'ledger':0,'banquets':1})
+    allowed_menus = db.Column(db.String(256), default='')  # 允许访问的菜单列表（如 ledger,banquets 等），新注册用户默认为空
+    
+    # --- AI 助手相关字段 ---
+    # 旧版单配置（向后兼容）
+    _ai_api_key = db.Column('ai_api_key', db.String(512), nullable=True)  # AES-256-GCM 密文存储
+    ai_base_url = db.Column(db.String(255), nullable=True, default='')
+    ai_model = db.Column(db.String(100), nullable=True, default='')
+    # 多配置列表（JSON 数组，结构: [{"name","api_key","base_url","model","enabled"}]）
+    ai_configs = db.Column(db.Text, default='[]')
+    # AI 授权标记（管理员可授权普通用户使用 AI）
+    ai_authorized = db.Column(db.Boolean, default=False)
+    # 备份授权标记（管理员可授权普通用户使用备份功能）
+    backup_authorized = db.Column(db.Boolean, default=False)
+    # 定时任务授权标记（管理员可授权普通用户使用定时任务功能）
+    scheduled_task_authorized = db.Column(db.Boolean, default=False)
+    menu_permissions = db.Column(db.Text, default='{}')  # 各菜单独立数据权限配置 JSON (如 {'ledger':0,'banquets':1,'backups':0})
     created_at = db.Column(db.DateTime, default=datetime.now)
     
     records = db.relationship('GiftRecord', backref='owner', lazy=True, cascade='all, delete-orphan')
@@ -121,7 +135,7 @@ class User(UserMixin, db.Model):
     def get_allowed_menus(self):
         if getattr(self, 'is_admin', False):
             return ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'admin_users', 'admin_logs', 'admin_broadcasts', 'admin_webhooks', 'admin_backups']
-        raw = getattr(self, 'allowed_menus', 'ledger') or 'ledger'
+        raw = getattr(self, 'allowed_menus', '') or ''
         return [m.strip() for m in raw.split(',') if m.strip()]
 
     def can_access_menu(self, menu_key):
@@ -138,7 +152,7 @@ class User(UserMixin, db.Model):
                 res = json.loads(raw)
             except Exception:
                 res = {}
-        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin']
+        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
         final_perms = {}
         for m in ALL_MENUS:
             val = res.get(m)
@@ -164,7 +178,7 @@ class User(UserMixin, db.Model):
     def set_menu_permissions(self, perms_dict):
         """设置各菜单独立数据权限配置"""
         clean_perms = {}
-        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin']
+        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
         for m in ALL_MENUS:
             val = perms_dict.get(m, 0) if isinstance(perms_dict, dict) else 0
             try:
@@ -264,6 +278,170 @@ class User(UserMixin, db.Model):
             'q2': q2,
             'a2': ans2 or '无'
         }
+
+    # ==================== AI 助手相关方法 ====================
+
+    @property
+    def ai_api_key(self):
+        """解密获取 AI API Key 明文"""
+        if not self._ai_api_key:
+            return ''
+        return decrypt_credential(self._ai_api_key, fallback_plain=True) or ''
+
+    @ai_api_key.setter
+    def ai_api_key(self, value):
+        """加密存储 AI API Key"""
+        if not value or str(value).strip() == '':
+            self._ai_api_key = None
+        else:
+            self._ai_api_key = encrypt_credential(str(value).strip())
+
+    def get_ai_configs(self):
+        """获取解密后的 AI 多配置列表"""
+        raw = getattr(self, 'ai_configs', None) or '[]'
+        try:
+            configs = json.loads(raw)
+        except Exception:
+            configs = []
+        # 解密每个配置的 api_key
+        for cfg in configs:
+            cipher_key = cfg.get('api_key', '')
+            if cipher_key:
+                try:
+                    cfg['api_key'] = decrypt_credential(cipher_key, fallback_plain=True) or ''
+                except Exception:
+                    cfg['api_key'] = ''
+        return configs
+
+    def set_ai_configs(self, configs_list):
+        """加密保存 AI 多配置列表（api_key 字段加密存储）"""
+        clean = []
+        for cfg in configs_list:
+            if not isinstance(cfg, dict):
+                continue
+            api_key = str(cfg.get('api_key', '') or '').strip()
+            if not api_key:
+                continue  # 空 key 的配置跳过
+            clean.append({
+                'name': str(cfg.get('name', ''))[:50].strip() or f'配置{len(clean)+1}',
+                'api_key': encrypt_credential(api_key) if api_key else '',
+                'base_url': str(cfg.get('base_url', '') or '').strip(),
+                'model': str(cfg.get('model', '') or '').strip(),
+                'enabled': bool(cfg.get('enabled', True))
+            })
+        self.ai_configs = json.dumps(clean, ensure_ascii=False)
+        # 同步旧版字段
+        if clean:
+            first_enabled = next((c for c in clean if c.get('enabled', True)), clean[0])
+            self._ai_api_key = first_enabled.get('api_key', '')
+            self.ai_base_url = first_enabled.get('base_url', '')
+            self.ai_model = first_enabled.get('model', '')
+        else:
+            self._ai_api_key = None
+            self.ai_base_url = ''
+            self.ai_model = ''
+
+    def can_use_ai(self):
+        """检查用户是否有权使用 AI 助手"""
+        if getattr(self, 'is_admin', False):
+            return True
+        return bool(getattr(self, 'ai_authorized', False))
+
+    def can_use_backup(self):
+        """检查用户是否有权使用备份功能"""
+        if getattr(self, 'is_admin', False):
+            return True
+        return bool(getattr(self, 'backup_authorized', False))
+
+    def can_use_scheduled_tasks(self):
+        """检查用户是否有权使用定时任务功能"""
+        if getattr(self, 'is_admin', False):
+            return True
+        return bool(getattr(self, 'scheduled_task_authorized', False))
+
+    def can_view_others_backup(self):
+        """检查用户是否可查看其他用户的备份数据（menu_permissions['backups'] >= 1）"""
+        if getattr(self, 'is_admin', False):
+            return True
+        return self.get_menu_perm('backups') >= 1
+
+    def can_edit_others_backup(self):
+        """检查用户是否可修改/恢复其他用户的备份数据（menu_permissions['backups'] >= 2）"""
+        if getattr(self, 'is_admin', False):
+            return True
+        return self.get_menu_perm('backups') >= 2
+
+    def can_delete_others_backup(self):
+        """检查用户是否可删除其他用户的备份数据（menu_permissions['backups'] >= 3）"""
+        if getattr(self, 'is_admin', False):
+            return True
+        return self.get_menu_perm('backups') >= 3
+
+    # V10.2 新增：定时任务操作权限方法
+    def can_view_others_scheduled_tasks(self):
+        """检查用户是否可查看其他用户的定时任务"""
+        if getattr(self, 'is_admin', False):
+            return True
+        cfg = BackupConfig.get_config(None)
+        return bool(getattr(cfg, 'allow_view_others_tasks', False)) if cfg else False
+
+    def can_edit_others_scheduled_tasks(self):
+        """检查用户是否可编辑其他用户的定时任务"""
+        if getattr(self, 'is_admin', False):
+            return True
+        cfg = BackupConfig.get_config(None)
+        return bool(getattr(cfg, 'allow_edit_others_tasks', False)) if cfg else False
+
+    def can_delete_others_scheduled_tasks(self):
+        """检查用户是否可删除其他用户的定时任务"""
+        if getattr(self, 'is_admin', False):
+            return True
+        cfg = BackupConfig.get_config(None)
+        return bool(getattr(cfg, 'allow_delete_others_tasks', False)) if cfg else False
+
+
+class ChatSession(db.Model):
+    """AI 助手聊天会话"""
+    __tablename__ = 'chat_sessions'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    title = db.Column(db.String(100), default='新会话')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    messages = db.relationship('ChatMessage', backref='session', lazy=True, cascade='all, delete-orphan')
+    user = db.relationship('User', backref=db.backref('chat_sessions', lazy=True, cascade='all, delete-orphan'))
+
+
+class ChatMessage(db.Model):
+    """AI 助手聊天消息"""
+    __tablename__ = 'chat_messages'
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey('chat_sessions.id', ondelete='CASCADE'), nullable=False)
+    role = db.Column(db.String(10), nullable=False)  # 'user' 或 'ai'
+    content = db.Column(db.Text, nullable=False)
+    used_config_name = db.Column(db.String(100), nullable=True, default='')
+    used_search = db.Column(db.Boolean, default=False)
+    error_hint = db.Column(db.Text, nullable=True, default='')
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+
+class AIQueryLog(db.Model):
+    """AI 查询日志（旧版兼容）"""
+    __tablename__ = 'ai_query_logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    session_id = db.Column(db.String(100), nullable=True, default='')
+    query_type = db.Column(db.String(20), default='qa')  # qa, price_compare, ...
+    query_text = db.Column(db.Text, nullable=True)
+    response_text = db.Column(db.Text, nullable=True)
+    response_time_ms = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    user = db.relationship('User', backref=db.backref('ai_query_logs', lazy=True))
 
 
 class Banquet(db.Model):
@@ -617,6 +795,16 @@ class WebhookConfig(db.Model):
     notify_on_delete = db.Column(db.Boolean, default=True)
     notify_on_reminder = db.Column(db.Boolean, default=True)
     notify_on_broadcast = db.Column(db.Boolean, default=True)
+    # 新增：推送矩阵与自定义模板字段
+    notify_on_update = db.Column(db.Boolean, default=False)
+    notify_on_security = db.Column(db.Boolean, default=False)
+    notify_on_system = db.Column(db.Boolean, default=True)
+    notify_on_status_change = db.Column(db.Boolean, default=False)
+    notify_pages = db.Column(db.Text, default='{}')  # JSON: {event_category: [page_keys]}
+    message_templates = db.Column(db.Text, default='{}')  # JSON: {event_type:page_key or event_type: template_str}
+    # V10.3: 用户级 Webhook 监控过滤
+    monitor_user_ids = db.Column(db.Text, default='[]')    # JSON: [user_id, ...], 空=不限制
+    monitor_event_types = db.Column(db.Text, default='[]')  # JSON: [event_type, ...], 空=不限制
     created_at = db.Column(db.DateTime, default=datetime.now)
     
     user = db.relationship('User', backref=db.backref('webhooks', lazy=True))
@@ -694,17 +882,28 @@ class WebhookConfig(db.Model):
 
 
 class BackupConfig(db.Model):
-    """云端 / WebDAV 自动定时备份配置"""
+    """云端 / WebDAV 自动定时备份配置（支持多用户隔离）"""
     __tablename__ = 'backup_configs'
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, nullable=True)  # NULL=管理员全局配置，非NULL=用户私有配置
+    allow_view_others_tasks = db.Column(db.Boolean, default=False)  # 管理员全局配置：是否允许普通用户查看他人任务
+    # V10.2 新增：定时任务操作权限细化
+    allow_edit_others_tasks = db.Column(db.Boolean, default=False)  # 是否允许普通用户编辑他人定时任务
+    allow_delete_others_tasks = db.Column(db.Boolean, default=False)  # 是否允许普通用户删除他人定时任务
     webdav_url = db.Column(db.String(255), nullable=True)
     webdav_username = db.Column(db.String(100), nullable=True)
     webdav_password = db.Column(db.String(255), nullable=True)
     backup_path = db.Column(db.String(255), default='/gift_backups/')
     auto_backup_daily = db.Column(db.Boolean, default=False)
+    _backup_encrypt_password = db.Column('backup_encrypt_password', db.String(512), nullable=True)  # AES-256-GCM 密文存储
     last_backup_time = db.Column(db.DateTime, nullable=True)
     last_status = db.Column(db.String(255), nullable=True)
+    backup_subdir = db.Column(db.String(100), default='gift_backups')
     updated_at = db.Column(db.DateTime, default=datetime.now)
+    # V9 新增：配置别称（管理员为全局 WebDAV 配置设置，供普通用户引用时展示，不暴露地址/账号/密码）
+    config_alias = db.Column(db.String(100), nullable=True)
+    # V9 新增：该用户配置是否引用自管理员（引用后地址/账号/密码在页面不回显）
+    adopted_from_admin = db.Column(db.Boolean, default=False)
 
     @property
     def server_url(self):
@@ -753,19 +952,114 @@ class BackupConfig(db.Model):
         return decrypt_credential(self.webdav_password)
 
     @classmethod
-    def get_config(cls):
-        cfg = cls.query.first()
-        if not cfg:
-            cfg = cls()
-            db.session.add(cfg)
-            db.session.commit()
-        return cfg
+    def get_config(cls, user_id=None):
+        """获取配置：user_id=None 返回管理员全局配置，否则返回用户私有配置
+        V7 修复：普通用户首次访问创建空白配置，不再自动复制管理员全局配置（越权风险）"""
+        if user_id is None:
+            # 管理员全局配置（user_id 为 NULL 的记录）
+            cfg = cls.query.filter(cls.user_id.is_(None)).first()
+            if not cfg:
+                cfg = cls()
+                db.session.add(cfg)
+                db.session.commit()
+            return cfg
+        else:
+            # 用户私有配置（V7: 空白配置，不继承管理员凭证）
+            cfg = cls.query.filter(cls.user_id == user_id).first()
+            if not cfg:
+                cfg = cls(user_id=user_id)
+                db.session.add(cfg)
+                db.session.commit()
+            return cfg
+
+    @property
+    def backup_encrypt_password(self):
+        if not self._backup_encrypt_password:
+            return None
+        return decrypt_credential(self._backup_encrypt_password, fallback_plain=True)
+
+    @backup_encrypt_password.setter
+    def backup_encrypt_password(self, val):
+        if val is None or str(val).strip() == '':
+            self._backup_encrypt_password = None
+        else:
+            self._backup_encrypt_password = encrypt_credential(str(val).strip())
+
+
+class ScheduledBackupTask(db.Model):
+    """定时任务（支持数据库备份、文件备份、自定义脚本）"""
+    __tablename__ = 'scheduled_backup_tasks'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, default='定时任务')
+    cron_expr = db.Column(db.String(50), nullable=False, default='0 2 * * *')  # 默认每天凌晨2点
+    is_enabled = db.Column(db.Boolean, default=False)
+    encrypt_enabled = db.Column(db.Boolean, default=False)
+    task_type = db.Column(db.String(20), default='db_backup')  # db_backup / file_backup / custom
+    target_files = db.Column(db.Text, nullable=True)  # JSON 数组，file_backup 类型用
+    custom_script = db.Column(db.Text, nullable=True)  # 自定义脚本，custom 类型用
+    last_run_time = db.Column(db.DateTime, nullable=True)
+    last_run_status = db.Column(db.String(255), nullable=True)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # 创建者ID
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    creator = db.relationship('User', foreign_keys=[created_by], backref=db.backref('scheduled_tasks', lazy=True))
+
+
+class ScheduledTaskExecutionLog(db.Model):
+    """定时任务执行历史日志"""
+    __tablename__ = 'scheduled_task_execution_logs'
+    id = db.Column(db.Integer, primary_key=True)
+    task_id = db.Column(db.Integer, db.ForeignKey('scheduled_backup_tasks.id', ondelete='CASCADE'), nullable=False)
+    start_time = db.Column(db.DateTime, nullable=True)
+    end_time = db.Column(db.DateTime, nullable=True)
+    status = db.Column(db.String(20), default='running')  # running / success / failed
+    output_log = db.Column(db.Text, nullable=True)  # 执行输出日志
+    executed_by = db.Column(db.String(100), nullable=True)  # 执行人用户名（定时任务自动执行时为 'system'）
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    task = db.relationship('ScheduledBackupTask', backref=db.backref('execution_logs', lazy=True, cascade='all, delete-orphan'))
+
+
+class BackupAttachment(db.Model):
+    """备份附件文件"""
+    __tablename__ = 'backup_attachments'
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(255), nullable=False)
+    file_size = db.Column(db.Integer, default=0)
+    file_type = db.Column(db.String(50), default='application/octet-stream')
+    is_encrypted = db.Column(db.Boolean, default=False)
+    uploaded_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    storage_path = db.Column(db.String(500), nullable=True)  # WebDAV 远端路径或本地路径
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    user = db.relationship('User', backref=db.backref('backup_attachments', lazy=True))
+
+
+class PermissionTicket(db.Model):
+    """权限申请工单"""
+    __tablename__ = 'permission_tickets'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    requested_menus = db.Column(db.String(256), nullable=False)  # 申请的菜单列表（逗号分隔）
+    reason = db.Column(db.Text, nullable=True)  # 申请理由
+    status = db.Column(db.String(20), default='pending')  # pending / approved / rejected / revoked
+    reviewed_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    reviewed_at = db.Column(db.DateTime, nullable=True)
+    review_comment = db.Column(db.Text, nullable=True)
+    granted_menus = db.Column(db.String(256), nullable=True)  # 实际批准的菜单列表
+    created_at = db.Column(db.DateTime, default=datetime.now)
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+    user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('permission_tickets', lazy=True, cascade='all, delete-orphan'))
+    reviewer = db.relationship('User', foreign_keys=[reviewed_by])
 
 
 class WebhookLog(db.Model):
     __tablename__ = 'webhook_logs'
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    operator_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     webhook_id = db.Column(db.Integer, db.ForeignKey('webhook_configs.id', ondelete='CASCADE'), nullable=True)
     event_type = db.Column(db.String(50), nullable=False)  # add, delete, test, reminder, broadcast
     payload = db.Column(db.Text, nullable=True)
@@ -773,4 +1067,5 @@ class WebhookLog(db.Model):
     response_body = db.Column(db.Text, nullable=True)
     is_success = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.now)
-    user = db.relationship('User', backref=db.backref('webhook_logs', lazy=True))
+    user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('webhook_logs', lazy=True))
+    operator = db.relationship('User', foreign_keys=[operator_id])
