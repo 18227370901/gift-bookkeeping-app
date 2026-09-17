@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '67747d5e-541c-449f-ba1d-dd16ddabc6ef'
-  PropagateID: '67747d5e-541c-449f-ba1d-dd16ddabc6ef'
-  ReservedCode1: 'b3f3477e-c85b-442b-b6d9-a27bb92dac2b'
-  ReservedCode2: 'b3f3477e-c85b-442b-b6d9-a27bb92dac2b'
+  ProduceID: '43a33c0e-1c92-490d-82f9-95cd91ad655a'
+  PropagateID: '43a33c0e-1c92-490d-82f9-95cd91ad655a'
+  ReservedCode1: 'b5db17b9-8a03-4e0f-b1fb-3fb5d9bba768'
+  ReservedCode2: 'b5db17b9-8a03-4e0f-b1fb-3fb5d9bba768'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -466,6 +466,35 @@ AIGC:
 - 现象：PID 12304（系统 Python）与 PID 41372（TeleAgent 运行时）同时 LISTENING 11443
 - 处理：杀掉两个 `app.py` 旧实例，统一用系统 Python 后台启动单实例（HTTP 200、监听唯一）
 - 重启规范见 `AI_ASSISTANT_DESIGN.md` 第二十章 20.4（先杀旧实例 → 确认无监听 → `Start-Process -WindowStyle Hidden` 启动 → 验证监听与页面）
+
+### V10.7 凭证验证跳转修复与备份恢复安全加固（2026-09-17）
+
+#### 问题1：管理员查看凭证验证失败后跳转首页
+- 根因：`admin_user_credentials` 接口验证失败时返回 HTTP 401，`base.html` 全局 Fetch 拦截器把任何 401 当作"登录失效"强制跳转 `/login`，已登录用户被重定向到首页
+- 修复：后端将"未验证通过"的 HTTP 状态码由 401 改为 200（JSON `code` 仍为 401），前端按 `res.code` 判断不受影响；全局拦截器增加 `need_verify` 豁免双保险
+- 涉及文件：`app.py`（2604行）、`templates/base.html`（232-251行）
+
+#### 问题2：普通用户上传他人/异常 db 导致系统崩溃（500）
+- 根因1：`_is_full_restore` 判定允许 `can_view_others_for('ledger')` 的普通用户走文件级替换主库路径，上传结构不一致的 .db 覆盖主库后 users 等全局表丢失 → 全站 500
+- 根因2：本地上传入口无文件归属/命名校验，任意 .db 均可上传
+- 修复：
+  - 收紧文件级替换判定为仅 `is_admin`（本地 + WebDAV 两处同步改），普通用户一律走数据级合并
+  - 本地上传增加文件命名规则校验 + 归属校验（兼容 `YYYYMMDD_HHMMSS_用户名_db_backup.db` 与 `gift_bookkeeping_backup_YYYYMMDD_HHMMSS.db` 两种格式）
+  - `merge_user_scoped_backup` 加固：完整库拦截（含 users 表拒绝）、结构兼容性校验（缺 user_id 列报错）、列对齐取交集（防止 schema 差异 INSERT 异常）、SELECT 前置 user_id 过滤
+- 涉及文件：`routes_ext.py`（`merge_user_scoped_backup` 113-188行、`admin_upload_local_backup` 3966-4099行、`admin_restore_webdav_backup` 4237-4253行）
+
+#### 数据库恢复
+- 修复过程中发现主库已因问题2 漏洞损坏（malformed database schema），用自动备份 `gift_bookkeeping.db.bak_1789623762` 恢复（22 张表、6 个用户、业务数据完整）
+- 损坏库副本保留为 `gift_bookkeeping.db.corrupted_20260917` 供分析
+
+#### 浏览器验证结果
+- 问题1：错误密码 → 停留在 Modal 显示"验证失败"不跳首页 ✅；正确密码 → 正常显示凭证 ✅
+- 问题2场景1（任意命名 test.db）→ 命名规则拒绝 ✅
+- 问题2场景2（他人文件名 zhangsan）→ 归属校验拒绝 ✅
+- 问题2场景3（自己文件名但含完整库）→ 完整库拦截拒绝 ✅
+- 问题2场景4（本人正常过滤备份）→ 合并成功 ✅
+- 问题2场景5（下载→上传闭环）→ 合并成功 ✅
+- 全站无崩溃、其他用户数据不受影响 ✅
 
 ## 📂 项目文件结构
 

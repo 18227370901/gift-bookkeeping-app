@@ -141,10 +141,22 @@ def merge_user_scoped_backup(db_path, backup_db_path, user):
         # 校验备份中实际存在的业务表
         existing = {r[0] for r in src.execute(
             "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+        # V10.7：完整库拦截——非管理员上传的备份若含 users 等全局表（说明是完整库/他人库），
+        # 明确拒绝，防止用他人或管理员完整备份覆盖本人数据
+        if not getattr(user, 'is_admin', False) and 'users' in existing:
+            src.close()
+            return False, '检测到上传的是完整备份文件（含全局用户表），普通用户仅可恢复本人生成的过滤备份，请联系管理员处理', {}
         missing = [t for t in user_tables if t not in existing]
         if missing:
             src.close()
             return False, f'备份文件中缺少业务表: {", ".join(missing)}，无法恢复', {}
+
+        # V10.7：结构兼容性校验——三张业务表必须包含 user_id 列（旧版/异构表结构直接报错，避免 SQL 异常导致 500）
+        for tbl in user_tables:
+            _tbl_cols = {r[1] for r in src.execute(f'PRAGMA table_info("{tbl}")').fetchall()}
+            if 'user_id' not in _tbl_cols:
+                src.close()
+                return False, f'备份文件 [{tbl}] 表缺少 user_id 列，数据库结构不兼容，无法恢复', {}
 
         # ATTACH 主库，在同一连接内完成数据合并（自动处理跨库约束）
         src.execute("ATTACH DATABASE ? AS main_db", (db_path,))
@@ -159,12 +171,17 @@ def merge_user_scoped_backup(db_path, backup_db_path, user):
                 continue  # 跳过该表，保留本人现有数据不动
             # 1) 删除主库中该用户本人的旧数据
             src.execute(f'DELETE FROM main_db."{tbl}" WHERE user_id = ?', (user_id,))
-            # 2) 从备份导入该用户数据（列对齐，排除 id 由 SQLite 重新分配主键）
-            cols = [r[1] for r in src.execute(f'PRAGMA table_info("{tbl}")').fetchall()]
-            src_cols = [c for c in cols]
+            # 2) 从备份导入该用户数据（列对齐：取备份表与主表共有列，排除 id 由 SQLite 重新分配主键）
+            # 注意：PRAGMA 的 schema 前缀格式为 PRAGMA main_db.table_info("表名")，不能写成 PRAGMA table_info(main_db."表名")
+            main_cols = {r[1] for r in src.execute(f'PRAGMA main_db.table_info("{tbl}")').fetchall()}
+            _backup_cols = [r[1] for r in src.execute(f'PRAGMA table_info("{tbl}")').fetchall()]
+            src_cols = [c for c in _backup_cols if c in main_cols and c != 'id']
             col_list = ', '.join(f'"{c}"' for c in src_cols)
             placeholders = ', '.join('?' for _ in src_cols)
-            rows = src.execute(f'SELECT {col_list} FROM "{tbl}"').fetchall()
+            # V10.7：SELECT 前置 user_id 过滤（数据隔离双保险，不再全表扫描再逐行过滤）
+            rows = src.execute(
+                f'SELECT {col_list} FROM "{tbl}" WHERE user_id = ?', (user_id,)
+            ).fetchall()
             inserted = 0
             for row in rows:
                 # 备份按 user_id 过滤生成，这里再防御性校验一次
@@ -3984,13 +4001,31 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         try:
             # V9 修复：普通用户的过滤备份不能文件级替换主库（会导致 users 表丢失、全站 500），
             # 改为数据级合并：只把备份中本人三张业务表数据合回主库
-            _is_full_restore = current_user.is_admin or (
-                hasattr(current_user, 'can_view_others_for') and current_user.can_view_others_for('ledger'))
+            # V10.7 收紧：文件级替换仅限管理员；拥有他人查看权限（ledger level>=1）的普通用户
+            # 也必须走数据级合并，防止上传他人/完整/结构不一致的 .db 文件级覆盖主库导致全站 500
+            _is_full_restore = current_user.is_admin
             if not _is_full_restore:
                 import tempfile
                 tmp_dir = tempfile.mkdtemp(prefix='gift_upload_')
                 tmp_db_path = os.path.join(tmp_dir, 'uploaded.db')
                 file.save(tmp_db_path)
+
+                # V10.7：文件归属校验——仅允许上传本人系统生成的备份文件
+                # 兼容两种系统命名格式：
+                #   1) WebDAV/定时备份格式: YYYYMMDD_HHMMSS_用户名_db_backup.db
+                #   2) 本地下载格式:       gift_bookkeeping_backup_YYYYMMDD_HHMMSS.db（不含用户名，跳过归属比对）
+                import re as _re_upload
+                _fn = file.filename or ''
+                _fn_m = _re_upload.match(r'(\d{8}_\d{6})_(.+?)_(db_backup|file_backup|custom)\.(db|zip)', _fn)
+                _fn_local = _re_upload.match(r'gift_bookkeeping_backup_(\d{8}_\d{6})\.db$', _fn)
+                if not _fn_m and not _fn_local:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    flash('恢复失败：上传文件不符合系统备份命名规则，仅支持上传本人在本系统生成的备份文件！', 'danger')
+                    return redirect(url_for('admin_backups'))
+                if _fn_m and _fn_m.group(2) != current_user.username:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    flash('恢复失败：该备份文件不属于当前账号，仅能恢复本人的备份文件！', 'danger')
+                    return redirect(url_for('admin_backups'))
 
                 # 校验上传的数据库文件完整性
                 import sqlite3 as _sqlite3
@@ -4234,8 +4269,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
                 # V9 修复：普通用户的过滤备份不能文件级替换主库（users 表丢失 → 全站 500），
                 # 改为数据级合并：只把备份中本人三张业务表数据合回主库
-                _is_full_restore = current_user.is_admin or (
-                    hasattr(current_user, 'can_view_others_for') and current_user.can_view_others_for('ledger'))
+                # V10.7：文件级恢复仅限管理员（含他人查看权限的普通用户也必须数据级合并）
+                _is_full_restore = current_user.is_admin
                 if not _is_full_restore:
                     # 防锁：合并前先提交请求内未提交事务并释放连接池，确保主库写锁可获取
                     try:

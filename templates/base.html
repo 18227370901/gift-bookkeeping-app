@@ -230,17 +230,24 @@
         window.togglePassVisibility = togglePasswordVisibility;
 
         // 全局 Fetch 拦截器：捕获 401 认证失效并优雅跳转登录
+        // V10.7：若 401 响应的 JSON 含 need_verify 字段，视为业务性校验失败（如凭证二次验证），
+        //        不触发登录失效跳转，避免误伤业务 401
         const _originalFetch = window.fetch;
         window.fetch = async function(...args) {
             try {
                 const response = await _originalFetch.apply(this, args);
                 if (response.status === 401) {
                     let msg = '登录状态已失效，请重新登录！';
+                    let isBusinessVerify = false;
                     try {
                         const cloneRes = response.clone();
                         const data = await cloneRes.json();
                         if (data && data.message) msg = data.message;
+                        if (data && data.need_verify) isBusinessVerify = true;
                     } catch(e) {}
+                    if (isBusinessVerify) {
+                        return response;
+                    }
                     alert(msg);
                     window.location.href = '/login';
                 }

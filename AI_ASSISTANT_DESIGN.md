@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '4a7d1e93-f5af-452a-8caf-b7baebbb69c2'
-  PropagateID: '4a7d1e93-f5af-452a-8caf-b7baebbb69c2'
-  ReservedCode1: '4eb2537b-1dba-4a94-b2b9-a1f588a6e483'
-  ReservedCode2: '4eb2537b-1dba-4a94-b2b9-a1f588a6e483'
+  ProduceID: '9a499e19-6b21-4130-9053-934c93363009'
+  PropagateID: '9a499e19-6b21-4130-9053-934c93363009'
+  ReservedCode1: '025d5ce0-cb3a-46d5-a7d4-a54e2c0a9e84'
+  ReservedCode2: '025d5ce0-cb3a-46d5-a7d4-a54e2c0a9e84'
 ---
 
 # AI 助手模块技术设计方案
@@ -1861,3 +1861,87 @@ netstat -ano | findstr ":11443" | findstr "LISTENING"   # 应只有一行
 | `templates/admin_users.html` | 补管理员二次验证界面（修复查看凭证卡死） |
 | `webhook_utils.py` | PAGE_EVENT_MATRIX 补 security/restore/status_change 事件 |
 | `README.md` | 新增 V10.6 变更日志 |
+
+## 第二十一章 V10.7 凭证验证跳转修复与备份恢复安全加固（2026-09-17）
+
+### 21.1 需求总览
+
+本轮基于 V10.6（commit 44ce3fe + bfd5810）处理用户报告的两个缺陷：
+1. **问题1**：管理员查看管理员用户凭证时，弹出"需输入管理员密码或密保"提示，输入后点击确认，页面自动跳转到礼金账本首页，未继续正常操作。
+2. **问题2**：普通用户能导入其他用户或管理员的 db 备份文件，导致系统崩溃（Internal Server Error）。
+
+### 21.2 根因分析
+
+#### 21.2.1 问题1：凭证验证失败后跳转首页
+
+**证据链**：
+1. `admin_user_credentials`（app.py 2583-2640行）：管理员账号的凭证验证失败时返回 **HTTP 401**（2604-2613行）
+2. `base.html` 全局 Fetch 拦截器（232-251行）：**任何** fetch 响应状态码为 401，一律视为"登录失效" → `alert()` + `window.location.href = '/login'`
+3. `/login` 对已登录用户直接重定向到首页（app.py 1111行）
+4. 于是"密码/密保验证失败 → 401 → 被误判登录失效 → 跳 /login → 重定向首页"，凭证弹窗的错误提示根本没机会展示
+
+#### 21.2.2 问题2：普通用户导入他人 db 导致系统崩溃
+
+**证据链**：
+1. `admin_upload_local_backup`（routes_ext.py 3966行）：`_is_full_restore = is_admin or can_view_others_for('ledger')`
+   - **拥有"查看他人礼金"权限（level≥1）的普通用户被误判为"可全库恢复"**，走**文件级替换主库**路径
+   - 上传任意 .db 替换主库后 users 等全局表丢失 → 全站 500
+2. **本地上传入口无文件归属/命名校验**（WebDAV 恢复有 `created_by` 校验，本地上传没有）
+3. `merge_user_scoped_backup`（routes_ext.py 113-188行）防御不足：
+   - SELECT 未按 user_id 过滤（全表扫描后逐行过滤）
+   - 列对齐未校验主表列（schema 差异导致 INSERT 异常）
+   - 未识别上传的是"完整库/他人库"
+
+### 21.3 修复方案与实施
+
+#### 21.3.1 问题1 修复
+
+| 文件 | 改动 |
+|------|------|
+| `app.py` 2604行 | 凭证"未验证通过"的 HTTP 状态码由 401 改为 200（JSON `code` 仍为 401、`need_verify: true` 不变） |
+| `templates/base.html` 232-251行 | 全局 Fetch 拦截器增加 `need_verify` 豁免：401 响应 JSON 含 `need_verify` 字段时跳过登录失效跳转（双保险） |
+
+#### 21.3.2 问题2 修复
+
+| 文件 | 改动 |
+|------|------|
+| `routes_ext.py` 4005行（本地）/ 4252行（WebDAV） | `_is_full_restore` 收紧为仅 `current_user.is_admin`（含他人查看权限的普通用户也必须数据级合并） |
+| `routes_ext.py` 4013-4025行 | 本地上传增加文件命名规则 + 归属校验：兼容 `YYYYMMDD_HHMMSS_用户名_db_backup.db` 与 `gift_bookkeeping_backup_YYYYMMDD_HHMMSS.db` 两种格式；前者校验用户名归属，后者为本地下载格式（无用户名信息，靠 merge 数据隔离 + 完整库拦截兜底） |
+| `routes_ext.py` 142-167行 | `merge_user_scoped_backup` 加固：完整库拦截（非管理员 + 含 users 表 → 拒绝）、结构兼容性校验（缺 user_id 列 → 报错）、列对齐取交集（备份表与主表共有列，排除 id）、SELECT 前置 user_id 过滤 |
+
+#### 21.3.3 数据库恢复
+
+修复过程中发现主库已因问题2 漏洞损坏（`malformed database schema`），用自动备份 `gift_bookkeeping.db.bak_1789623762` 恢复：
+- 22 张表、6 个用户、业务数据完整（gift_records 8、banquets 8、anniversary 4、operation_logs 239、webhook_logs 45）
+- 损坏库副本保留为 `gift_bookkeeping.db.corrupted_20260917` 供分析
+- 恢复后清理损坏的 `-wal`/`-shm` 文件
+
+### 21.4 浏览器验证结果
+
+#### 问题1 验证
+
+| 场景 | 结果 |
+|------|------|
+| 错误密码 → 验证失败提示 | ✅ 停留在 Modal 显示"原密码或密保答案不正确"，不跳首页 |
+| 正确密码 → 显示凭证 | ✅ 正常显示密码、双密保问答 |
+
+#### 问题2 验证
+
+| 场景 | 结果 |
+|------|------|
+| 任意命名 test.db | ✅ 命名规则校验拒绝 |
+| 他人文件名 zhangsan_db_backup.db | ✅ 归属校验拒绝 |
+| 自己文件名但内容含 users 表（完整库） | ✅ 完整库拦截拒绝 |
+| 本人正常过滤备份 | ✅ 合并成功（11 条数据恢复） |
+| 下载→上传闭环 | ✅ 合并成功 |
+| 全站无崩溃、其他用户数据不受影响 | ✅ integrity ok、users 6、数据分布不变 |
+
+### 21.5 涉及文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `app.py` | 凭证接口 401→200（code 仍 401） |
+| `templates/base.html` | 全局拦截器增加 need_verify 豁免 |
+| `routes_ext.py` | _is_full_restore 收紧 + 本地上传文件归属校验 + merge_user_scoped_backup 防御增强 |
+| `README.md` | 新增 V10.7 变更日志 |
+| `AI_ASSISTANT_DESIGN.md` | 新增第二十一章 |

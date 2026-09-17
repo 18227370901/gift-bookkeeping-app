@@ -2602,6 +2602,8 @@ def admin_user_credentials(user_id):
             verified = True
 
         if not verified:
+            # V10.7 修复：未验证通过时 HTTP 状态码改为 200（JSON code 仍为 401），
+            # 避免 base.html 全局 Fetch 拦截器把业务性 401 误判为登录失效而强制跳转首页
             return jsonify({
                 'code': 401,
                 'need_verify': True,
@@ -2610,7 +2612,7 @@ def admin_user_credentials(user_id):
                 'q1': user.security_question_1 or user.security_question or '未设置',
                 'q2': user.security_question_2 or '',
                 'message': '管理员账号的安全凭证受保护，必须先验证当前账号的原密码或原密保答案！'
-            }), 401
+            }), 200
 
     plain_password = user.get_decrypted_password()
     security_qa = user.get_decrypted_security_answers()
