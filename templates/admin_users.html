@@ -967,6 +967,31 @@ function copyCredPassword() {
         </div>
         <div id="credError" class="alert alert-danger d-none mb-0"></div>
 
+        <!-- 管理员二次验证界面（查看管理员账号凭证时需先验证原密码或原密保） -->
+        <div id="credVerifySection" class="d-none">
+          <div class="alert alert-warning-subtle border border-warning-subtle py-2 px-3 small rounded-3 mb-3">
+            <i class="fa-solid fa-triangle-exclamation me-1 text-warning"></i>
+            <strong>安全验证：</strong>管理员账号的凭证受保护，请先验证原密码或原密保答案。
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold text-secondary">原密码</label>
+            <div class="input-group input-group-sm">
+              <input type="password" id="credVerifyPwdInput" class="form-control" placeholder="输入当前账号原密码">
+              <button class="btn btn-outline-secondary" type="button" onclick="togglePassVisibility('credVerifyPwdInput', this)"><i class="fa-regular fa-eye"></i></button>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small fw-bold text-secondary">密保答案 <span id="credVerifyQuestionLabel" class="text-muted fw-normal"></span></label>
+            <input type="text" id="credVerifyAnsInput" class="form-control form-control-sm" placeholder="输入密保答案（若配置了双密保请同时输入）">
+          </div>
+          <div id="credVerifyError" class="alert alert-danger d-none py-1 px-2 small mb-2"></div>
+          <div class="text-end">
+            <button type="button" class="btn btn-primary btn-sm rounded-pill px-4" onclick="submitAdminVerifyCred()">
+              <i class="fa-solid fa-shield-halved me-1"></i>验证并查看
+            </button>
+          </div>
+        </div>
+
         <div id="credContent" class="d-none">
           <div class="alert alert-warning-subtle border border-warning-subtle py-2 px-3 small rounded-3 mb-3">
             <i class="fa-solid fa-triangle-exclamation me-1 text-warning"></i>

@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '130341ea-f6b9-4bf2-819c-cd977d2a0c13'
-  PropagateID: '130341ea-f6b9-4bf2-819c-cd977d2a0c13'
-  ReservedCode1: 'bee2b9d6-8bb4-42cd-8a8d-0cab0af73dfc'
-  ReservedCode2: 'bee2b9d6-8bb4-42cd-8a8d-0cab0af73dfc'
+  ProduceID: '5b7d3810-2500-43a0-b6d1-93ee36eda85b'
+  PropagateID: '5b7d3810-2500-43a0-b6d1-93ee36eda85b'
+  ReservedCode1: '45384f52-61a2-44f4-8e4b-be53e02ff152'
+  ReservedCode2: '45384f52-61a2-44f4-8e4b-be53e02ff152'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -445,6 +445,22 @@ AIGC:
 - **routes_ext.py 6 处**：toggle_share_ledger、banquet_export_excel、admin_upload_attachment、admin_test_webdav、admin_download_local_backup、admin_restore_webdav_backup（普通用户数据级合并路径）
 - **routes_ai.py 2 处**：api_ai_session_create、api_ai_session_rename
 - **不补充 2 处**：admin_test_webhook（循环推送风险）、api_ai_chat（高频调用噪音）
+
+### V10.6 Webhook 推送修复与查看凭证卡死修复（2026-09-17）
+
+#### 用户管理-查看凭证卡死修复
+- 根因：`admin_users.html` 的 `fetchAndRenderCredentials()` JS 引用不存在的元素 `credVerifySection`，抛 `TypeError` 导致 loading 永不消失
+- 修复：补充管理员二次验证界面（原密码/密保输入 + 验证按钮），凭证展示正常
+
+#### Webhook 推送不生效修复（PAGE_EVENT_MATRIX 补全）
+- 根因：启用中通道的 `notify_pages` 页面矩阵缺项，`_page_matches` 过滤掉本应推送的事件
+- 修复：`webhook_utils.py` 补全矩阵——ledger/admin_users/admin_logs 增加 `security`、admin_backups 增加 `security`+`restore`、ai_config 增加 `status_change`；数据库通道 `notify_pages` 同步更新
+- 覆盖问题清单：人情对账同步、用户管理启用/重置密码/重置密保/查看凭证、审计日志删除、AI 授权开关、Webhook 新增/编辑、WebDAV 下载备份/上传恢复、导出数据 CSV
+
+#### 浏览器逐项验证结果（webhook_logs 基线 max_id=41）
+- 验证通过项（均有成功推送记录）：查看凭证、人情对账同步、用户管理重置密码/重置密保/禁用/查看凭证/启用、审计日志单选删除/批量删除、AI 授权授权/取消授权、Webhook 新增/编辑通道、WebDAV 下载备份、导出 CSV
+- 验证数据已清理：临时通道 #4 已删除、验证推送日志（id=42~48）已删除，基线恢复 max_id=41
+- 待用户自行验证：WebDAV 上传覆盖恢复（代码已确认含推送）
 
 ## 📂 项目文件结构
 
