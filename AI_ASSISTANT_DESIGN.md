@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'be2fbd66-82c8-43f3-8865-6c69289f5ba7'
-  PropagateID: 'be2fbd66-82c8-43f3-8865-6c69289f5ba7'
-  ReservedCode1: 'f4975e6c-54d6-446b-b533-ec92a2fb96b3'
-  ReservedCode2: 'f4975e6c-54d6-446b-b533-ec92a2fb96b3'
+  ProduceID: '4a76ebcd-10e1-45a0-824d-68173780db7f'
+  PropagateID: '4a76ebcd-10e1-45a0-824d-68173780db7f'
+  ReservedCode1: '9609a514-3fb6-4442-b386-795e1eb6c29b'
+  ReservedCode2: '9609a514-3fb6-4442-b386-795e1eb6c29b'
 ---
 
 # AI 助手模块技术设计方案
@@ -2003,7 +2003,15 @@ netstat -ano | findstr ":11443" | findstr "LISTENING"   # 应只有一行
 |------|----------|
 | `routes_ext.py` | 4 处补推送 + 2 处补 page_key + custom_push 重构 + 备份失败补推送 + 新建 Webhook 默认全选 |
 | `webhook_utils.py` | `_monitor_matches` 空列表=拦截 |
-| `app.py` | V10.9 数据迁移块（空监控范围预填全选） |
+| `app.py` | V10.9 数据迁移块（空监控范围预填全选 + notify_pages 矩阵 batch_delete 补 admin_webhooks） |
 | `templates/admin_webhooks.html` | 监控范围提示文案更新 |
 | `AI_ASSISTANT_DESIGN.md` | 新增第二十二章 |
 | `README.md` | 新增 V10.9 变更日志 |
+
+### 22.9 V10.9.1 补丁：notify_pages 矩阵遗漏修复
+
+**问题**：验证阶段发现 #2 通道的推送配置矩阵 `notify_pages` 中，`batch_delete` 大类下未包含 `admin_webhooks` 页面，导致批量删除推送日志时被页面级过滤拦截，推送不生效。
+
+**修复**：在 `app.py` 的 V10.9 迁移块中增加逻辑，遍历所有 WebhookConfig，检查 `notify_pages` 的 `batch_delete` 数组是否包含 `admin_webhooks`，未包含则自动追加。
+
+**验证结果**：修复后批量删除推送日志成功触发 `batch_delete` 事件推送，日志中新增对应记录。

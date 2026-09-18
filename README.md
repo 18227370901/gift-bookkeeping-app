@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '623eed30-2c27-43cc-b882-e2102a77ce0b'
-  PropagateID: '623eed30-2c27-43cc-b882-e2102a77ce0b'
-  ReservedCode1: '69cba256-41d0-4def-94f6-698c559de74e'
-  ReservedCode2: '69cba256-41d0-4def-94f6-698c559de74e'
+  ProduceID: '3422b542-1b76-4516-8851-345f72d5392c'
+  PropagateID: '3422b542-1b76-4516-8851-345f72d5392c'
+  ReservedCode1: '65a5c3db-465a-48c2-b157-f3bc9649ed27'
+  ReservedCode2: '65a5c3db-465a-48c2-b157-f3bc9649ed27'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -521,6 +521,9 @@ AIGC:
 
 #### 涉及文件
 - `routes_ext.py`、`webhook_utils.py`、`app.py`、`templates/admin_webhooks.html`、`AI_ASSISTANT_DESIGN.md`、`README.md`
+
+#### V10.9.1 补丁
+- 修复 `notify_pages` 矩阵遗漏：`batch_delete` 大类补 `admin_webhooks` 页面（导致批量删除推送日志被页面级过滤拦截）
 
 ## 📂 项目文件结构
 

@@ -820,9 +820,22 @@ def init_database():
                         changed = True
                 except Exception:
                     pass
+                # V10.9.1: 修复 notify_pages 矩阵遗漏 — batch_delete 大类补 admin_webhooks 页面
+                raw_pages = getattr(wh, 'notify_pages', None) or '{}'
+                try:
+                    pages_dict = _migrate_json.loads(raw_pages) if isinstance(raw_pages, str) else raw_pages
+                    if isinstance(pages_dict, dict):
+                        bd_pages = pages_dict.get('batch_delete', [])
+                        if isinstance(bd_pages, list) and 'admin_webhooks' not in bd_pages:
+                            bd_pages.append('admin_webhooks')
+                            pages_dict['batch_delete'] = bd_pages
+                            wh.notify_pages = _migrate_json.dumps(pages_dict)
+                            changed = True
+                except Exception:
+                    pass
             if changed:
                 db.session.commit()
-                print(f"[V10.9 Migration] 已将 {sum(1 for h in hooks_to_migrate if getattr(h, '_sa_instance_state', None) and h in db.session.dirty)} 个 Webhook 通道的空监控范围预填为全选")
+                print(f"[V10.9 Migration] 已将 {sum(1 for h in hooks_to_migrate if getattr(h, '_sa_instance_state', None) and h in db.session.dirty)} 个 Webhook 通道的空监控范围/矩阵遗漏修复")
         except Exception as e:
             print(f"[V10.9 Migration] 监控范围迁移跳过: {e}")
 
