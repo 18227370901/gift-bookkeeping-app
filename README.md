@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '3422b542-1b76-4516-8851-345f72d5392c'
-  PropagateID: '3422b542-1b76-4516-8851-345f72d5392c'
-  ReservedCode1: '65a5c3db-465a-48c2-b157-f3bc9649ed27'
-  ReservedCode2: '65a5c3db-465a-48c2-b157-f3bc9649ed27'
+  ProduceID: 'f0a2c3e0-8dff-4d2b-81ee-6d39517deae6'
+  PropagateID: 'f0a2c3e0-8dff-4d2b-81ee-6d39517deae6'
+  ReservedCode1: '565dc9a9-da15-40e7-b34f-4577aec7ddf4'
+  ReservedCode2: '565dc9a9-da15-40e7-b34f-4577aec7ddf4'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -525,6 +525,32 @@ AIGC:
 #### V10.9.1 补丁
 - 修复 `notify_pages` 矩阵遗漏：`batch_delete` 大类补 `admin_webhooks` 页面（导致批量删除推送日志被页面级过滤拦截）
 
+### V10.10 多项目共用 443 端口 SNI 分流改造（2026-09-18）
+
+#### 改造目标
+- 多项目（如本系统与「萌芽」平台）部署在同一台服务器时，共用宿主机 443 端口对外提供 HTTPS，依靠 SNI（server_name 域名）区分流量，每个项目一份独立 Nginx 配置文件。
+
+#### 变更内容
+- `run.sh`：
+  - `NGINX_PORT` 默认值 15001 → **443**
+  - 新增变量（均支持环境变量覆盖）：`PROJECT_NAME`（默认 gift_app，决定 Nginx 配置文件名与 upstream 名，防止多项目重名冲突）、`SNI_DOMAIN`（默认 localhost，写入 server_name 与自签证书 CN/SAN）、`SSL_CERT`/`SSL_KEY`（默认 $APP_DIR/ssl/server.crt|key，可指向正式证书）、`SNI_DEFAULT_SERVER`（默认 1，本项目作为 443 端口兑底 default_server；多项目共端口时只应有一个项目设为 1）
+  - `setup_nginx_config()` 重写：改为渲染占位符模板输出 `$NGINX_CONF_DIR/$PROJECT_NAME.conf`；SNI_DOMAIN 为空时告警中止启动；生成文件头部自动加"自动生成，勿手工修改"标识；自动禁用旧版 `gift_app_native.conf`；启动成功提示改为 `https://$SNI_DOMAIN/`（非 443 端口时附加端口号）
+  - `ensure_ssl_certs()` 传 `--domain $SNI_DOMAIN`，并在 APP_DIR 下固定执行，确保证书输出路径不随调用目录漂移
+- `nginx_ssl.conf`：改造为占位符模板（`__UPSTREAM_NAME__` / `__BACKEND_PORT__` / `__NGINX_PORT__` / `__SNI_DOMAIN__` / `__SSL_CERT__` / `__SSL_KEY__`），由 run.sh 渲染，不再手工维护；`proxy_set_header Host` 去掉 `:$server_port`（443 为标准端口，避免后端生成带 :443 的 URL）
+- `generate_ssl_certs.py`：新增 `--domain`（写入证书 CN/SAN，支持域名或 IP）与 `--days` 参数；SAN 自动区分 DNS/IP 条目类型且不产生重复条目；不传参数行为与原版一致
+
+#### 多项目接入示例
+```bash
+# 项目一（本系统，作为 443 兑底）
+PROJECT_NAME=gift_app SNI_DOMAIN=gift.example.com SNI_DEFAULT_SERVER=1 ./run.sh start
+
+# 项目二（萌芽平台）
+PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.sh start
+```
+
+#### 涉及文件
+- `run.sh`、`nginx_ssl.conf`、`generate_ssl_certs.py`、`README.md`
+
 ## 📂 项目文件结构
 
 ```text
@@ -540,9 +566,9 @@ gift_bookkeeping_app/
 ├── webdav_utils.py             # WebDAV 客户端、加密 zip 备份与还原管理
 ├── requirements.txt            # 项目 Python 依赖库列表
 ├── gift_bookkeeping.db         # SQLite 数据库文件 (支持 WAL 模式与并发读写)
-├── run.sh                      # Linux 后台服务管理与虚拟环境自动创建/启动脚本
-├── nginx_ssl.conf              # Nginx 自定义 HTTPS 端口反向代理配置文件
-├── generate_ssl_certs.py       # 自签名 SSL 证书快速生成脚本
+├── run.sh                      # Linux 后台服务管理与虚拟环境自动创建/启动脚本 (SNI 多项目 443 端口分流)
+├── nginx_ssl.conf              # Nginx HTTPS SNI 反向代理占位符模板 (由 run.sh 自动渲染为项目专属配置)
+├── generate_ssl_certs.py       # 自签名 SSL 证书快速生成脚本 (支持 --domain 写入 SNI 域名)
 ├── AI_ASSISTANT_DESIGN.md      # [新增] AI 助手与综合增强功能技术设计文档
 ├── Project_Survey.md           # 系统架构设计规范与 38 项架构决策记录 (ADR-01 ~ ADR-38)
 ├── README.md                   # 系统使用说明与运维开发手册
@@ -609,7 +635,17 @@ chmod +x run.sh
 ```
 
 > 💡 **端口与账号自定义**：
-> 可在 `run.sh` 脚本头的环境变量中修改 `PORT`（默认 11443）、`NGINX_PORT`（默认 15001）、`ADMIN_USER` 与 `ADMIN_PASS`。执行 `start` 或 `restart` 时，系统会自动重写更新 Nginx 配置文件并热重载生效。
+> 环境变量可在执行命令时临时指定，也可写入 shell 配置后长期生效：`PORT`（后端端口，默认 11443）、`NGINX_PORT`（Nginx 对外监听端口，默认 443）、`ADMIN_USER` 与 `ADMIN_PASS`。执行 `start` 或 `restart` 时，系统会自动渲染 Nginx 配置并热重载生效。
+>
+> 💡 **多项目共用 443 端口 SNI 分流**（V10.10）：
+> 同一台服务器多个项目可共用 443 端口，依靠域名区分流量，各项目启动时指定专属变量即可：
+> ```bash
+> PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.sh start
+> ```
+> - `PROJECT_NAME`：项目标识，决定 Nginx 配置文件名与 upstream 名（默认 gift_app）
+> - `SNI_DOMAIN`：SNI 域名，写入 server_name 与证书 CN/SAN（默认 localhost）
+> - `SNI_DEFAULT_SERVER`：是否作为 443 兑底 default_server，多项目只应有一个设为 1（默认 1）
+> - `SSL_CERT` / `SSL_KEY`：可指向正式证书路径，默认使用自动生成的自签证书
 
 ---
 
@@ -619,13 +655,17 @@ chmod +x run.sh
 
 ### 1. 生成自签名证书（内网/测试环境可选）
 ```bash
-python generate_ssl_certs.py
+# 默认域名 localhost；建议通过 --domain 写入实际 SNI 域名，避免浏览器报证书域名不匹配
+python generate_ssl_certs.py --domain gift.example.com
+# 也可指定有效期
+python generate_ssl_certs.py --domain gift.example.com --days 730
 ```
-将在根目录下自动生成 `server.crt` 与 `server.key`。
+将在根目录 `ssl/` 下自动生成 `server.crt` 与 `server.key`（`--domain` 支持域名或 IP，写入证书 CN 与 SAN）。
+> 注：`run.sh start` 会自动传入 `--domain $SNI_DOMAIN` 生成证书，无需手工执行。
 
-### 2. Nginx 反向代理配置（HTTPS 15001 端口映射至本地 11443）
-1. 参考根目录下的 `nginx_ssl.conf`（配置监听 HTTPS 15001 端口并将请求反向代理至 `127.0.0.1:11443`）。
-2. 将配置文件复制到服务器 Nginx 配置目录（如 `/etc/nginx/conf.d/gift_app.conf`）。
+### 2. Nginx 反向代理配置（模板渲染，V10.10 改为 SNI 多项目共用 443 端口）
+1. 根目录 `nginx_ssl.conf` 已改为**占位符模板**，不直接使用，由 `run.sh` 自动渲染输出到 Nginx 配置目录（如 `/etc/nginx/conf.d/gift_app.conf`），每个项目一份独立配置，共用 443 端口依靠 SNI 域名区分流量。
+2. 默认启动（`./run.sh start`）即可自动完成配置同步；需要自定义时通过环境变量指定（见上节"多项目共用 443 端口 SNI 分流"）。
 3. 检查 Nginx 语法并重载生效：
    ```bash
    nginx -t
