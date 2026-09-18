@@ -2697,7 +2697,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 all_with_days.sort(key=lambda x: x[1])
                 nearest = all_with_days[:3]
                 title, detail_msg, lines = format_reminder_notification_content(nearest)
-                trigger_webhook_event(webhooks, 'reminder', f"{title}（测试推送最近 {len(nearest)} 条）", detail_msg, operator_id=current_user.id)
+                trigger_webhook_event(webhooks, 'reminder', f"{title}（测试推送最近 {len(nearest)} 条）", detail_msg, page_key='reminders', operator_id=current_user.id)
                 safe_log('推送纪念日提醒', f"Webhook 测试推送了最近 {len(nearest)} 条纪念日", user=current_user)
                 return jsonify({
                     'code': 200,
@@ -2708,7 +2708,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return jsonify({'code': 200, 'message': '当前暂无任何有效的亲友纪念日记录，请先添加纪念日！', 'count': 0})
 
         title, detail_msg, lines = format_reminder_notification_content(upcoming)
-        trigger_webhook_event(webhooks, 'reminder', title, detail_msg, operator_id=current_user.id)
+        trigger_webhook_event(webhooks, 'reminder', title, detail_msg, page_key='reminders', operator_id=current_user.id)
         safe_log('推送纪念日提醒', f"向 Webhook 推送了 {len(upcoming)} 条即将到期的纪念日", user=current_user)
 
         unbound_names = []
@@ -2798,104 +2798,21 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         if custom_note and custom_note not in md_detail:
             md_detail += "\n\n> 💡 **发起人特别附言**：" + custom_note
 
-        target_app = current_app._get_current_object()
-        wh_targets = [{
-            'id': w.id,
-            'user_id': w.user_id,
-            'channel_name': w.channel_name,
-            'url': getattr(w, 'webhook_url', '') or '',
-            'secret': getattr(w, 'secret_token', None),
-            'connection_type': getattr(w, 'connection_type', 'webhook_url') or 'webhook_url',
-            'bot_platform': getattr(w, 'bot_platform', 'wecom') or 'wecom',
-            'bot_id': getattr(w, 'bot_id', None),
-            'bot_secret': getattr(w, 'bot_secret', None)
-        } for w in webhooks]
-
-        def _execute_push_round(round_idx, total_rounds):
-            now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            sub_title = title if total_rounds == 1 else f"{title} (第{round_idx}/{total_rounds}次提醒)"
-            for item in wh_targets:
-                try:
-                    conn_type = item.get('connection_type', 'webhook_url')
-                    if conn_type == 'long_connection':
-                        b_id = item.get('bot_id', '')
-                        b_sec = item.get('bot_secret', '')
-                        c_id = extract_chatid_from_url(item.get('url', '')) or _cached_chatids.get(b_id)
-                        if b_id and b_sec:
-                            s, c, b = send_wecom_long_connection_message(b_id, b_sec, sub_title, md_detail, now_str, 'reminder', chatid=c_id)
-                            record_webhook_log(item.get('user_id'), item.get('id'), 'reminder', {"title": sub_title, "bot_id": b_id, "chatid": c_id, "details": md_detail}, c, b, s)
-                        continue
-
-                    url = item.get('url', '')
-                    if not url:
-                        continue
-
-                    if 'dingtalk.com' in url:
-                        payload = {
-                            "msgtype": "markdown",
-                            "markdown": {
-                                "title": sub_title,
-                                "text": f"### {sub_title}\n\n- **时间**: {now_str}\n- **说明**: {md_detail}\n\n> 礼金记账系统通知"
-                            }
-                        }
-                    elif 'feishu.cn' in url or 'larksuite.com' in url:
-                        payload = {
-                            "msg_type": "text",
-                            "content": {"text": f"{sub_title}\n时间: {now_str}\n\n{md_detail}"}
-                        }
-                    elif 'qyapi.weixin.qq.com' in url:
-                        if md_detail and ('\n' in md_detail or chr(10) in md_detail):
-                            md_cnt = f"### {sub_title}\n> 时间：<font color=\"comment\">{now_str}</font>\n\n{md_detail}"
-                        else:
-                            md_cnt = f"### {sub_title}\n> 时间：<font color=\"comment\">{now_str}</font>\n> 详情：<font color=\"info\">{md_detail or '无'}</font>"
-                        payload = {
-                            "msgtype": "markdown",
-                            "markdown": {"content": md_cnt}
-                        }
-                    elif 'pushplus.plus' in url:
-                        token = item.get('secret')
-                        if not token and 'token=' in url:
-                            parsed = urllib.parse.urlparse(url)
-                            qs = urllib.parse.parse_qs(parsed.query)
-                            token = qs.get('token', [''])[0]
-                        html_details = md_detail.replace('\n', '<br>').replace(chr(10), '<br>') if md_detail else '无'
-                        payload = {
-                            "token": token,
-                            "title": sub_title,
-                            "content": f"<h3>{sub_title}</h3><p>时间：{now_str}</p><div>{html_details}</div>",
-                            "template": "html"
-                        }
-                    elif 'ftqq.com' in url:
-                        payload = {
-                            "title": sub_title,
-                            "desp": f"### {sub_title}\n\n- **时间**: {now_str}\n- **说明**: {md_detail}"
-                        }
-                    elif 'api.day.app' in url:
-                        payload = {
-                            "title": sub_title,
-                            "body": f"{md_detail}\n时间: {now_str}",
-                            "group": "礼金记账"
-                        }
-                    else:
-                        payload = {
-                            "event": "reminder",
-                            "title": sub_title,
-                            "time": now_str,
-                            "details": md_detail,
-                            "source": "gift_bookkeeping_app"
-                        }
-
-                    headers = {}
-                    if item.get('secret'):
-                        headers['Authorization'] = f"Bearer {item.get('secret')}"
-
-                    s, c, b = _send_payload(url, payload, headers, timeout=12)
-                    record_webhook_log(item.get('user_id'), item.get('id'), 'reminder', payload, c, b, s)
-                except Exception as e:
-                    print(f"[_execute_push_round error]: {e}")
-
         channel_names = [w.channel_name for w in webhooks]
         channel_str = '、'.join(channel_names)
+
+        # V10.9: 重构为通过 trigger_webhook_event 统一推送管道
+        # 保留多轮推送与间隔逻辑，每轮调用 trigger_webhook_event
+        def _execute_push_round(round_idx, total_rounds):
+            sub_title = title if total_rounds == 1 else f"{title} (第{round_idx}/{total_rounds}次提醒)"
+            final_detail = md_detail
+            if total_rounds > 1:
+                final_detail = f"（第{round_idx}/{total_rounds}次提醒）\n{md_detail}"
+            trigger_webhook_event(
+                webhooks, 'reminder', sub_title, final_detail,
+                page_key='reminders', user_name=current_user.username,
+                operator_id=current_user.id
+            )
 
         if repeat_count > 1:
             def _background_repeat_task():
@@ -3127,6 +3044,20 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             br = BroadcastRead(broadcast_id=bc_id, user_id=current_user.id)
             db.session.add(br)
             db.session.commit()
+        # V10.9: 补充推送
+        try:
+            bc = Broadcast.query.get(bc_id)
+            bc_title = bc.title if bc else f'广播#{bc_id}'
+            webhooks = WebhookConfig.query.filter_by(is_enabled=True).all()
+            trigger_webhook_event(
+                webhooks, 'status_change',
+                f'标记广播已读',
+                f'操作人：{current_user.username} | 页面：系统广播 | 标记「{bc_title}」为已读',
+                page_key='admin_broadcasts', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
         return jsonify({'code': 200, 'message': '已标记为已读'})
 
     @app.route('/api/broadcast/mark_all_read', methods=['POST'])
@@ -3137,10 +3068,25 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         read_bc_ids = set(
             row[0] for row in db.session.query(BroadcastRead.broadcast_id).filter_by(user_id=current_user.id).all()
         )
+        marked_count = 0
         for bc in active_bcs:
             if bc.id not in read_bc_ids:
                 db.session.add(BroadcastRead(broadcast_id=bc.id, user_id=current_user.id))
+                marked_count += 1
         db.session.commit()
+        # V10.9: 补充推送
+        if marked_count > 0:
+            try:
+                webhooks = WebhookConfig.query.filter_by(is_enabled=True).all()
+                trigger_webhook_event(
+                    webhooks, 'status_change',
+                    f'全部标记广播已读',
+                    f'操作人：{current_user.username} | 页面：系统广播 | 一键标记 {marked_count} 条广播为已读',
+                    page_key='admin_broadcasts', user_name=current_user.username,
+                    operator_id=current_user.id
+                )
+            except Exception:
+                pass
         return jsonify({'code': 200, 'message': '所有通知已全部标记为已读'})
 
     @app.route('/admin/webhooks', methods=['GET'])
@@ -3192,8 +3138,27 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         notify_pages = request.form.get('notify_pages', '{}').strip()
         message_templates = request.form.get('message_templates', '{}').strip()
         # V10.3: 用户级监控过滤
-        monitor_user_ids = request.form.get('monitor_user_ids', '[]').strip()
-        monitor_event_types = request.form.get('monitor_event_types', '[]').strip()
+        # V10.9: 空列表 = 不推送，新建时如未勾选则默认全选
+        monitor_user_ids = request.form.get('monitor_user_ids', '').strip()
+        monitor_event_types = request.form.get('monitor_event_types', '').strip()
+        # 解析检查，如果为空列表则填入全选
+        import json as _wh_json
+        try:
+            uids_list = _wh_json.loads(monitor_user_ids) if monitor_user_ids else []
+            if not uids_list:
+                uids_list = [u.id for u in User.query.with_entities(User.id).all()]
+                monitor_user_ids = _wh_json.dumps(uids_list)
+        except Exception:
+            monitor_user_ids = _wh_json.dumps([u.id for u in User.query.with_entities(User.id).all()])
+        try:
+            types_list = _wh_json.loads(monitor_event_types) if monitor_event_types else []
+            if not types_list:
+                from webhook_utils import EVENT_COLUMNS as _ev_cols
+                types_list = list(_ev_cols.keys())
+                monitor_event_types = _wh_json.dumps(types_list)
+        except Exception:
+            from webhook_utils import EVENT_COLUMNS as _ev_cols
+            monitor_event_types = _wh_json.dumps(list(_ev_cols.keys()))
 
         is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
 
@@ -3419,6 +3384,18 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         try:
             success, code, msg = test_single_webhook(hook, sender_name=current_user.username)
             safe_log('测试Webhook推送', f"通道: {hook.channel_name}, 结果: {'成功' if success else '失败'}, 状态码: {code}")
+            # V10.9: 补充推送通知
+            try:
+                webhooks = WebhookConfig.query.filter_by(is_enabled=True).all()
+                trigger_webhook_event(
+                    webhooks, 'system',
+                    f'测试Webhook通道',
+                    f'操作人：{current_user.username} | 页面：Webhook通知 | 测试通道「{hook.channel_name}」结果: {"成功" if success else "失败"}',
+                    page_key='admin_webhooks', user_name=current_user.username,
+                    operator_id=current_user.id
+                )
+            except Exception:
+                pass
             return jsonify({
                 'success': bool(success),
                 'code': 200 if success else 500,
@@ -3593,6 +3570,18 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     f"成功从企业微信 HTTP 回调中捕获群聊会话 chatid [{chatid}]，已自动绑定渠道: {', '.join(bound_names) or '企微渠道'}",
                     True
                 )
+                # V10.9: 补充推送通知 - 企微回调自动绑定 chatid
+                try:
+                    webhooks_for_notify = WebhookConfig.query.filter_by(is_enabled=True).all()
+                    trigger_webhook_event(
+                        webhooks_for_notify, 'update',
+                        f'企微回调自动绑定chatid',
+                        f'系统自动 | 页面：Webhook通知 | 捕获群聊会话 chatid [{chatid}]，已绑定渠道: {", ".join(bound_names) or "企微渠道"}',
+                        page_key='admin_webhooks', user_name='系统自动'
+                    )
+                except Exception:
+                    pass
+
                 if raw_body and ('<xml' in raw_body.lower()):
                     reply_xml = f"""<xml>
 <ToUserName><![CDATA[{sender or ''}]]></ToUserName>
@@ -3925,6 +3914,17 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         else:
             config.last_status = f'失败: {msg}'
             db.session.commit()
+            # V10.9: 备份失败也推送通知
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                    f'WebDAV备份失败',
+                    f'操作人：{current_user.username} | 页面：WebDAV备份 | 失败原因：{msg}',
+                    page_key='admin_backups', user_name=current_user.username,
+                    operator_id=current_user.id
+                )
+            except Exception:
+                pass
             flash(f'备份失败: {msg}', 'danger')
         return redirect(url_for('admin_backups'))
 

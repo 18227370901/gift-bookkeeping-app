@@ -791,6 +791,41 @@ def init_database():
             "ALTER TABLE webhook_configs ADD COLUMN monitor_user_ids TEXT DEFAULT '[]'",
             "ALTER TABLE webhook_configs ADD COLUMN monitor_event_types TEXT DEFAULT '[]'",
         ])
+
+        # V10.9: 数据迁移 — 将现有 Webhook 的空监控范围预填为全选
+        # 逻辑变更：空列表从"不限制=全部放行"改为"不推送"，需保证现有通道不受影响
+        try:
+            import json as _migrate_json
+            all_user_ids = [u.id for u in User.query.with_entities(User.id).all()]
+            from webhook_utils import EVENT_COLUMNS as _migrate_events
+            all_event_types = list(_migrate_events.keys())
+            hooks_to_migrate = WebhookConfig.query.all()
+            for wh in hooks_to_migrate:
+                changed = False
+                # monitor_user_ids 空列表 → 填全部用户
+                raw_uids = getattr(wh, 'monitor_user_ids', None) or '[]'
+                try:
+                    uids = _migrate_json.loads(raw_uids) if isinstance(raw_uids, str) else raw_uids
+                    if not uids:
+                        wh.monitor_user_ids = _migrate_json.dumps(all_user_ids)
+                        changed = True
+                except Exception:
+                    pass
+                # monitor_event_types 空列表 → 填全部事件
+                raw_types = getattr(wh, 'monitor_event_types', None) or '[]'
+                try:
+                    types = _migrate_json.loads(raw_types) if isinstance(raw_types, str) else raw_types
+                    if not types:
+                        wh.monitor_event_types = _migrate_json.dumps(all_event_types)
+                        changed = True
+                except Exception:
+                    pass
+            if changed:
+                db.session.commit()
+                print(f"[V10.9 Migration] 已将 {sum(1 for h in hooks_to_migrate if getattr(h, '_sa_instance_state', None) and h in db.session.dirty)} 个 Webhook 通道的空监控范围预填为全选")
+        except Exception as e:
+            print(f"[V10.9 Migration] 监控范围迁移跳过: {e}")
+
         with db.engine.connect() as conn:
             for sql in migration_sqls:
                 try:

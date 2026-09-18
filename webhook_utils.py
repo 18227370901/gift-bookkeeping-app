@@ -548,22 +548,24 @@ def _get_monitor_event_types(webhook):
 
 
 def _monitor_matches(webhook, event_type, operator_id):
-    """V10.3: 检查该 Webhook 通道的监控范围是否匹配当前操作
-    - monitor_user_ids 为空 = 不限制用户（全部通过）
-    - monitor_event_types 为空 = 不限制事件类型（全部通过）
-    - 两者都配置时需同时满足
+    """V10.9: 检查该 Webhook 通道的监控范围是否匹配当前操作
+    - monitor_user_ids 为空 = 不推送（必须勾选至少一个用户）
+    - monitor_event_types 为空 = 不推送（必须勾选至少一个事件类型）
+    - 两者都勾选时需同时满足才推送
     """
-    # 用户过滤
+    # 用户过滤：空列表 = 不推送
     monitor_uids = _get_monitor_user_ids(webhook)
-    if monitor_uids and operator_id is not None:
-        if operator_id not in monitor_uids:
-            return False
-    # 事件类型过滤（按大类匹配）
+    if not monitor_uids:
+        return False
+    if operator_id is not None and operator_id not in monitor_uids:
+        return False
+    # 事件类型过滤：空列表 = 不推送
     monitor_types = _get_monitor_event_types(webhook)
-    if monitor_types:
-        event_cat = _get_event_category(event_type)
-        if event_cat not in monitor_types and event_type not in monitor_types:
-            return False
+    if not monitor_types:
+        return False
+    event_cat = _get_event_category(event_type)
+    if event_cat not in monitor_types and event_type not in monitor_types:
+        return False
     return True
 
 

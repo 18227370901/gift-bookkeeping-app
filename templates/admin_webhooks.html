@@ -518,12 +518,12 @@
               </div>
 
                <!-- V10.3: Tab 4: 监控范围 -->
-               <div class="tab-pane fade" id="newTabMonitor" role="tabpanel">
-                 <div class="form-text small text-muted mb-2">
-                   <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。留空 = 不限制（推送全部）。
-                 </div>
-                 <div class="d-flex justify-content-between align-items-center mb-1">
-                   <h6 class="text-muted mb-0"><i class="fa-solid fa-user-shield me-1"></i>监控用户（可选）</h6>
+                <div class="tab-pane fade" id="newTabMonitor" role="tabpanel">
+                  <div class="form-text small text-muted mb-2">
+                    <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。必须至少勾选一个用户和一个事件类型，否则通道不会推送任何通知。点击「全选」可快速勾选全部。
+                  </div>
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <h6 class="text-muted mb-0"><i class="fa-solid fa-user-shield me-1"></i>监控用户</h6>
                    <div class="btn-group btn-group-sm">
                      <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="monitorUserSelectAll('new')">全选</button>
                      <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="monitorUserClearAll('new')">清空</button>
@@ -556,9 +556,9 @@
                    </div>
                    {% endfor %}
                  </div>
-                 <div class="form-text small text-muted mt-2">不勾选任何用户 = 推送所有用户的操作；不勾选任何事件 = 推送所有事件类型。</div>
-               </div>
-            </div>
+                  <div class="form-text small text-muted mt-2">不勾选任何用户 = 不推送；不勾选任何事件 = 不推送。请勾选需要监控的用户和事件类型，或点击「全选」。</div>
+                </div>
+             </div>
          </div>
          <div class="modal-footer border-light">
            <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
@@ -758,12 +758,12 @@
               </div>
 
                <!-- V10.3: Tab 4: 监控范围 -->
-               <div class="tab-pane fade" id="editTabMonitor" role="tabpanel">
-                 <div class="form-text small text-muted mb-2">
-                   <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。留空 = 不限制（推送全部）。
-                 </div>
-                 <div class="d-flex justify-content-between align-items-center mb-1">
-                   <h6 class="text-muted mb-0"><i class="fa-solid fa-user-shield me-1"></i>监控用户（可选）</h6>
+                <div class="tab-pane fade" id="editTabMonitor" role="tabpanel">
+                  <div class="form-text small text-muted mb-2">
+                    <i class="fa-solid fa-circle-info me-1"></i>设置该通道仅推送特定用户的操作或特定事件类型。必须至少勾选一个用户和一个事件类型，否则通道不会推送任何通知。点击「全选」可快速勾选全部。
+                  </div>
+                  <div class="d-flex justify-content-between align-items-center mb-1">
+                    <h6 class="text-muted mb-0"><i class="fa-solid fa-user-shield me-1"></i>监控用户</h6>
                    <div class="btn-group btn-group-sm">
                      <button type="button" class="btn btn-outline-success btn-sm py-0 px-1" onclick="monitorUserSelectAll('edit')">全选</button>
                      <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" onclick="monitorUserClearAll('edit')">清空</button>
@@ -796,10 +796,10 @@
                    </div>
                    {% endfor %}
                  </div>
-                 <div class="form-text small text-muted mt-2">不勾选任何用户 = 推送所有用户的操作；不勾选任何事件 = 推送所有事件类型。</div>
-               </div>
-             </div>
-          </div>
+                  <div class="form-text small text-muted mt-2">不勾选任何用户 = 不推送；不勾选任何事件 = 不推送。请勾选需要监控的用户和事件类型，或点击「全选」。</div>
+                </div>
+              </div>
+           </div>
          <div class="modal-footer border-light">
            <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">取消</button>
            <button type="submit" id="editWebhookSubmitBtn" class="btn btn-primary rounded-pill px-4 shadow-sm">保存修改</button>

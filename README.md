@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '4dd1732e-d111-44fa-861c-c3ed44eec0b3'
-  PropagateID: '4dd1732e-d111-44fa-861c-c3ed44eec0b3'
-  ReservedCode1: '763ab816-04a0-4cba-a751-a8942dc3e877'
-  ReservedCode2: '763ab816-04a0-4cba-a751-a8942dc3e877'
+  ProduceID: '623eed30-2c27-43cc-b882-e2102a77ce0b'
+  PropagateID: '623eed30-2c27-43cc-b882-e2102a77ce0b'
+  ReservedCode1: '69cba256-41d0-4def-94f6-698c559de74e'
+  ReservedCode2: '69cba256-41d0-4def-94f6-698c559de74e'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -498,6 +498,29 @@ AIGC:
 - 问题2场景4（本人正常过滤备份）→ 合并成功 ✅
 - 问题2场景5（下载→上传闭环）→ 合并成功 ✅
 - 全站无崩溃、其他用户数据不受影响 ✅
+
+### V10.9 Webhook 推送全覆盖与监控范围逻辑修复（2026-09-18）
+
+#### 缺失推送补充（4 处）
+- 系统广播-标记单条已读 `/api/broadcast/mark_read/<id>`：补充 `status_change` / `admin_broadcasts` 推送
+- 系统广播-全部标记已读 `/api/broadcast/mark_all_read`：补充 `status_change` / `admin_broadcasts` 推送
+- Webhook-测试通道 `/admin/webhooks/test/<id>`：补充 `system` / `admin_webhooks` 推送
+- Webhook-企微回调绑定 chatid `/api/wecom/callback`：补充 `update` / `admin_webhooks` 推送
+
+#### 推送参数修复（3 处）
+- 纪念日推送 `/api/reminders/trigger_push`：补传 `page_key='reminders'`（原缺失导致页面级过滤失效）
+- 自定义推送 `/api/reminders/custom_push`：从自建 payload 直发重构为走 `trigger_webhook_event` 统一管道（原绕过导致监控过滤/页面过滤/消息模板全部不生效）
+- WebDAV 备份 `/admin/backups/trigger` 失败分支：补充 `security` / `admin_backups` 推送（原仅成功时推送）
+
+#### 监控范围逻辑修复
+- **原逻辑**：不勾选用户/事件 = 不限制 = 全部放行
+- **新逻辑**：不勾选用户/事件 = 不推送；必须至少勾选一个用户和一个事件类型
+- 数据迁移：启动时自动将现有 Webhook 空监控范围预填为全选，保证不受影响
+- 新建 Webhook 默认全选用户+全选事件
+- 页面提示文案更新为"不勾选 = 不推送"
+
+#### 涉及文件
+- `routes_ext.py`、`webhook_utils.py`、`app.py`、`templates/admin_webhooks.html`、`AI_ASSISTANT_DESIGN.md`、`README.md`
 
 ## 📂 项目文件结构
 

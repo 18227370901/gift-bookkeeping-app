@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '9a499e19-6b21-4130-9053-934c93363009'
-  PropagateID: '9a499e19-6b21-4130-9053-934c93363009'
-  ReservedCode1: '025d5ce0-cb3a-46d5-a7d4-a54e2c0a9e84'
-  ReservedCode2: '025d5ce0-cb3a-46d5-a7d4-a54e2c0a9e84'
+  ProduceID: 'be2fbd66-82c8-43f3-8865-6c69289f5ba7'
+  PropagateID: 'be2fbd66-82c8-43f3-8865-6c69289f5ba7'
+  ReservedCode1: 'f4975e6c-54d6-446b-b533-ec92a2fb96b3'
+  ReservedCode2: 'f4975e6c-54d6-446b-b533-ec92a2fb96b3'
 ---
 
 # AI 助手模块技术设计方案
@@ -1945,3 +1945,65 @@ netstat -ano | findstr ":11443" | findstr "LISTENING"   # 应只有一行
 | `routes_ext.py` | _is_full_restore 收紧 + 本地上传文件归属校验 + merge_user_scoped_backup 防御增强 |
 | `README.md` | 新增 V10.7 变更日志 |
 | `AI_ASSISTANT_DESIGN.md` | 新增第二十一章 |
+
+## 第二十二章 V10.9 Webhook 推送全覆盖与监控范围逻辑修复（2026-09-18）
+
+### 22.1 背景
+
+用户反馈：Webhook 监控范围全选配置后，人情对账同步、批量删除推送日志等操作未触发推送。经全量审计 3 个文件（app.py 3054行、routes_ext.py 5174行、routes_ai.py 380行）约 55 个数据变更路由，发现 4 处缺失推送、3 处推送参数有问题、监控范围空列表逻辑与用户直觉相反。
+
+### 22.2 缺失推送补充（4 处）
+
+| # | 路由 | event_type | page_key | 说明 |
+|---|------|-----------|---------|------|
+| 1 | `/api/broadcast/mark_read/<id>` | `status_change` | `admin_broadcasts` | 标记单条广播已读 |
+| 2 | `/api/broadcast/mark_all_read` | `status_change` | `admin_broadcasts` | 全部标记已读 |
+| 3 | `/admin/webhooks/test/<id>` | `system` | `admin_webhooks` | 测试 Webhook 通道 |
+| 4 | `/api/wecom/callback` | `update` | `admin_webhooks` | 企微回调自动绑定 chatid |
+
+### 22.3 推送参数修复（3 处）
+
+| # | 路由 | 问题 | 修复 |
+|---|------|------|------|
+| 5 | `/api/reminders/trigger_push` | 缺少 `page_key` 参数，页面级过滤失效 | 补传 `page_key='reminders'`（2 处调用） |
+| 6 | `/api/reminders/custom_push` | 完全绕过 `trigger_webhook_event`，自建 payload 调 `_send_payload`，导致 monitor_user_ids / monitor_event_types / notify_pages / message_templates 全部不生效 | 重构为调用 `trigger_webhook_event`，保留多轮推送与间隔逻辑 |
+| 7 | `/admin/backups/trigger` 失败分支 | 备份失败无推送通知 | 失败时补推送 `event_type='security'`，page_key='admin_backups' |
+
+### 22.4 监控范围逻辑修复
+
+**原逻辑（V10.3）**：`monitor_user_ids` 为空 = 不限制 = 全部放行；`monitor_event_types` 为空 = 不限制 = 全部放行
+
+**新逻辑（V10.9）**：`monitor_user_ids` 为空 = 不推送；`monitor_event_types` 为空 = 不推送；必须至少勾选一个用户和一个事件类型
+
+| 配置状态 | 原行为 | 新行为 |
+|---------|--------|--------|
+| 不勾选任何用户 | 推送所有用户操作 | **不推送** |
+| 不勾选任何事件 | 推送所有事件类型 | **不推送** |
+| 勾选指定用户 | 仅推送这些用户 | 仅推送这些用户 |
+| 全选所有用户 | 推送所有用户 | 推送所有用户 |
+
+### 22.5 数据迁移
+
+启动时自动将所有现有 Webhook 通道的空 `monitor_user_ids` 预填为全部用户 ID、空 `monitor_event_types` 预填为全部事件类型，保证现有通道不受影响。
+
+### 22.6 新建 Webhook 默认值
+
+新建 Webhook 时如前端未勾选监控用户或事件类型，后端自动填入全选。
+
+### 22.7 页面提示文案更新
+
+| 位置 | 原文案 | 新文案 |
+|------|--------|--------|
+| 新建/编辑 Modal 监控范围 Tab 顶部 | 留空 = 不限制（推送全部） | 必须至少勾选一个用户和一个事件类型，否则通道不会推送任何通知 |
+| 新建/编辑 Modal 监控范围 Tab 底部 | 不勾选 = 推送所有 | 不勾选 = 不推送，请勾选或点击全选 |
+
+### 22.8 涉及文件清单
+
+| 文件 | 改动内容 |
+|------|----------|
+| `routes_ext.py` | 4 处补推送 + 2 处补 page_key + custom_push 重构 + 备份失败补推送 + 新建 Webhook 默认全选 |
+| `webhook_utils.py` | `_monitor_matches` 空列表=拦截 |
+| `app.py` | V10.9 数据迁移块（空监控范围预填全选） |
+| `templates/admin_webhooks.html` | 监控范围提示文案更新 |
+| `AI_ASSISTANT_DESIGN.md` | 新增第二十二章 |
+| `README.md` | 新增 V10.9 变更日志 |
