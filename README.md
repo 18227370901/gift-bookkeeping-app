@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '0d2896ad-4081-4bc7-8f9e-111b4d00b6dd'
-  PropagateID: '0d2896ad-4081-4bc7-8f9e-111b4d00b6dd'
-  ReservedCode1: '3a25537f-6142-4149-a3f1-4f559b90ebf0'
-  ReservedCode2: '3a25537f-6142-4149-a3f1-4f559b90ebf0'
+  ProduceID: 'e26adb23-7eed-48a7-9cc1-e63ed26fe89f'
+  PropagateID: 'e26adb23-7eed-48a7-9cc1-e63ed26fe89f'
+  ReservedCode1: '0f335b17-a210-472d-9b4c-e012244ad402'
+  ReservedCode2: '0f335b17-a210-472d-9b4c-e012244ad402'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -551,18 +551,6 @@ PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.s
 #### 涉及文件
 - `run.sh`、`nginx_ssl.conf`、`generate_ssl_certs.py`、`README.md`
 
-### V10.10.2 样例数据体系扩充与两版统一（2026-09-20）
-
-#### 变更内容
-- 礼金记账明细从 104 条扩充至 **151 条**：新增随礼（send）42 条、收礼（receive）6 条，与原收礼数据形成完整的人情对账双向往来闭环
-- 亲友纪念日备忘从 4 条扩充至 **6 条**：新增岳母六十五寿辰、结婚十周年纪念日
-- **两版样例库完全统一**：传统版与 Docker Compose 版根目录 `gift_bookkeeping.db` 字节级一致（MD5 校验），开箱演示体验完全相同
-- 新增随礼覆盖婚宴、寿宴、满月酒、周岁宴、升学宴、乔迁、开业、白事、生日等全部典型场景，可直接体验人情对账「待补礼 / 待还礼」状态流转
-
-#### 数据安全
-- 全部姓名、电话、地址均为虚构演示数据，无任何真实个人信息（电话采用 138/139 号段虚拟测试号码）
-- 首次启动时 `init_database()` 自动补齐 AI 会话、权限工单等 V10.10 新表，样例库零配置开箱即用
-
 ### V10.10.1 人情对账状态标签方向修复（2026-09-20）
 
 #### 问题描述
@@ -580,6 +568,18 @@ PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.s
 
 #### 涉及文件
 - `gift_utils.py`、`routes_ext.py`、`templates/reconciliation.html`、`Project_Survey.md`
+
+### V10.10.2 样例数据体系扩充与两版统一（2026-09-20）
+
+#### 变更内容
+- 礼金记账明细从 104 条扩充至 **151 条**：新增随礼（send）42 条、收礼（receive）6 条，与原收礼数据形成完整的人情对账双向往来闭环
+- 亲友纪念日备忘从 4 条扩充至 **6 条**：新增岳母六十五寿辰、结婚十周年纪念日
+- **两版样例库完全统一**：传统版与 Docker Compose 版根目录 `gift_bookkeeping.db` 字节级一致（MD5 校验），开箱演示体验完全相同
+- 新增随礼覆盖婚宴、寿宴、满月酒、周岁宴、升学宴、乔迁、开业、白事、生日等全部典型场景，可直接体验人情对账「待补礼 / 待还礼」状态流转
+
+#### 数据安全
+- 全部姓名、电话、地址均为虚构演示数据，无任何真实个人信息（电话采用 138/139 号段虚拟测试号码）
+- 首次启动时 `init_database()` 自动补齐 AI 会话、权限工单等 V10.10 新表，样例库零配置开箱即用
 
 ## 📂 项目文件结构
 
