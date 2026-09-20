@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '68a91e14-0533-4ab0-9070-3deeb3d729a4'
-  PropagateID: '68a91e14-0533-4ab0-9070-3deeb3d729a4'
-  ReservedCode1: 'e32ac02a-936e-4a81-981c-51b6dd6f76e6'
-  ReservedCode2: 'e32ac02a-936e-4a81-981c-51b6dd6f76e6'
+  ProduceID: 'f26d1ec0-684f-43d6-8fb0-5c778943d5d0'
+  PropagateID: 'f26d1ec0-684f-43d6-8fb0-5c778943d5d0'
+  ReservedCode1: '0754bb43-1754-4317-873c-86d42535f279'
+  ReservedCode2: '0754bb43-1754-4317-873c-86d42535f279'
 ---
 
 # 礼金记账与金融数据集成系统技术调研与架构决策报告 (Project Survey)
@@ -127,8 +127,8 @@ AIGC:
   * 工具栏提供【从礼金账本同步数据】手动同步按钮（`/banquets/sync`），支持管理员在增补历史账本后主动触发全局再归集。
 * **人情对账核算引擎与明细穿透**：
   * `calculate_reconciliation(records)` 实时汇总各亲友在系统内的全部收送往来，计算净差额（`net_balance = received - given`），智能归类为：
-    * **待还礼**（`net_balance > 0`，对方送我多）
-    * **待补礼**（`net_balance < 0`，我送对方多）
+    * **待补礼**（`net_balance > 0`，我方收 > 送，我欠对方）
+    * **待还礼**（`net_balance < 0`，我方送 > 收，对方欠我）
     * **已平账**（`net_balance == 0`，往来平衡）
   * 人情对账页面支持每页条数自定义（10 / 20 / 50 / 100 条，默认 10 条）、关键字查询与状态筛选。
   * 点击【明细】按钮通过事件委托触发模态框，优先从客户端已缓存字典无缝秒开；缺失时平滑回退请求 `/api/person_ledger/<name>` 接口，完整呈现该亲友的每一笔来往流水，杜绝点击无响应故障。

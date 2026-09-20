@@ -72,8 +72,8 @@
                             <div class="col-md-3">
                                 <select class="form-select shadow-sm py-2" name="status" onchange="this.form.submit()">
                                     <option value="">所有对账状态 (全部)</option>
-                                    <option value="need_return" {% if status == 'need_return' %}selected{% endif %}>🟢 待还礼 (尚欠我方，收 > 送)</option>
-                                    <option value="need_pay" {% if status == 'need_pay' %}selected{% endif %}>🔴 待补礼 (我方需回，送 > 收)</option>
+                                    <option value="need_return" {% if status == 'need_return' %}selected{% endif %}>🟢 待还礼 (尚欠我方，送 > 收)</option>
+                                    <option value="need_pay" {% if status == 'need_pay' %}selected{% endif %}>🔴 待补礼 (我方需回，收 > 送)</option>
                                     <option value="balanced" {% if status == 'balanced' %}selected{% endif %}>⚪ 已平账 (金额相等)</option>
                                 </select>
                             </div>
@@ -125,11 +125,11 @@
                                         {{ '+' if item.net_balance > 0 else '' }}¥{{ "%.2f"|format(item.net_balance) }}
                                     </td>
                                     <td>
-                                        {% if item.net_balance > 0 %}
+                                        {% if item.net_balance < 0 %}
                                         <span class="badge bg-success-subtle text-success border border-success-subtle">
                                             <i class="fa-solid fa-arrow-down-left me-1"></i>待还礼 (尚欠我方)
                                         </span>
-                                        {% elif item.net_balance < 0 %}
+                                        {% elif item.net_balance > 0 %}
                                         <span class="badge bg-danger-subtle text-danger border border-danger-subtle">
                                             <i class="fa-solid fa-arrow-up-right me-1"></i>待补礼 (我方需回)
                                         </span>

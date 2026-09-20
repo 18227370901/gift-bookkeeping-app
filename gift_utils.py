@@ -296,15 +296,17 @@ def calculate_reconciliation(records):
         net = item['received_amount'] - item['given_amount']
         item['net_balance'] = round(net, 2)
         if net > 0:
-            item['status_text'] = '待还礼'
+            # 我方收 > 送 → 我方欠对方人情 → 待补礼（我方需回礼）
+            item['status_text'] = '待补礼'
             item['status_class'] = 'text-danger fw-bold'
             item['badge_class'] = 'bg-danger-subtle text-danger border border-danger-subtle'
-            item['status_desc'] = f'对方送我多 ¥{net:.2f}'
+            item['status_desc'] = f'我欠对方 ¥{net:.2f}'
         elif net < 0:
-            item['status_text'] = '待补礼'
-            item['status_class'] = 'text-primary fw-bold'
-            item['badge_class'] = 'bg-primary-subtle text-primary border border-primary-subtle'
-            item['status_desc'] = f'我送对方多 ¥{abs(net):.2f}'
+            # 我方送 > 收 → 对方欠我方人情 → 待还礼（尚欠我方）
+            item['status_text'] = '待还礼'
+            item['status_class'] = 'text-success fw-bold'
+            item['badge_class'] = 'bg-success-subtle text-success border border-success-subtle'
+            item['status_desc'] = f'对方欠我 ¥{abs(net):.2f}'
         else:
             item['status_text'] = '已平账'
             item['status_class'] = 'text-success'

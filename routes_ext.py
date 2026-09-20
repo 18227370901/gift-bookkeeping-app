@@ -1310,19 +1310,19 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         # 2. 状态筛选 (status)
         status = request.args.get('status', '').strip()
-        if status == 'need_return':  # 对方送我多 / 待还礼 (net_balance > 0)
-            balance_list = [item for item in balance_list if item['net_balance'] > 0]
-        elif status == 'need_pay':   # 我送对方多 / 待补礼 (net_balance < 0)
+        if status == 'need_return':  # 待还礼 → 对方欠我方 → net_balance < 0
             balance_list = [item for item in balance_list if item['net_balance'] < 0]
+        elif status == 'need_pay':   # 待补礼 → 我方欠对方 → net_balance > 0
+            balance_list = [item for item in balance_list if item['net_balance'] > 0]
         elif status == 'balanced':   # 已平账 (net_balance == 0)
             balance_list = [item for item in balance_list if item['net_balance'] == 0]
 
         # 3. 排序 (sort)
         sort_by = request.args.get('sort', 'diff_abs_desc').strip()
         if sort_by == 'need_return_first':
-            balance_list.sort(key=lambda x: x['net_balance'], reverse=True)
-        elif sort_by == 'need_pay_first':
             balance_list.sort(key=lambda x: x['net_balance'])
+        elif sort_by == 'need_pay_first':
+            balance_list.sort(key=lambda x: x['net_balance'], reverse=True)
         elif sort_by == 'received_desc':
             balance_list.sort(key=lambda x: x['received_amount'], reverse=True)
         elif sort_by == 'given_desc':
