@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'f0a2c3e0-8dff-4d2b-81ee-6d39517deae6'
-  PropagateID: 'f0a2c3e0-8dff-4d2b-81ee-6d39517deae6'
-  ReservedCode1: '565dc9a9-da15-40e7-b34f-4577aec7ddf4'
-  ReservedCode2: '565dc9a9-da15-40e7-b34f-4577aec7ddf4'
+  ProduceID: '33599e78-20be-4ae0-a81b-186aaa0c4d4d'
+  PropagateID: '33599e78-20be-4ae0-a81b-186aaa0c4d4d'
+  ReservedCode1: '928f0d27-5b54-494b-b788-673bec11f22b'
+  ReservedCode2: '928f0d27-5b54-494b-b788-673bec11f22b'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -550,6 +550,24 @@ PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.s
 
 #### 涉及文件
 - `run.sh`、`nginx_ssl.conf`、`generate_ssl_certs.py`、`README.md`
+
+### V10.10.1 人情对账状态标签方向修复（2026-09-20）
+
+#### 问题描述
+- 人情对账页面「人情状态」标签与实际差额方向完全相反：`net_balance = 收礼 - 随礼`，当 net > 0（收 > 送，我方需回礼）时错误显示为「待还礼」，net < 0（送 > 收，对方欠我方）时错误显示为「待补礼」。数值计算（差额列）本身正确，仅标签语义与符号映射错位。
+
+#### 修复内容
+- `gift_utils.py`：对调状态标签与差额符号映射——net > 0 → 待补礼（红色 danger，我方需回）；net < 0 → 待还礼（绿色 success，尚欠我方），status_desc 同步修正
+- `routes_ext.py`：对调筛选条件符号（need_return → net < 0；need_pay → net > 0）与排序方向（need_return_first 升序负数排前；need_pay_first 降序正数排前）
+- `templates/reconciliation.html`：对调徽章显示条件（net < 0 显示绿色待还礼，net > 0 显示红色待补礼）与下拉筛选文案
+- `Project_Survey.md`：同步修正状态定义文档
+
+#### 验证用例
+- 柏楚安（收 200 / 送 300 / 差额 -100）→ 待还礼（尚欠我方）✅
+- 反向场景（收 300 / 送 200 / 差额 +100）→ 待补礼（我方需回）✅
+
+#### 涉及文件
+- `gift_utils.py`、`routes_ext.py`、`templates/reconciliation.html`、`Project_Survey.md`
 
 ## 📂 项目文件结构
 

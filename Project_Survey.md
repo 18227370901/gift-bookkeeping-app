@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'f26d1ec0-684f-43d6-8fb0-5c778943d5d0'
-  PropagateID: 'f26d1ec0-684f-43d6-8fb0-5c778943d5d0'
-  ReservedCode1: '0754bb43-1754-4317-873c-86d42535f279'
-  ReservedCode2: '0754bb43-1754-4317-873c-86d42535f279'
+  ProduceID: 'fce62496-ff57-4e8d-8568-3338e834c150'
+  PropagateID: 'fce62496-ff57-4e8d-8568-3338e834c150'
+  ReservedCode1: 'f8e6d7cf-a451-44b6-acf9-c5b3f9ca690b'
+  ReservedCode2: 'f8e6d7cf-a451-44b6-acf9-c5b3f9ca690b'
 ---
 
 # 礼金记账与金融数据集成系统技术调研与架构决策报告 (Project Survey)

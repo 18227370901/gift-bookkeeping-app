@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '4a76ebcd-10e1-45a0-824d-68173780db7f'
-  PropagateID: '4a76ebcd-10e1-45a0-824d-68173780db7f'
-  ReservedCode1: '9609a514-3fb6-4442-b386-795e1eb6c29b'
-  ReservedCode2: '9609a514-3fb6-4442-b386-795e1eb6c29b'
+  ProduceID: '3a912a57-05de-432a-946b-4ae43dbed183'
+  PropagateID: '3a912a57-05de-432a-946b-4ae43dbed183'
+  ReservedCode1: '7dbdaa85-ef59-473d-93cf-01be42627811'
+  ReservedCode2: '7dbdaa85-ef59-473d-93cf-01be42627811'
 ---
 
 # AI 助手模块技术设计方案
