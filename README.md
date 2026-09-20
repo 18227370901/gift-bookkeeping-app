@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'b15ef8cb-4078-4359-8c44-6b6c92028d9e'
-  PropagateID: 'b15ef8cb-4078-4359-8c44-6b6c92028d9e'
-  ReservedCode1: '9f87238f-ec82-440e-9b4b-5f6542dafe4c'
-  ReservedCode2: '9f87238f-ec82-440e-9b4b-5f6542dafe4c'
+  ProduceID: '0d2896ad-4081-4bc7-8f9e-111b4d00b6dd'
+  PropagateID: '0d2896ad-4081-4bc7-8f9e-111b4d00b6dd'
+  ReservedCode1: '3a25537f-6142-4149-a3f1-4f559b90ebf0'
+  ReservedCode2: '3a25537f-6142-4149-a3f1-4f559b90ebf0'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -785,7 +785,7 @@ git stash pop
 |:---|:---|:---|
 | 🖥️ **Web 原生部署版** | [gift-bookkeeping-app](https://github.com/18227370901/gift-bookkeeping-app.git) | 适合本地 Python 环境、虚拟主机、轻量 VPS 单机运行 |
 | 🐳 **Docker Compose 版** | [gift-bookkeeping-app-docker](https://github.com/18227370901/gift-bookkeeping-app-docker.git) | 适合企业生产服务器、一键容器编排、Nginx 反代与 SSL 自动化管理 |
-| 📱 **Android 原生 APK 版** | [gift-bookkeeping-apk](https://github.com/18227370901/gift-bookkeeping-apk.git) | 适合安卓手机与平板脱机随身离线使用 |
+| 📱 **Android 原生 APK 版** | [gift_bookkeeping_apk](https://github.com/18227370901/gift_bookkeeping_apk.git) | 适合安卓手机与平板脱机随身离线使用 |
 
 ## 📄 开源许可证
 
