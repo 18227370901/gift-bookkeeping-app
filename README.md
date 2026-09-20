@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'e26adb23-7eed-48a7-9cc1-e63ed26fe89f'
-  PropagateID: 'e26adb23-7eed-48a7-9cc1-e63ed26fe89f'
-  ReservedCode1: '0f335b17-a210-472d-9b4c-e012244ad402'
-  ReservedCode2: '0f335b17-a210-472d-9b4c-e012244ad402'
+  ProduceID: 'e5dd3b3b-ca20-41f8-ad19-7df9ba941abd'
+  PropagateID: 'e5dd3b3b-ca20-41f8-ad19-7df9ba941abd'
+  ReservedCode1: '4fa9b306-db2a-4563-ae56-b76e77e0d9ed'
+  ReservedCode2: '4fa9b306-db2a-4563-ae56-b76e77e0d9ed'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -580,6 +580,30 @@ PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.s
 #### 数据安全
 - 全部姓名、电话、地址均为虚构演示数据，无任何真实个人信息（电话采用 138/139 号段虚拟测试号码）
 - 首次启动时 `init_database()` 自动补齐 AI 会话、权限工单等 V10.10 新表，样例库零配置开箱即用
+
+### V10.10.3 run.sh 证书与 Nginx 配置覆盖保护（2026-09-20）
+
+#### 问题背景
+- 原版 `run.sh` 每次 `start`/`restart` 都无条件重新生成自签证书并覆盖渲染 Nginx 配置文件，导致用户自行替换的正式证书（`SSL_CERT`/`SSL_KEY` 指向外部文件时同样受影响）或手工定制过的证书内容被静默覆盖丢失。
+
+#### 变更内容
+- **SSL 证书**：`ensure_ssl_certs()` 重构为三分支——证书不存在时直接创建（不询问）；已存在时先询问 `y/n` 是否更新，输入 `n` 保留现有证书、输入 `y` 才重新生成覆盖
+- **Nginx 配置**：`setup_nginx_config()` 同样保护——已存在 `$PROJECT_NAME.conf` 时先询问再决定是否重新渲染覆盖；文件不存在时直接渲染创建
+- **新增覆盖策略函数 `should_overwrite()`**：交互式终端弹 `y/n` 询问（默认 `n` 保留，回车即安全）；用 `[ -t 0 ]` 检测非交互环境（cron/CI/管道），自动保留旧文件不卡死，并提示可用环境变量强制更新
+- **新增环境变量**：`SSL_FORCE_UPDATE=1`（强制更新证书不询问）、`NGINX_CONF_FORCE_UPDATE=1`（强制覆盖渲染 Nginx 配置不询问）；均设 `0` 则强制保留，供自动化场景显式指定行为
+- 用法帮助信息同步补充两个新环境变量的说明与示例
+
+#### 非交互式执行兼容
+- cron 定时重启、CI 管道等无终端环境：`read` 检测到 stdin 非终端时**不等待输入**，直接自动保留旧文件并给出提示，脚本正常继续执行不卡死
+- 需要 cron 场景强制更新时显式加 `SSL_FORCE_UPDATE=1 NGINX_CONF_FORCE_UPDATE=1 ./run.sh restart`
+
+#### 验证结论
+- `bash -n` 语法校验通过（传统版与 Docker 版均 LF 换行）
+- 功能测试全部通过：逻辑测试 6/6、传统版端到端测试 14/14（证书不存在→生成、已存在非交互→保留、`SSL_FORCE_UPDATE=1`→强制更新、Nginx conf 保留/强制渲染+占位符零残留）、Docker 版验证 7/7（含两版 `should_overwrite` 函数逐字一致性校验）
+- 交互式 `y/n` 询问分支与强制更新共用同一段生成/渲染代码，已由强制更新场景覆盖验证
+
+#### 涉及文件
+- `run.sh`（传统版与 Docker 版同步修改，`should_overwrite` 函数两版逐字一致）
 
 ## 📂 项目文件结构
 
