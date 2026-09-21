@@ -1891,6 +1891,7 @@ def change_password():
 
         current_user.set_password(new_password)
         db.session.commit()
+        logout_user()  # 修改密码后强制注销当前会话，确保必须用新密码重新登录
 
         log_action('修改密码', f'用户成功修改个人密码')
         try:

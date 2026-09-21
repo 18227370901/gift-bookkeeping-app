@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '4bd17e70-15b2-44dc-b32d-7fee12f93917'
-  PropagateID: '4bd17e70-15b2-44dc-b32d-7fee12f93917'
-  ReservedCode1: 'c23eb7ba-e40e-40f6-9bca-a51f902ba203'
-  ReservedCode2: 'c23eb7ba-e40e-40f6-9bca-a51f902ba203'
+  ProduceID: '93ab47aa-4247-4ea0-aafa-4ab59e6d36bc'
+  PropagateID: '93ab47aa-4247-4ea0-aafa-4ab59e6d36bc'
+  ReservedCode1: '6b06e016-1258-41c5-9b03-43f734050f87'
+  ReservedCode2: '6b06e016-1258-41c5-9b03-43f734050f87'
 ---
 
 # 礼金记账与金融数据集成系统技术调研与架构决策报告 (Project Survey)
@@ -804,4 +804,58 @@ AIGC:
 - `templates/register.html`（两版同步修改：注册页密保问题下拉菜单 + 自定义选项）
 - `app.py`（两版同步修改：新增 `profile_security` 路由）
 - `README.md`（两版）：V10.10.6 更新条目
+- `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
+
+## 15. V10.10.7 下拉菜单切换修复、修改密码强制注销与页面排版优化复盘 (2026年9月21日更新)
+
+### 1. 问题背景
+
+V10.10.6 上线后用户在验证过程中发现 4 个问题：
+
+1. **下拉菜单切换 Bug**：重置密保时，密保问题下拉菜单从自定义切换为内置问题后，再切回自定义，自定义输入框消失不见。且选择自定义问题时只有问题输入框没有答案输入框——此问题在管理员重置密保和普通用户修改密保两处均存在。
+2. **修改密码未强制注销**：普通用户在个人安全设置页面修改密码成功后，页面提示重新登录，但没有实际强制注销用户当前会话（`change_password` 路由只 redirect 到 login 页面，没有调用 `logout_user()`）。
+3. **页面排版冗长**：普通用户个人安全设置页面修改密码和修改密保两个卡片同时展开，信息量大、页面冗长。
+
+### 2. 根因分析
+
+#### 下拉菜单切换 Bug
+- JS 函数 `onSecurityQuestionSelectChange` 通过 `selectEl.parentElement.querySelector('input[name="..."]')` 查找隐藏 input，依赖精确的 DOM 父子层级关系
+- `hiddenInput.focus()` 在移动端微信浏览器中可能引起页面自动滚动/键盘弹出，导致输入框"视觉消失"
+- 自定义输入框的显隐完全靠 `d-none` 类切换 input 本身，没有额外的容器包裹，容错性差
+
+#### 修改密码未强制注销
+- `change_password` 路由在密码修改成功后执行 `return redirect(url_for('login'))`
+- 但未调用 `logout_user()`，用户 session 仍然有效
+- login 页面检测到已登录用户会 redirect 回首页，导致用户并未真正登出
+
+### 3. 修复方案
+
+#### 修复 1&4：下拉菜单切换 Bug
+- **HTML 结构调整**：给每个密保问题组容器添加 `data-sq-group="1"` / `data-sq-group="2"` 属性；自定义输入框外加 `<div class="sq-custom-wrapper d-none">` 容器，通过切换容器的 `d-none` 控制可见性
+- **JS 函数重写**：通过 `closest('[data-sq-group]')` 查找容器，再在容器内按 name 精确查找元素，不再依赖 `parentElement`；移除 `focus()` 调用
+- **DOMContentLoaded 初始化同步**：同样改用 `closest('[data-sq-group]')` 查找容器和 `sq-custom-wrapper`
+
+#### 修复 2：修改密码强制注销
+- 在 `change_password` 路由的 `db.session.commit()` 之后、`log_action` 之前，添加 `logout_user()` 调用
+
+#### 优化 3：页面排版重构
+- 使用 Bootstrap accordion 折叠面板，将"修改登录密码"和"修改密保问题"分为两个可折叠面板
+- 两个面板互斥展开（accordion 效果），同一时间只展开一个
+- 面板标题旁显示当前密保问题1摘要信息
+
+### 4. 验证结果
+- Python AST 编译通过（两版 app.py）
+- 两版 3 个文件 MD5 一致性校验全部通过
+- Flask 服务重启成功（PID 33716，端口 11443）
+- 浏览器端到端验证：
+  - 折叠面板正常工作，默认收起，点击展开后互斥收起另一个
+  - 下拉菜单切换（自定义→预置→自定义）全部正常，自定义输入框和答案输入框始终正确显示/隐藏
+  - 管理员重置密保模态框下拉菜单切换同样正常
+  - 修改密码后成功跳转到登录页，用户被强制注销，需用新密码重新登录
+
+### 5. 涉及文件
+- `templates/profile_security.html`（两版同步修改：折叠面板 + 下拉 Bug 修复）
+- `templates/admin_users.html`（两版同步修改：下拉 Bug 修复）
+- `app.py`（两版同步修改：`change_password` 路由增加 `logout_user()`）
+- `README.md`（两版）：V10.10.7 更新条目
 - `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节

@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '6f1dc204-5080-4741-b41c-e0e195e4a92f'
-  PropagateID: '6f1dc204-5080-4741-b41c-e0e195e4a92f'
-  ReservedCode1: 'cc335acd-9f3b-4d7a-99e5-1e9e26f51d47'
-  ReservedCode2: 'cc335acd-9f3b-4d7a-99e5-1e9e26f51d47'
+  ProduceID: '65eb1ab8-654f-4104-af1b-eb21ba0ee7fa'
+  PropagateID: '65eb1ab8-654f-4104-af1b-eb21ba0ee7fa'
+  ReservedCode1: '40491edc-1fa1-4945-86b6-e78ae472eac0'
+  ReservedCode2: '40491edc-1fa1-4945-86b6-e78ae472eac0'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -664,53 +664,41 @@ PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.s
 - `templates/admin_users.html`（传统版与 Docker 版同步修改）
 - `app.py`（传统版与 Docker 版同步修改）
 
-### V10.10.6 密保问题下拉菜单与个人安全设置页面（2026-09-21）
+### V10.10.7 下拉菜单切换修复、修改密码强制注销与页面排版优化（2026-09-21）
 
 #### 问题背景
-1. 管理员重置密保时，密保问题为自由文本输入框，缺乏规范约束，用户需手动输入问题文本，体验不佳且容易输入不一致。
-2. 管理员查看凭证时，安全验证区只展示 1 个密保问题，用户不知道密保问题 2 的内容无法用密保 2 答案验证。
-3. 普通用户登录后无法自助修改自身密码或密保问题，只能通过管理员重置或 URL 直接访问 `/change-password`，且无修改密保的入口。
-4. 注册页密保问题为固定 6 选 1 下拉框（两组各 6 个不重复选项），不支持自定义问题。
+1. 重置密保时，密保问题下拉菜单从自定义切换为内置问题后，再切回自定义，自定义输入框消失不见。且选择自定义问题时只有问题输入框没有答案输入框——此问题在管理员重置密保和普通用户修改密保两处均存在。
+2. 普通用户在个人安全设置页面修改密码成功后，页面提示重新登录，但没有实际强制注销用户当前会话，用户仍处于登录状态。
+3. 普通用户个人安全设置页面两个卡片同时展开，信息量大、页面冗长，需要重新排版美化。
 
 #### 变更内容
-- **优化 1：重置密保下拉菜单（`admin_users.html`，两版同步修改）**
-  - 重置密保模态框的两组密保问题输入从自由文本框改为下拉菜单 + 自定义输入复合控件
-  - 下拉菜单统一包含 12 个预置密保问题 + 1 个"自定义问题..."选项
-  - 选择预置问题时自动写入隐藏 input 并隐藏自定义输入框；选择自定义时显示输入框供用户输入
-  - 页面加载时根据当前密保问题值自动初始化下拉框选中状态（预置问题选中对应选项，自定义问题选中"自定义"并显示输入框）
-- **优化 2：查看凭证双密保验证（`admin_users.html`，两版同步修改）**
-  - 查看凭证安全验证区从只展示 1 个密保问题改为展示 2 个密保问题 + 2 个答案输入框
-  - JS `fetchAndRenderCredentials` 增加 `ans2Verify` 参数，`submitAdminVerifyCred` 读取两个答案输入框
-  - 后端 `admin_user_credentials` 路由已支持 `verify_security_answer_2` 参数（无需修改）
-- **新增 3：普通用户个人安全设置页面（两版同步新增）**
-  - 新建 `templates/profile_security.html`：卡片 A 修改密码 + 卡片 B 修改密保，修改密保需先验证身份（旧密码 / 旧密保 1 / 旧密保 2，答对任一即可）
-  - 新增 `app.py` 路由 `/profile/security`（GET 渲染页面 + POST 处理密保修改：身份验证 → 成对校验 → 重复校验 → `set_security_answers` → 审计日志 → Webhook 推送）
-  - `templates/base.html` 导航栏用户下拉菜单新增"个人安全设置"入口
-  - 密保问题使用与重置密保相同的下拉菜单 + 自定义输入复合控件（12 个预置 + 自定义）
-  - 普通用户修改密保后管理员查看凭证页面同步显示最新数据
-- **注册页自定义密保选项（`register.html`，两版同步修改）**
-  - 两组密保问题下拉框统一扩展为 12 个预置问题 + "自定义问题..."选项
-  - 选择自定义时显示输入框供用户输入自定义问题
-  - JS 校验逻辑适配新的 select + hidden input 复合控件
+- **修复 1&4：下拉菜单切换 Bug（`profile_security.html` + `admin_users.html`，两版同步修改）**
+  - 根因：JS 函数 `onSecurityQuestionSelectChange` 通过 `selectEl.parentElement.querySelector(...)` 查找隐藏 input，依赖精确的 DOM 父子层级关系，且 `hiddenInput.focus()` 在移动端可能引起布局跳变
+  - 修复：给每个密保问题组容器添加 `data-sq-group` 属性，自定义输入框外加 `sq-custom-wrapper` 容器，通过 `closest('[data-sq-group]')` 查找容器再按 name 精确查找元素，移除 `focus()` 调用
+  - DOMContentLoaded 初始化同步改用 `closest('[data-sq-group]')` 查找
+- **修复 2：修改密码未强制注销（`app.py`，两版同步修改）**
+  - 根因：`change_password` 路由在密码修改成功后只 `redirect(url_for('login'))`，未调用 `logout_user()`，用户 session 仍然有效
+  - 修复：在 `db.session.commit()` 之后、`log_action` 之前添加 `logout_user()` 调用
+- **优化 3：个人安全设置页面排版重构（`profile_security.html`，两版同步修改）**
+  - 使用 Bootstrap accordion 折叠面板替代两个同时展开的卡片
+  - "修改登录密码"和"修改密保问题"分为两个可折叠面板，互斥展开（同一时间只展开一个）
+  - 面板标题旁显示当前密保问题1摘要信息，收起时也能看到概况
 
 #### 验证结论
 - Python AST 编译通过（两版 app.py）
-- 两版 5 个文件 MD5 一致性校验全部通过（app.py、admin_users.html、base.html、register.html、profile_security.html）
-- Flask 服务重启成功（PID 54768，端口 11443）
+- 两版 3 个文件 MD5 一致性校验全部通过（app.py、admin_users.html、profile_security.html）
+- Flask 服务重启成功（PID 33716，端口 11443）
 - 浏览器端到端验证：
-  - 导航栏"个人安全设置"入口正确显示，点击跳转 `/profile/security`
-  - 个人安全设置页面修改密码卡片和修改密保卡片正常渲染
-  - 修改密保：旧密码身份验证通过，下拉菜单选择预置问题 + 输入答案，提交后 flash 成功，当前密保信息更新
-  - 重置密保模态框：下拉菜单 + 自定义复合控件正确渲染，自动回显当前密保问题
-  - 查看凭证模态框：双密保问题 + 双答案输入框正确展示，密码验证通过后凭证显示最新数据
+  - 个人安全设置页面折叠面板正常工作，两个面板默认收起，点击展开后互斥收起另一个
+  - 下拉菜单切换：自定义→预置→自定义，自定义输入框和答案输入框始终正确显示/隐藏
+  - 管理员重置密保模态框下拉菜单切换同样正常
+  - 修改密码后成功跳转到登录页并显示提示，用户被强制注销，需用新密码重新登录
   - 测试数据已恢复到测试前状态
 
 #### 涉及文件
-- `templates/admin_users.html`（两版同步修改）
-- `templates/profile_security.html`（两版同步新增）
-- `templates/base.html`（两版同步修改）
-- `templates/register.html`（两版同步修改）
-- `app.py`（两版同步修改）
+- `templates/profile_security.html`（两版同步修改：折叠面板 + 下拉 Bug 修复）
+- `templates/admin_users.html`（两版同步修改：下拉 Bug 修复）
+- `app.py`（两版同步修改：`change_password` 路由增加 `logout_user()`）
 
 ## 📂 项目文件结构
 
