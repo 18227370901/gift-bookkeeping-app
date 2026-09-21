@@ -24,6 +24,14 @@
     .config-card.disabled-config {
         opacity: 0.6;
     }
+    .test-result {
+        margin-top: 12px;
+        animation: fadeIn 0.3s ease-in;
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-4px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
     .auth-row {
         padding: 8px 12px;
         border-radius: 8px;
@@ -170,6 +178,9 @@ function renderConfigs() {
                     <button class="btn btn-sm btn-outline-secondary" onclick="moveConfig(${idx}, 1)" ${idx === aiConfigs.length - 1 ? 'disabled' : ''}>
                         <i class="fa-solid fa-arrow-down"></i>
                     </button>
+                    <button class="btn btn-sm btn-outline-info" onclick="testConfig(${idx})" id="testBtn-${idx}" title="测试此配置是否可用">
+                        <i class="fa-solid fa-vial me-1"></i>测试
+                    </button>
                     <button class="btn btn-sm btn-outline-danger" onclick="removeConfig(${idx})">
                         <i class="fa-solid fa-trash"></i>
                     </button>
@@ -211,6 +222,7 @@ function renderConfigs() {
                         </div>
                     </div>
                 </div>
+                <div id="testResult-${idx}"></div>
             </div>
         </div>
     `).join('');
@@ -284,6 +296,96 @@ async function saveConfigs() {
     } else {
         alert('保存失败：' + (data?.message || '未知错误'));
     }
+}
+
+// 测试单个 AI 配置是否可用
+async function testConfig(idx) {
+    const cfg = aiConfigs[idx];
+    if (!cfg) return;
+
+    const btn = document.getElementById(`testBtn-${idx}`);
+    const resultDiv = document.getElementById(`testResult-${idx}`);
+    if (!btn || !resultDiv) return;
+
+    // 按钮变为测试中状态
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>测试中...';
+
+    // 先同步当前编辑框中的值到 aiConfigs（确保测试的是最新输入）
+    // 通过 DOM 读取当前输入值
+    const nameInput = document.querySelector(`#config-${idx} input[onchange*="name"]`);
+    const modelInput = document.querySelector(`#config-${idx} input[onchange*="model"]`);
+    const keyInput = document.getElementById(`apiKey-${idx}`);
+    const urlInput = document.querySelector(`#config-${idx} input[onchange*="base_url"]`);
+    if (nameInput) cfg.name = nameInput.value;
+    if (modelInput) cfg.model = modelInput.value;
+    if (keyInput) cfg.api_key = keyInput.value;
+    if (urlInput) cfg.base_url = urlInput.value;
+
+    if (!cfg.api_key) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-warning py-2 mb-0 mt-2 test-result">
+                <i class="fa-solid fa-triangle-exclamation me-1"></i>API Key 为空，请先填写后再测试
+            </div>
+        `;
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-vial me-1"></i>测试';
+        return;
+    }
+
+    try {
+        const data = await aiFetch('/api/ai/config/test', {
+            method: 'POST',
+            body: JSON.stringify({
+                api_key: cfg.api_key,
+                base_url: cfg.base_url || '',
+                model: cfg.model || ''
+            })
+        });
+
+        if (data && data.code === 200 && data.data) {
+            const result = data.data;
+            if (result.success) {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-success py-2 mb-0 test-result d-flex align-items-start justify-content-between">
+                        <div>
+                            <i class="fa-solid fa-circle-check me-1"></i><strong>配置可用</strong>
+                            <span class="text-muted ms-2">延迟: ${result.latency_ms}ms</span>
+                            ${result.detail ? `<div class="small mt-1">${escapeHtml(result.detail)}</div>` : ''}
+                        </div>
+                        <button type="button" class="btn-close btn-sm ms-2" onclick="this.parentElement.parentElement.remove();"></button>
+                    </div>
+                `;
+            } else {
+                resultDiv.innerHTML = `
+                    <div class="alert alert-danger py-2 mb-0 test-result d-flex align-items-start justify-content-between">
+                        <div>
+                            <i class="fa-solid fa-circle-xmark me-1"></i><strong>配置不可用</strong>
+                            <span class="text-danger ms-2">${escapeHtml(result.message)}</span>
+                            ${result.latency_ms ? `<span class="text-muted ms-2">(${result.latency_ms}ms)</span>` : ''}
+                            ${result.detail ? `<div class="small text-muted mt-1">${escapeHtml(result.detail)}</div>` : ''}
+                        </div>
+                        <button type="button" class="btn-close btn-sm ms-2" onclick="this.parentElement.parentElement.remove();"></button>
+                    </div>
+                `;
+            }
+        } else {
+            resultDiv.innerHTML = `
+                <div class="alert alert-danger py-2 mb-0 test-result">
+                    <i class="fa-solid fa-circle-xmark me-1"></i>测试请求失败: ${escapeHtml(data?.message || '未知错误')}
+                </div>
+            `;
+        }
+    } catch (err) {
+        resultDiv.innerHTML = `
+            <div class="alert alert-danger py-2 mb-0 test-result">
+                <i class="fa-solid fa-circle-xmark me-1"></i>测试请求异常: ${escapeHtml(String(err))}
+            </div>
+        `;
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-vial me-1"></i>测试';
 }
 
 // 加载授权用户列表

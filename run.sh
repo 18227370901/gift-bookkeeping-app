@@ -89,6 +89,101 @@ check_status() {
     fi
 }
 
+# 检测端口是否被占用，被占用时提示用户选择处理方式（SNI 模式下允许双版本共存，但后端端口不能相同）
+check_port_conflict() {
+    local check_port="$1"
+    local port_pid=$(lsof -ti :"$check_port" 2>/dev/null)
+
+    if [ -z "$port_pid" ]; then
+        return 0  # 端口空闲，可正常启动
+    fi
+
+    # 端口被占用，判断是否为自身服务（PID 文件匹配）
+    if [ -f "$PID_FILE" ]; then
+        local my_pid=$(cat "$PID_FILE")
+        if [ "$port_pid" = "$my_pid" ]; then
+            return 0  # 是自己的进程，正常
+        fi
+    fi
+
+    # 端口被其他进程占用
+    local proc_info=$(ps -p "$port_pid" -o cmd= 2>/dev/null | head -c 200)
+    echo_e "${RED}❌ 端口 $check_port 已被占用！${NC}"
+    echo_e "   占用进程 PID: $port_pid"
+    echo_e "   进程信息: $proc_info"
+
+    # 非交互环境直接中止
+    if [ ! -t 0 ]; then
+        echo_e "${RED}非交互环境无法选择，服务启动中止。请更换端口后重试。${NC}"
+        echo_e "   传统版: PORT=新端口 ./$0 start"
+        echo_e "   Docker版: HOST_PORT=新端口 ./$0 start"
+        return 1
+    fi
+
+    # 交互式选择
+    while true; do
+        echo_e "${YELLOW}请选择处理方式：${NC}"
+        echo_e "  1) 修改本服务端口后重新启动（推荐）"
+        echo_e "  2) 停用另一个服务的 Nginx 配置后继续"
+        echo_e "  3) 中止启动"
+        printf '请输入选项 [1/2/3]: '
+        read -r choice
+        case "$choice" in
+            1)
+                echo_e "${GREEN}请修改端口后重新启动：${NC}"
+                echo_e "   传统版: PORT=新端口 ./$0 start"
+                echo_e "   Docker版: HOST_PORT=新端口 ./$0 start"
+                return 1
+                ;;
+            2)
+                # 列出当前 Nginx 配置目录中的项目配置文件，让用户选择停用哪个
+                echo_e "${YELLOW}当前 $NGINX_CONF_DIR 中的 Nginx 配置文件：${NC}"
+                local conf_files=$(ls "$NGINX_CONF_DIR"/*.conf 2>/dev/null)
+                if [ -z "$conf_files" ]; then
+                    echo_e "${RED}未找到任何 .conf 配置文件${NC}"
+                    return 1
+                fi
+                local ci=1
+                for f in $conf_files; do
+                    echo_e "  $ci) $(basename "$f")"
+                    ci=$((ci + 1))
+                done
+                printf '请输入要停用的配置编号: '
+                read -r conf_choice
+                local selected=$(echo "$conf_files" | sed -n "${conf_choice}p")
+                if [ -n "$selected" ]; then
+                    mv "$selected" "${selected}.disabled" 2>/dev/null
+                    echo_e "${GREEN}已停用: $(basename "$selected")${NC}"
+                    # reload nginx
+                    if command -v nginx > /dev/null 2>&1; then
+                        if nginx -t >/dev/null 2>&1; then
+                            nginx -s reload 2>/dev/null || systemctl reload nginx 2>/dev/null
+                        fi
+                    fi
+                    # 再次检测端口是否释放
+                    local recheck_pid=$(lsof -ti :"$check_port" 2>/dev/null)
+                    if [ -n "$recheck_pid" ]; then
+                        echo_e "${RED}停用 Nginx 配置后端口 $check_port 仍被占用，可能后端进程仍在运行${NC}"
+                        echo_e "   请手动停止占用端口的进程: kill $recheck_pid"
+                        return 1
+                    fi
+                    return 0
+                else
+                    echo_e "${RED}无效的选择${NC}"
+                    return 1
+                fi
+                ;;
+            3)
+                echo_e "${YELLOW}已中止启动${NC}"
+                return 1
+                ;;
+            *)
+                echo_e "${RED}无效选项，请重新选择${NC}"
+                ;;
+        esac
+    done
+}
+
 # 自动生成 SSL 证书：文件不存在则直接创建；已存在时先询问是否更新，防止自定义/正式证书被自签证书覆盖
 ensure_ssl_certs() {
     # 两份证书文件均不存在时，无需询问，直接创建（首次部署场景）
@@ -141,16 +236,19 @@ setup_nginx_config() {
 
     if [ -d "$NGINX_CONF_DIR" ]; then
         echo_e "${GREEN}正在处理 Nginx 配置文件 ($NGINX_CONF_DIR)...${NC}"
-        if [ -f "$NGINX_CONF_DIR/gift_app_docker.conf" ]; then
-            mv "$NGINX_CONF_DIR/gift_app_docker.conf" "$NGINX_CONF_DIR/gift_app_docker.conf.disabled" 2>/dev/null || true
-            echo_e "${YELLOW}已禁用冲突的 Docker 版本 Nginx 配置: gift_app_docker.conf${NC}"
-        fi
-        # 禁用本项目旧版硬编码命名的配置文件（防止新旧配置共存导致 server_name 冲突）
-        if [ "$PROJECT_NAME" = "gift_app" ] && [ -f "$NGINX_CONF_DIR/gift_app_native.conf" ]; then
-            mv "$NGINX_CONF_DIR/gift_app_native.conf" "$NGINX_CONF_DIR/gift_app_native.conf.disabled" 2>/dev/null || true
-            echo_e "${YELLOW}已禁用旧版 Nginx 配置: gift_app_native.conf${NC}"
-        fi
         local target_conf="$NGINX_CONF_DIR/$PROJECT_NAME.conf"
+        # SNI default_server 冲突自动降级：同端口只能有一个 default_server，检测到已有其他项目设为 default_server 时自动改为非兜底
+        if [ "$SNI_DEFAULT_SERVER" = "1" ]; then
+            for f in "$NGINX_CONF_DIR"/*.conf; do
+                [ -f "$f" ] || continue
+                [ "$f" = "$target_conf" ] && continue  # 跳过自己
+                if grep -q "default_server" "$f" 2>/dev/null; then
+                    echo_e "${YELLOW}⚠️ 检测到 $(basename "$f") 已设为 default_server，本项目将自动改为非兜底模式${NC}"
+                    SNI_DEFAULT_SERVER=0
+                    break
+                fi
+            done
+        fi
         # 已存在的项目配置文件先取得许可再覆盖渲染，防止用户手改过的 conf 被模板静默重置
         # （首次部署文件不存在时无需询问，直接渲染创建）
         if [ -f "$target_conf" ] && ! should_overwrite "$target_conf" "$NGINX_CONF_FORCE_UPDATE" "NGINX_CONF_FORCE_UPDATE"; then
@@ -214,6 +312,10 @@ start_service() {
 
     # 启动前自动生成最新 SSL 证书、配置 Nginx 与清理缓存垃圾（SNI 配置失败则中止启动）
     ensure_ssl_certs
+
+    # 端口冲突检测（SNI 模式下允许双版本共存，但后端端口不能相同）
+    check_port_conflict "$PORT" || return 1
+
     setup_nginx_config || {
         echo_e "${RED}❌ Nginx SNI 配置失败，服务启动中止，请检查 SNI_DOMAIN 环境变量${NC}"
         return 1

@@ -9,7 +9,7 @@ from datetime import datetime
 from flask import render_template, request, redirect, url_for, flash, jsonify, session, abort
 from flask_login import login_required, current_user
 from models import db, User, ChatSession, ChatMessage, AIQueryLog
-from ai_service import ai_chat, _build_config_list, _get_suggestions
+from ai_service import ai_chat, _build_config_list, _get_suggestions, test_ai_config
 from webhook_utils import trigger_webhook_event
 from models import WebhookConfig
 
@@ -316,6 +316,49 @@ def register_ai_routes(app, log_action=None):
             'ai_configs': configs,
             'message': 'AI 配置保存成功'
         }})
+
+    # ==================== AI 配置可用性测试（仅管理员） ====================
+
+    @app.route('/api/ai/config/test', methods=['POST'])
+    @login_required
+    def api_ai_config_test():
+        """测试 AI 配置可用性（仅管理员）
+        支持两种模式：
+        1) 传 config_index: 从已保存的配置中取对应条目测试
+        2) 传 api_key/base_url/model: 直接测试未保存的配置
+        """
+        if not current_user.is_admin:
+            return jsonify({'code': 403, 'message': '此接口仅管理员可访问'}), 403
+
+        data = request.get_json(silent=True) or {}
+
+        # 模式1：按索引测试已保存的配置
+        config_index = data.get('config_index')
+        if config_index is not None:
+            try:
+                config_index = int(config_index)
+            except (ValueError, TypeError):
+                return jsonify({'code': 400, 'message': 'config_index 必须是整数'}), 400
+
+            configs = current_user.get_ai_configs()
+            if config_index < 0 or config_index >= len(configs):
+                return jsonify({'code': 400, 'message': '配置索引超出范围'}), 400
+
+            cfg = configs[config_index]
+            result = test_ai_config(
+                cfg.get('api_key', ''),
+                cfg.get('base_url', ''),
+                cfg.get('model', '')
+            )
+            return jsonify({'code': 200, 'data': result})
+
+        # 模式2：直接传入配置参数测试
+        api_key = (data.get('api_key') or '').strip()
+        base_url = (data.get('base_url') or '').strip()
+        model = (data.get('model') or '').strip()
+
+        result = test_ai_config(api_key, base_url, model)
+        return jsonify({'code': 200, 'data': result})
 
     # ==================== AI 授权管理（仅管理员） ====================
 
