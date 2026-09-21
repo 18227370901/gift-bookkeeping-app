@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '6ce0ee86-50c3-48b5-827e-b248b358c98e'
-  PropagateID: '6ce0ee86-50c3-48b5-827e-b248b358c98e'
-  ReservedCode1: '125e439b-d831-4b2f-a426-d2c1234797ee'
-  ReservedCode2: '125e439b-d831-4b2f-a426-d2c1234797ee'
+  ProduceID: '093c2786-6d33-4bea-9ac7-61197781b19f'
+  PropagateID: '093c2786-6d33-4bea-9ac7-61197781b19f'
+  ReservedCode1: '9809b20a-9f7c-4d81-b246-0e6a1d0cbca8'
+  ReservedCode2: '9809b20a-9f7c-4d81-b246-0e6a1d0cbca8'
 ---
 
 # 礼金记账与金融数据集成系统技术调研与架构决策报告 (Project Survey)
@@ -639,6 +639,43 @@ AIGC:
 ### 5. 涉及文件
 - `gift_bookkeeping.db`（两版根目录样例库，字节级统一）
 - `README.md`（两版）：样例数据体系说明扩充 + V10.10.2 更新条目
+- `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
+
+## 12. V10.10.4 f-string 兼容修复、Nginx 路径默认值调整与 run.sh POSIX 兼容化复盘 (2026年9月21日更新)
+
+### 1. 问题背景与根因
+- **f-string 报错**：`routes_ext.py:4441` WebDAV 备份删除推送消息中 f-string 外层单引号、表达式内也用单引号 `f'...{', '.join(filenames)}...'`。Python 3.12（PEP 701）放宽了 f-string 引号规则允许此写法，但 Docker 镜像 `python:3.11-slim` 不支持，导致 `SyntaxError: f-string: expecting '}'`，gunicorn worker 全部退出、容器无法启动。本地 venv 为 Python 3.12.13 因此不报错，问题仅在 Docker 部署时暴露。
+- **Nginx 路径不匹配**：`run.sh` 中 `NGINX_CONF_DIR` 默认值为 `/etc/nginx/conf.d`，但实际服务器部署路径为 `/opt/service/nginx/conf.d`，导致 Nginx 配置文件输出到错误目录。
+- **sh 兼容性报错**：`run.sh` 含 bash 独有语法（`${BASH_SOURCE[0]:-$0}` 数组下标、`((wait_time++))` 算术扩展、`echo -e` 的 `-e` 参数、`source` 命令、`read -r -p` 的 `-p` 参数），用 `sh`/`dash` 执行时报 `Bad substitution`、`() unexpected`、`[[: not found` 等。
+
+### 2. 修复方案
+- **f-string 引号修复**：外层单引号改双引号 `f"...{', '.join(filenames)}..."`，表达式内保持单引号，消息内容不变。两版逐字一致。
+- **Nginx 路径调整**：
+  - 默认值从 `/etc/nginx/conf.d` 改为 `/opt/service/nginx/conf.d`；
+  - 目录不存在时提示用户手动创建（不自动 mkdir、不跳过、不删除任何东西），`return 1` 中止；
+  - 添加注释说明其他用户可通过环境变量 `NGINX_CONF_DIR` 覆盖为 `/etc/nginx/conf.d`。
+- **run.sh POSIX 兼容化**（7 项改动，两版同步）：
+  - `#!/bin/bash` → `#!/bin/sh`
+  - 移除 bash 自愈逻辑（`if [ -z "$BASH_VERSION" ]; then exec bash "$0" "$@"; fi`），脚本已纯 POSIX 兼容不再需要切换
+  - `${BASH_SOURCE[0]:-$0}` → `$0`（数组下标是 bash 独有）
+  - 新增 `echo_e()` 函数（`printf '%b\n' "$*"`），替换全文所有 `echo -e`（dash 的 echo 不支持 `-e`）
+  - `read -r -p "提示语" answer` → `printf '提示语' >&2; read -r answer`（`-p` 是 bash 独有）
+  - `((wait_time++))` → `wait_time=$((wait_time + 1))`（传统版，`(( ))` 是 bash 独有）
+  - `source $VENV_DIR/bin/activate` → `. $VENV_DIR/bin/activate`（传统版，`source` 是 bash 独有）
+
+### 3. 验证结论
+- Python AST 编译通过（两版 routes_ext.py，3.12 环境）
+- `bash -n` + `dash -n` 双语法校验通过（两版 run.sh）
+- `dash run.sh status` 功能测试通过：无任何 `Bad substitution`/`() unexpected`/`[[: not found` 报错
+- `dash run.sh`（无参数）用法提示正常输出
+- 传统版 Flask 服务重启验证通过（PID 55448，端口 11443，admin/admin123 登录正常）
+- 全文 `echo -e` 清零扫描确认（仅注释中残留）
+- bashism 残留扫描确认：`BASH_SOURCE`、`((`、`source `、`read -r -p` 全部清除
+
+### 4. 涉及文件
+- `routes_ext.py`（两版同步修改，第 4441 行逐字一致）
+- `run.sh`（两版同步修改，`echo_e` 函数两版逐字一致）
+- `README.md`（两版）：V10.10.4 更新条目
 - `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
 
 ## 11. V10.10.3 run.sh 证书与 Nginx 配置覆盖保护复盘 (2026年9月20日更新)

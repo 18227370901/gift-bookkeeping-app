@@ -4438,7 +4438,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             trigger_webhook_event(
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'delete',
                 f'{current_user.username} 删除WebDAV备份',
-                f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{', '.join(filenames)} | 结果：{"全部成功" if all_success else "部分失败"}',
+                f"操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{', '.join(filenames)} | 结果：{'全部成功' if all_success else '部分失败'}",
                 page_key='admin_backups', user_name=current_user.username, operator_id=current_user.id
             )
         except Exception:

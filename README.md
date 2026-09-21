@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'e5dd3b3b-ca20-41f8-ad19-7df9ba941abd'
-  PropagateID: 'e5dd3b3b-ca20-41f8-ad19-7df9ba941abd'
-  ReservedCode1: '4fa9b306-db2a-4563-ae56-b76e77e0d9ed'
-  ReservedCode2: '4fa9b306-db2a-4563-ae56-b76e77e0d9ed'
+  ProduceID: 'dcdabf23-42fd-4b82-931d-2b782818c6b4'
+  PropagateID: 'dcdabf23-42fd-4b82-931d-2b782818c6b4'
+  ReservedCode1: '21dfd866-600b-4862-b85e-e98d1fa18dd4'
+  ReservedCode2: '21dfd866-600b-4862-b85e-e98d1fa18dd4'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -604,6 +604,37 @@ PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.s
 
 #### 涉及文件
 - `run.sh`（传统版与 Docker 版同步修改，`should_overwrite` 函数两版逐字一致）
+
+### V10.10.4 f-string 兼容修复、Nginx 路径默认值调整与 run.sh POSIX 兼容化（2026-09-21）
+
+#### 问题背景
+1. **Docker 版启动报错 `SyntaxError: f-string: expecting '}'`**：`routes_ext.py` 第 4441 行 WebDAV 备份删除推送消息中，f-string 外层用单引号、表达式内也用单引号（`f'...{', '.join(filenames)}...'`）。Python 3.12（PEP 701）允许此写法，但 Docker 镜像 `python:3.11-slim` 不支持，导致 gunicorn worker 全部退出、容器无法启动。
+2. **Nginx 配置目录默认路径不匹配实际部署**：`run.sh` 中 `NGINX_CONF_DIR` 默认值为 `/etc/nginx/conf.d`，但实际服务器部署路径为 `/opt/service/nginx/conf.d`。
+3. **`sh run.sh status` 报多项语法错误**：脚本含 bash 独有语法（`${BASH_SOURCE[0]}`、`((wait_time++))`、`echo -e`、`source`、`read -r -p`），用 `sh`/`dash` 执行时报 `Bad substitution`、`() unexpected`、`[[: not found` 等。
+
+#### 变更内容
+- **f-string 引号修复**：`routes_ext.py:4441` 外层单引号改双引号 `f"...{', '.join(filenames)}..."`，表达式内保持单引号，消息内容不变；两版逐字一致
+- **Nginx 默认路径调整**：`NGINX_CONF_DIR` 默认值从 `/etc/nginx/conf.d` 改为 `/opt/service/nginx/conf.d`；目录不存在时提示用户手动创建（不自动 mkdir、不跳过、不删除任何东西）；添加注释说明其他用户可通过环境变量覆盖为 `/etc/nginx/conf.d`
+- **run.sh POSIX 兼容化**（7 项改动，两版同步）：
+  - `#!/bin/bash` → `#!/bin/sh`
+  - 移除 bash 自愈逻辑（`if [ -z "$BASH_VERSION" ]; then exec bash...`）
+  - `${BASH_SOURCE[0]:-$0}` → `$0`
+  - 新增 `echo_e()` 函数（`printf '%b\n'`），替换全文所有 `echo -e`
+  - `read -r -p "提示语" answer` → `printf '提示语' >&2; read -r answer`
+  - `((wait_time++))` → `wait_time=$((wait_time + 1))`（传统版）
+  - `source $VENV_DIR/bin/activate` → `. $VENV_DIR/bin/activate`（传统版）
+
+#### 验证结论
+- Python AST 编译通过（两版 routes_ext.py）
+- `bash -n` + `dash -n` 语法校验通过（两版 run.sh）
+- `dash run.sh status` 功能测试通过：无任何 `Bad substitution`/`() unexpected`/`[[: not found` 报错
+- 传统版 Flask 服务重启验证通过（PID 55448，端口 11443，admin/admin123 登录正常）
+- 全文 `echo -e` 清零扫描确认（仅注释中残留）
+- bashism 残留扫描确认：`${BASH_SOURCE}`、`((`、`source `、`read -r -p` 全部清除（仅 `$((wait_time + 1))` POSIX 标准算术展开）
+
+#### 涉及文件
+- `routes_ext.py`（传统版与 Docker 版同步修改，第 4441 行逐字一致）
+- `run.sh`（传统版与 Docker 版同步修改，`echo_e` 函数两版逐字一致）
 
 ## 📂 项目文件结构
 
