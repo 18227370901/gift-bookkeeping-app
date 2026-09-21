@@ -648,7 +648,7 @@
                         </div>
                         <hr class="my-2 text-muted">
                         {% endif %}
-                        <div class="mb-3">
+                        <div class="mb-3" data-sq-group="1">
                           <label class="form-label small text-muted">新密保问题 1：</label>
                           <select class="form-select form-select-sm sq-select" name="security_question_1_select" data-target="security_question_1" onchange="onSecurityQuestionSelectChange(this)">
                             <option value="__custom__">自定义问题...</option>
@@ -665,13 +665,15 @@
                             <option value="您最喜欢的一部电影是？">您最喜欢的一部电影是？</option>
                             <option value="您毕业的学校名称是？">您毕业的学校名称是？</option>
                           </select>
-                          <input type="text" name="security_question_1" class="form-control form-control-sm mt-1 d-none sq-custom-input" placeholder="请输入自定义密保问题 1" value="{{ u.security_question_1 or u.security_question }}" required>
+                          <div class="sq-custom-wrapper d-none mt-1">
+                            <input type="text" name="security_question_1" class="form-control form-control-sm" placeholder="请输入自定义密保问题 1" value="{{ u.security_question_1 or u.security_question }}" required>
+                          </div>
                         </div>
                         <div class="mb-3">
                           <label class="form-label small text-muted">新密保答案 1：</label>
                           <input type="text" name="security_answer_1" class="form-control form-control-sm" placeholder="请输入新密保问题 1 的答案" required>
                         </div>
-                        <div class="mb-3">
+                        <div class="mb-3" data-sq-group="2">
                           <label class="form-label small text-muted">新密保问题 2：</label>
                           <select class="form-select form-select-sm sq-select" name="security_question_2_select" data-target="security_question_2" onchange="onSecurityQuestionSelectChange(this)">
                             <option value="">不设置第 2 个密保</option>
@@ -689,7 +691,9 @@
                             <option value="您最喜欢的一部电影是？">您最喜欢的一部电影是？</option>
                             <option value="您毕业的学校名称是？">您毕业的学校名称是？</option>
                           </select>
-                          <input type="text" name="security_question_2" class="form-control form-control-sm mt-1 d-none sq-custom-input" placeholder="请输入自定义密保问题 2" value="{{ u.security_question_2 or '' }}">
+                          <div class="sq-custom-wrapper d-none mt-1">
+                            <input type="text" name="security_question_2" class="form-control form-control-sm" placeholder="请输入自定义密保问题 2" value="{{ u.security_question_2 or '' }}">
+                          </div>
                         </div>
                         <div class="mb-3">
                           <label class="form-label small text-muted">新密保答案 2：</label>
@@ -740,22 +744,25 @@
 
 <script>
 // 密保问题下拉菜单切换：选择预置问题直接写入隐藏 input，选择自定义则显示输入框
+// 通过 closest('[data-sq-group]') 查找容器，不再依赖 parentElement 层级
 function onSecurityQuestionSelectChange(selectEl) {
-  const targetName = selectEl.getAttribute('data-target');
-  const hiddenInput = selectEl.parentElement.querySelector('input[name="' + targetName + '"]');
+  var group = selectEl.closest('[data-sq-group]');
+  if (!group) return;
+  var targetName = selectEl.getAttribute('data-target');
+  var customWrapper = group.querySelector('.sq-custom-wrapper');
+  var hiddenInput = group.querySelector('input[name="' + targetName + '"]');
   if (!hiddenInput) return;
-  const val = selectEl.value;
+  var val = selectEl.value;
   if (val === '__custom__') {
-    // 显示自定义输入框，清空隐藏字段让用户手动输入
-    hiddenInput.classList.remove('d-none');
-    hiddenInput.focus();
+    // 自定义：显示输入框容器，不清空原有值（方便用户来回切换）
+    if (customWrapper) customWrapper.classList.remove('d-none');
   } else if (val === '') {
     // 不设置第 2 个密保（仅问题2有此选项）
-    hiddenInput.classList.add('d-none');
+    if (customWrapper) customWrapper.classList.add('d-none');
     hiddenInput.value = '';
   } else {
-    // 选择了预置问题，隐藏自定义输入框，将值写入隐藏字段
-    hiddenInput.classList.add('d-none');
+    // 选择了预置问题，隐藏自定义输入框容器，将值写入隐藏字段
+    if (customWrapper) customWrapper.classList.add('d-none');
     hiddenInput.value = val;
   }
 }
@@ -763,10 +770,13 @@ function onSecurityQuestionSelectChange(selectEl) {
 // 页面加载时初始化所有密保问题下拉框的默认选中状态
 document.addEventListener('DOMContentLoaded', function() {
   document.querySelectorAll('.sq-select').forEach(function(sel) {
-    const targetName = sel.getAttribute('data-target');
-    const hiddenInput = sel.parentElement.querySelector('input[name="' + targetName + '"]');
+    var group = sel.closest('[data-sq-group]');
+    if (!group) return;
+    var targetName = sel.getAttribute('data-target');
+    var customWrapper = group.querySelector('.sq-custom-wrapper');
+    var hiddenInput = group.querySelector('input[name="' + targetName + '"]');
     if (!hiddenInput) return;
-    const currentVal = hiddenInput.value || '';
+    var currentVal = hiddenInput.value || '';
     if (!currentVal) {
       // 无现有值：问题1选第一个预置，问题2选"不设置"
       if (targetName === 'security_question_1') {
@@ -775,7 +785,7 @@ document.addEventListener('DOMContentLoaded', function() {
       return;
     }
     // 检查当前值是否在下拉选项中
-    let found = false;
+    var found = false;
     Array.from(sel.options).forEach(function(opt) {
       if (opt.value === currentVal) {
         found = true;
@@ -783,11 +793,11 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     if (found) {
       sel.value = currentVal;
-      hiddenInput.classList.add('d-none');
+      if (customWrapper) customWrapper.classList.add('d-none');
     } else {
       // 当前值不在预置列表中，选自定义并显示输入框
       sel.value = '__custom__';
-      hiddenInput.classList.remove('d-none');
+      if (customWrapper) customWrapper.classList.remove('d-none');
     }
   });
 });
