@@ -156,6 +156,86 @@ def _call_openai(prompt, api_key, base_url, model):
         return False, '', str(e)
 
 
+# ==================== 配置可用性测试 ====================
+
+def test_ai_config(api_key, base_url, model):
+    """
+    测试单个 AI 配置是否可用
+    发送一条简短测试消息，验证连通性、鉴权、接口返回是否正常
+    返回 dict: { success: bool, message: str, latency_ms: int, detail: str }
+    """
+    if not api_key:
+        return {'success': False, 'message': 'API Key 为空，请先填写', 'latency_ms': 0, 'detail': ''}
+
+    if not model:
+        model = 'gpt-4o-mini'  # 未填模型时使用默认值
+
+    if not _HAS_OPENAI:
+        return {'success': False, 'message': 'OpenAI SDK 未安装，无法测试', 'latency_ms': 0,
+                'detail': '请在服务器上执行 pip install openai 安装 SDK'}
+
+    start_time = time.time()
+    try:
+        client_kwargs = {'api_key': api_key}
+        if base_url:
+            client_kwargs['base_url'] = base_url
+        client = OpenAI(**client_kwargs)
+
+        # 发送极简测试消息，max_tokens 限制为 20 以快速返回
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是一个测试助手，请简短回复。"},
+                {"role": "user", "content": "请回复'测试成功'四个字"}
+            ],
+            max_tokens=20,
+            temperature=0,
+            timeout=15  # 测试用较短超时，快速反馈
+        )
+        content = resp.choices[0].message.content.strip()
+        latency_ms = int((time.time() - start_time) * 1000)
+
+        if content:
+            return {
+                'success': True,
+                'message': '配置可用，连接正常',
+                'latency_ms': latency_ms,
+                'detail': f'模型 {model} 回复: {content[:100]}'
+            }
+        return {
+            'success': False,
+            'message': 'API 返回空内容',
+            'latency_ms': latency_ms,
+            'detail': '接口连通正常但返回内容为空，请检查模型名称是否正确'
+        }
+
+    except Exception as e:
+        latency_ms = int((time.time() - start_time) * 1000)
+        err_str = str(e)
+
+        # 常见错误自动归类提示
+        err_lower = err_str.lower()
+        if 'authentication' in err_lower or 'api key' in err_lower or '401' in err_lower:
+            reason = 'API Key 无效或已过期'
+        elif 'connection' in err_lower or 'connect' in err_lower or 'timeout' in err_lower or 'refused' in err_lower:
+            reason = '无法连接到 API 地址，请检查 Base URL 是否正确'
+        elif 'not found' in err_lower or '404' in err_lower or 'model' in err_lower:
+            reason = '模型名称不存在，请检查 Model 参数'
+        elif 'rate limit' in err_lower or '429' in err_lower:
+            reason = 'API 调用频率超限，Key 额度可能用尽'
+        elif 'insufficient' in err_lower or 'quota' in err_lower or 'billing' in err_lower:
+            reason = 'API 账户余额不足或额度已用尽'
+        else:
+            reason = '未知错误'
+
+        return {
+            'success': False,
+            'message': reason,
+            'latency_ms': latency_ms,
+            'detail': err_str[:500]
+        }
+
+
 # ==================== 本地兜底引擎 ====================
 
 _LOCAL_INTENTS = [

@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '93ab47aa-4247-4ea0-aafa-4ab59e6d36bc'
-  PropagateID: '93ab47aa-4247-4ea0-aafa-4ab59e6d36bc'
-  ReservedCode1: '6b06e016-1258-41c5-9b03-43f734050f87'
-  ReservedCode2: '6b06e016-1258-41c5-9b03-43f734050f87'
+  ProduceID: 'f20271f7-2bae-49ef-84cb-c91b14c2a83c'
+  PropagateID: 'f20271f7-2bae-49ef-84cb-c91b14c2a83c'
+  ReservedCode1: 'cf38eda7-1e56-4c4d-881f-221a83a7aeea'
+  ReservedCode2: 'cf38eda7-1e56-4c4d-881f-221a83a7aeea'
 ---
 
 # 礼金记账与金融数据集成系统技术调研与架构决策报告 (Project Survey)
@@ -858,4 +858,71 @@ V10.10.6 上线后用户在验证过程中发现 4 个问题：
 - `templates/admin_users.html`（两版同步修改：下拉 Bug 修复）
 - `app.py`（两版同步修改：`change_password` 路由增加 `logout_user()`）
 - `README.md`（两版）：V10.10.7 更新条目
+- `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
+
+## 16. V10.10.8 AI助手一键测试功能与run.sh双版本共存端口检测复盘 (2026年9月21日更新)
+
+### 1. 问题背景
+
+V10.10.7 完成后，用户提出两项新需求：
+
+1. **AI 助手配置缺乏测试手段**：管理员在 AI 助手配置页面配置 API Key、Base URL、Model 后只能保存，无法验证配置是否可用。如果配置有误（如 API Key 过期、Base URL 写错、模型名不存在），只有去 AI 聊天页面发消息才能发现错误，体验差且排错困难。
+2. **传统版与 Docker 版无法共存**：两版 run.sh 中存在 SNI 改造前的遗留互斥逻辑——启动时自动 `mv` 对方的 Nginx 配置文件为 `.disabled`，导致先启动的服务配置被后启动的服务禁用。SNI 模式下两版应各自独立配置、共存运行，只需后端端口不冲突即可。
+
+### 2. 根因分析
+
+#### AI 配置无法测试
+- `ai_service.py` 中只有 `_call_openai()` 内部函数供 `ai_chat()` 使用，没有独立的配置测试函数
+- `routes_ai.py` 中没有配置测试路由
+- `admin_ai_config.html` 前端只有保存按钮，没有测试按钮
+
+#### 两版无法共存
+- 传统版 `run.sh` 的 `setup_nginx_config()` 中硬编码了：`if [ -f "$NGINX_CONF_DIR/gift_app_docker.conf" ]; then mv ... .disabled`
+- Docker 版 `run.sh` 的 `setup_nginx_config()` 中硬编码了：`if [ -f "$NGINX_CONF_DIR/gift_app.conf" ]; then mv ... .disabled`
+- 这些是 SNI 改造前的遗留代码，当时两版共用同一 Nginx 端口且无 SNI 分流，必须互斥运行
+- SNI 改造后，两版各自有独立的 `PROJECT_NAME.conf` 和 `server_name`，不再需要互斥
+- 两版启动时都没有检测后端端口是否被占用，如果端口相同会直接启动失败
+
+### 3. 修复方案
+
+#### AI 配置一键测试
+- **后端 `ai_service.py`** 新增 `test_ai_config(api_key, base_url, model)` 函数：
+  - 创建 OpenAI client，发送极简测试消息 `"请回复'测试成功'四个字"`
+  - `max_tokens=20`、`temperature=0`、`timeout=15`，快速返回结果
+  - 成功返回 `{success: True, message: "配置可用", latency_ms, detail: "模型 xxx 回复: ..."}`
+  - 失败自动归类常见错误：API Key 无效、连接失败、模型不存在、额度不足等
+- **后端 `routes_ai.py`** 新增 `POST /api/ai/config/test` 路由：
+  - 支持 `config_index` 参数：从已保存配置中取对应条目测试
+  - 支持直接传 `api_key/base_url/model`：测试未保存的配置
+  - 仅管理员可调用
+- **前端 `admin_ai_config.html`**：
+  - 每个配置卡片按钮组新增"测试"按钮
+  - 点击后按钮变为 spinner + "测试中..."，同步 DOM 输入值到 `aiConfigs`
+  - 结果以 Bootstrap alert 展示在卡片底部（绿色成功/红色失败），支持手动关闭
+
+#### run.sh 双版本共存
+- **移除互斥逻辑**：两版 `setup_nginx_config()` 中删除硬编码的 `mv 对方conf → .disabled` 代码块
+- **新增 `check_port_conflict()` 函数**：
+  - 传统版检测 `$PORT`，Docker 版检测 `$HOST_PORT`
+  - 端口空闲时直接返回 0；被自身进程占用时跳过
+  - 被其他进程占用时：非交互环境直接中止+提示换端口；交互环境三选一（改端口/停用另一个 Nginx 配置/中止）
+  - 选"停用 Nginx 配置"时列出 `$NGINX_CONF_DIR/*.conf` 供用户选择，停用后 reload nginx 并重新检测端口
+- **`default_server` 冲突自动降级**：`setup_nginx_config()` 中新增检测，如果 `SNI_DEFAULT_SERVER=1` 但已有其他 `.conf` 文件设为 `default_server`，自动降为 0
+
+### 4. 验证结果
+- Python AST 编译通过（两版 `ai_service.py`、`routes_ai.py`）
+- 两版 3 个共享文件 MD5 一致性校验全部通过
+- Flask 服务重启成功（PID 39436，端口 11443）
+- 浏览器端到端验证：
+  - 小茉莉配置（agnes-3.0-flash）：测试成功，延迟 9443ms，AI 回复"测试成功"
+  - 小海棠配置（agnes-2.5-flash）：测试失败，"API 返回空内容"，正确展示失败原因
+  - 测试按钮 loading/恢复正常，结果 alert 支持手动关闭
+
+### 5. 涉及文件
+- `ai_service.py`（两版同步修改：新增 `test_ai_config()` 函数）
+- `routes_ai.py`（两版同步修改：新增 `POST /api/ai/config/test` 路由 + import）
+- `templates/admin_ai_config.html`（两版同步修改：新增测试按钮 + JS 函数 + 结果展示 + CSS）
+- `run.sh`（传统版：移除互斥逻辑 + 新增 `check_port_conflict()` + `start_service` 调用 + `default_server` 降级）
+- `run.sh`（Docker 版：同上，检测 `$HOST_PORT` 而非 `$PORT`，无 `check_status` 依赖）
+- `README.md`（两版）：V10.10.8 更新条目
 - `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节

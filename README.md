@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '65eb1ab8-654f-4104-af1b-eb21ba0ee7fa'
-  PropagateID: '65eb1ab8-654f-4104-af1b-eb21ba0ee7fa'
-  ReservedCode1: '40491edc-1fa1-4945-86b6-e78ae472eac0'
-  ReservedCode2: '40491edc-1fa1-4945-86b6-e78ae472eac0'
+  ProduceID: 'ecb5cc00-d521-48a6-ab0a-c37f25afb907'
+  PropagateID: 'ecb5cc00-d521-48a6-ab0a-c37f25afb907'
+  ReservedCode1: 'b1365ef1-c03b-4867-bac8-6f13b8c7eb5e'
+  ReservedCode2: 'b1365ef1-c03b-4867-bac8-6f13b8c7eb5e'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -699,6 +699,39 @@ PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.s
 - `templates/profile_security.html`（两版同步修改：折叠面板 + 下拉 Bug 修复）
 - `templates/admin_users.html`（两版同步修改：下拉 Bug 修复）
 - `app.py`（两版同步修改：`change_password` 路由增加 `logout_user()`）
+
+### V10.10.8 AI助手一键测试功能与run.sh双版本共存端口检测（2026-09-21）
+
+#### 问题背景
+1. 管理员在 AI 助手配置页面配置 API Key、Base URL、Model 后只能保存，无法验证配置是否可用，需要实际去 AI 助手聊天页面发消息才能发现配置错误。
+2. 传统版与 Docker 版 run.sh 中存在 SNI 改造前的遗留互斥逻辑（启动时自动禁用对方 Nginx 配置），导致两版无法在同一台服务器上同时运行。SNI 模式下两版应各自独立配置、共存运行，只需后端端口不冲突即可。
+
+#### 变更内容
+- **新增功能：AI 配置一键测试（`ai_service.py` + `routes_ai.py` + `admin_ai_config.html`，两版同步修改）**
+  - 后端 `ai_service.py` 新增 `test_ai_config()` 函数：发送极简测试消息（"请回复'测试成功'四个字"），验证连通性、鉴权、接口返回，超时 15 秒快速反馈，自动归类常见错误（API Key 无效、连接失败、模型不存在、额度不足等）
+  - 后端 `routes_ai.py` 新增 `POST /api/ai/config/test` 路由：支持两种模式——按 `config_index` 测试已保存配置、或直接传 `api_key/base_url/model` 测试未保存配置
+  - 前端 `admin_ai_config.html` 每个配置卡片新增"测试"按钮：点击后按钮变为 spinner 加载状态，结果以 Bootstrap alert 展示在配置卡片底部（绿色成功/红色失败+具体原因），支持手动关闭
+- **优化：run.sh 双版本共存端口检测（两版 `run.sh` 分别修改）**
+  - 移除 `setup_nginx_config()` 中的跨版本互斥逻辑（传统版不再禁用 Docker 版 conf，Docker 版不再禁用传统版 conf）
+  - 新增 `check_port_conflict()` 函数：启动前检测后端端口是否被占用，被占用时交互式提示三选一（1.修改端口重新启动 2.停用另一个服务的 Nginx 配置 3.中止启动），非交互环境直接中止并提示换端口
+  - 传统版检测 `$PORT`（默认 11443），Docker 版检测 `$HOST_PORT`（默认 15000）
+  - `setup_nginx_config()` 新增 `SNI_DEFAULT_SERVER` 冲突自动降级：检测到已有其他项目 conf 设为 default_server 时，本项目自动改为非兜底模式
+
+#### 验证结论
+- Python AST 编译通过（两版 `ai_service.py`、`routes_ai.py`）
+- 两版 3 个共享文件 MD5 一致性校验全部通过（`ai_service.py`、`routes_ai.py`、`admin_ai_config.html`）
+- Flask 服务重启成功（PID 39436，端口 11443）
+- 浏览器端到端验证：
+  - 小茉莉配置（agnes-3.0-flash）：点击测试 → 绿色成功提示，延迟 9443ms，AI 回复"测试成功"
+  - 小海棠配置（agnes-2.5-flash）：点击测试 → 红色失败提示，"API 返回空内容"，接口连通正常但返回为空
+  - 测试按钮 loading 状态和恢复正常，结果 alert 支持手动关闭
+
+#### 涉及文件
+- `ai_service.py`（两版同步修改：新增 `test_ai_config()` 函数）
+- `routes_ai.py`（两版同步修改：新增 `POST /api/ai/config/test` 路由）
+- `templates/admin_ai_config.html`（两版同步修改：新增测试按钮 + JS 函数 + 结果展示）
+- `run.sh`（传统版：移除互斥逻辑 + 新增 `check_port_conflict()` + `default_server` 降级）
+- `run.sh`（Docker 版：同上，检测 `$HOST_PORT` 而非 `$PORT`）
 
 ## 📂 项目文件结构
 
