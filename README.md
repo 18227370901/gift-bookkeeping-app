@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'dcdabf23-42fd-4b82-931d-2b782818c6b4'
-  PropagateID: 'dcdabf23-42fd-4b82-931d-2b782818c6b4'
-  ReservedCode1: '21dfd866-600b-4862-b85e-e98d1fa18dd4'
-  ReservedCode2: '21dfd866-600b-4862-b85e-e98d1fa18dd4'
+  ProduceID: '9112e1f9-447c-4e96-ad47-e30a5769942b'
+  PropagateID: '9112e1f9-447c-4e96-ad47-e30a5769942b'
+  ReservedCode1: '50604316-760f-49cb-9a07-db9389c483ac'
+  ReservedCode2: '50604316-760f-49cb-9a07-db9389c483ac'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -635,6 +635,34 @@ PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.s
 #### 涉及文件
 - `routes_ext.py`（传统版与 Docker 版同步修改，第 4441 行逐字一致）
 - `run.sh`（传统版与 Docker 版同步修改，`echo_e` 函数两版逐字一致）
+
+### V10.10.5 管理员重置密保双密保输入框修复（2026-09-21）
+
+#### 问题背景
+管理员在用户管理页面点击「重置密保」时，模态框只提供单个密保问题输入框，无法看到和重置第 2 个密保问题；管理员安全验证区也只展示原密保问题 1，管理员不知道问题 2 内容无法用问题 2 验证。后端 `admin_reset_user_security` 路由已支持双密保字段获取，但前端从未提交 `security_question_2`/`security_answer_2`，导致密保 2 原值无法更新。
+
+#### 变更内容
+- **前端 `admin_users.html`（两版同步修改）**：
+  - 重置密保模态框：新密保输入区从单组改为双组（问题 1/答案 1 + 问题 2/答案 2），问题 2 非必填
+  - 重置密保模态框：管理员安全验证区从单原密保展示改为双原密保展示（问题 1 + 问题 2），新增 `old_security_answer_2` 验证输入框
+  - 重置密码模态框：管理员安全验证区同步修改，展示双原密保问题 + 双验证输入框
+  - 默认值回填修正：问题 1 使用 `security_question_1`（兼容旧 `security_question`），问题 2 使用 `security_question_2`
+- **后端 `app.py`（两版同步修改）**：
+  - 新增校验：密保问题 2 与答案 2 必须成对出现（两个都填或两个都空）
+  - 新增校验：两个新密保问题不能相同
+  - 成功提示优化：显示新问题 1 文本，有问题 2 时一并显示，无问题 2 时提示「密保 2 保留原设置」
+  - 管理员验证逻辑：答对任一密保即可通过验证
+
+#### 验证结论
+- Python AST 编译通过（两版 app.py）
+- 两版文件 MD5 一致性校验通过
+- Flask 服务重启成功（PID 39836，端口 11443）
+- 浏览器端到端验证：普通用户双密保重置（仅密保 1 / 同时两组密保）均成功，管理员模态框双原密保问题展示正确
+- 测试数据已恢复
+
+#### 涉及文件
+- `templates/admin_users.html`（传统版与 Docker 版同步修改）
+- `app.py`（传统版与 Docker 版同步修改）
 
 ## 📂 项目文件结构
 

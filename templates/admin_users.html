@@ -395,8 +395,12 @@
                         </div>
                         <div class="mb-3">
                           <label class="form-label small fw-bold text-dark">原密保答案验证 (与原密码二选一)：</label>
-                          <div class="small text-muted mb-1">问题：{{ u.security_question_1 or u.security_question or '默认安全问题' }}</div>
-                          <input type="text" name="old_security_answer_1" class="form-control form-control-sm" placeholder="请输入原密保问题的答案">
+                          <div class="small text-muted mb-1">问题 1：{{ u.security_question_1 or u.security_question or '默认安全问题' }}</div>
+                          <input type="text" name="old_security_answer_1" class="form-control form-control-sm" placeholder="请输入原密保问题 1 的答案">
+                          {% if u.security_question_2 %}
+                          <div class="small text-muted mb-1 mt-2">问题 2：{{ u.security_question_2 }}</div>
+                          <input type="text" name="old_security_answer_2" class="form-control form-control-sm" placeholder="请输入原密保问题 2 的答案">
+                          {% endif %}
                         </div>
                         <hr class="my-2 text-muted">
                         {% endif %}
@@ -635,18 +639,30 @@
                         </div>
                         <div class="mb-3">
                           <label class="form-label small fw-bold text-dark">原密保答案验证 (与原密码二选一)：</label>
-                          <div class="small text-muted mb-1">问题：{{ u.security_question_1 or u.security_question or '默认安全问题' }}</div>
-                          <input type="text" name="old_security_answer_1" class="form-control form-control-sm" placeholder="请输入原密保问题的答案">
+                          <div class="small text-muted mb-1">问题 1：{{ u.security_question_1 or u.security_question or '默认安全问题' }}</div>
+                          <input type="text" name="old_security_answer_1" class="form-control form-control-sm" placeholder="请输入原密保问题 1 的答案">
+                          {% if u.security_question_2 %}
+                          <div class="small text-muted mb-1 mt-2">问题 2：{{ u.security_question_2 }}</div>
+                          <input type="text" name="old_security_answer_2" class="form-control form-control-sm" placeholder="请输入原密保问题 2 的答案">
+                          {% endif %}
                         </div>
                         <hr class="my-2 text-muted">
                         {% endif %}
                         <div class="mb-3">
-                          <label class="form-label small text-muted">新密保问题：</label>
-                          <input type="text" name="security_question" class="form-control" placeholder="例如：我的高中母校名称？" value="{{ u.security_question }}" required>
+                          <label class="form-label small text-muted">新密保问题 1：</label>
+                          <input type="text" name="security_question_1" class="form-control" placeholder="例如：我的高中母校名称？" value="{{ u.security_question_1 or u.security_question }}" required>
                         </div>
                         <div class="mb-3">
-                          <label class="form-label small text-muted">新密保答案：</label>
-                          <input type="text" name="security_answer" class="form-control" placeholder="请输入新密保问题的答案" required>
+                          <label class="form-label small text-muted">新密保答案 1：</label>
+                          <input type="text" name="security_answer_1" class="form-control" placeholder="请输入新密保问题 1 的答案" required>
+                        </div>
+                        <div class="mb-3">
+                          <label class="form-label small text-muted">新密保问题 2：</label>
+                          <input type="text" name="security_question_2" class="form-control" placeholder="例如：我的出生地是哪里？" value="{{ u.security_question_2 or '' }}">
+                        </div>
+                        <div class="mb-3">
+                          <label class="form-label small text-muted">新密保答案 2：</label>
+                          <input type="text" name="security_answer_2" class="form-control" placeholder="请输入新密保问题 2 的答案（如不想设置第 2 个密保可留空）">
                         </div>
                       </div>
                       <div class="modal-footer border-0 pt-0">

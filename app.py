@@ -2501,6 +2501,15 @@ def admin_reset_user_security(user_id):
     q2 = request.form.get('security_question_2', '').strip()
     a2 = request.form.get('security_answer_2', '').strip()
 
+    # 校验：密保问题 2 与答案 2 必须成对出现（两个都填或两个都空）
+    if (q2 and not a2) or (a2 and not q2):
+        flash('新密保问题 2 与答案 2 必须成对填写！', 'warning')
+        return redirect(url_for('admin_users'))
+    # 校验：两个新密保问题不能相同
+    if q1 and q2 and q1 == q2:
+        flash('两个新密保问题不能相同，请输入不同的问题！', 'warning')
+        return redirect(url_for('admin_users'))
+
     if user.is_admin:
         # 管理员账号重置密保必须先验证旧密码或者旧密保问题
         old_pwd = request.form.get('old_password', '').strip()
@@ -2535,7 +2544,7 @@ def admin_reset_user_security(user_id):
             )
         except Exception:
             pass
-        flash(f'用户 [{user.username}] 的密保问题与答案已重置成功！', 'success')
+        flash(f'用户 [{user.username}] 的密保问题已重置成功！新问题 1：{q1}' + (f'；新问题 2：{q2}' if q2 else '；密保 2 保留原设置'), 'success')
     else:
         flash('密保问题和密保答案均不能为空！', 'warning')
 
