@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '9112e1f9-447c-4e96-ad47-e30a5769942b'
-  PropagateID: '9112e1f9-447c-4e96-ad47-e30a5769942b'
-  ReservedCode1: '50604316-760f-49cb-9a07-db9389c483ac'
-  ReservedCode2: '50604316-760f-49cb-9a07-db9389c483ac'
+  ProduceID: '6f1dc204-5080-4741-b41c-e0e195e4a92f'
+  PropagateID: '6f1dc204-5080-4741-b41c-e0e195e4a92f'
+  ReservedCode1: 'cc335acd-9f3b-4d7a-99e5-1e9e26f51d47'
+  ReservedCode2: 'cc335acd-9f3b-4d7a-99e5-1e9e26f51d47'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -663,6 +663,54 @@ PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.s
 #### 涉及文件
 - `templates/admin_users.html`（传统版与 Docker 版同步修改）
 - `app.py`（传统版与 Docker 版同步修改）
+
+### V10.10.6 密保问题下拉菜单与个人安全设置页面（2026-09-21）
+
+#### 问题背景
+1. 管理员重置密保时，密保问题为自由文本输入框，缺乏规范约束，用户需手动输入问题文本，体验不佳且容易输入不一致。
+2. 管理员查看凭证时，安全验证区只展示 1 个密保问题，用户不知道密保问题 2 的内容无法用密保 2 答案验证。
+3. 普通用户登录后无法自助修改自身密码或密保问题，只能通过管理员重置或 URL 直接访问 `/change-password`，且无修改密保的入口。
+4. 注册页密保问题为固定 6 选 1 下拉框（两组各 6 个不重复选项），不支持自定义问题。
+
+#### 变更内容
+- **优化 1：重置密保下拉菜单（`admin_users.html`，两版同步修改）**
+  - 重置密保模态框的两组密保问题输入从自由文本框改为下拉菜单 + 自定义输入复合控件
+  - 下拉菜单统一包含 12 个预置密保问题 + 1 个"自定义问题..."选项
+  - 选择预置问题时自动写入隐藏 input 并隐藏自定义输入框；选择自定义时显示输入框供用户输入
+  - 页面加载时根据当前密保问题值自动初始化下拉框选中状态（预置问题选中对应选项，自定义问题选中"自定义"并显示输入框）
+- **优化 2：查看凭证双密保验证（`admin_users.html`，两版同步修改）**
+  - 查看凭证安全验证区从只展示 1 个密保问题改为展示 2 个密保问题 + 2 个答案输入框
+  - JS `fetchAndRenderCredentials` 增加 `ans2Verify` 参数，`submitAdminVerifyCred` 读取两个答案输入框
+  - 后端 `admin_user_credentials` 路由已支持 `verify_security_answer_2` 参数（无需修改）
+- **新增 3：普通用户个人安全设置页面（两版同步新增）**
+  - 新建 `templates/profile_security.html`：卡片 A 修改密码 + 卡片 B 修改密保，修改密保需先验证身份（旧密码 / 旧密保 1 / 旧密保 2，答对任一即可）
+  - 新增 `app.py` 路由 `/profile/security`（GET 渲染页面 + POST 处理密保修改：身份验证 → 成对校验 → 重复校验 → `set_security_answers` → 审计日志 → Webhook 推送）
+  - `templates/base.html` 导航栏用户下拉菜单新增"个人安全设置"入口
+  - 密保问题使用与重置密保相同的下拉菜单 + 自定义输入复合控件（12 个预置 + 自定义）
+  - 普通用户修改密保后管理员查看凭证页面同步显示最新数据
+- **注册页自定义密保选项（`register.html`，两版同步修改）**
+  - 两组密保问题下拉框统一扩展为 12 个预置问题 + "自定义问题..."选项
+  - 选择自定义时显示输入框供用户输入自定义问题
+  - JS 校验逻辑适配新的 select + hidden input 复合控件
+
+#### 验证结论
+- Python AST 编译通过（两版 app.py）
+- 两版 5 个文件 MD5 一致性校验全部通过（app.py、admin_users.html、base.html、register.html、profile_security.html）
+- Flask 服务重启成功（PID 54768，端口 11443）
+- 浏览器端到端验证：
+  - 导航栏"个人安全设置"入口正确显示，点击跳转 `/profile/security`
+  - 个人安全设置页面修改密码卡片和修改密保卡片正常渲染
+  - 修改密保：旧密码身份验证通过，下拉菜单选择预置问题 + 输入答案，提交后 flash 成功，当前密保信息更新
+  - 重置密保模态框：下拉菜单 + 自定义复合控件正确渲染，自动回显当前密保问题
+  - 查看凭证模态框：双密保问题 + 双答案输入框正确展示，密码验证通过后凭证显示最新数据
+  - 测试数据已恢复到测试前状态
+
+#### 涉及文件
+- `templates/admin_users.html`（两版同步修改）
+- `templates/profile_security.html`（两版同步新增）
+- `templates/base.html`（两版同步修改）
+- `templates/register.html`（两版同步修改）
+- `app.py`（两版同步修改）
 
 ## 📂 项目文件结构
 

@@ -1908,6 +1908,69 @@ def change_password():
 
     return render_template('change_password.html')
 
+@app.route('/profile/security', methods=['GET', 'POST'])
+@login_required
+def profile_security():
+    """普通用户个人安全设置页面：查看/修改自身密码与密保问题"""
+    user = current_user._get_current_object()
+
+    if request.method == 'POST':
+        # ========== 修改密保问题 ==========
+        old_pwd = request.form.get('old_password', '').strip()
+        old_ans1 = request.form.get('old_security_answer_1', '').strip()
+        old_ans2 = request.form.get('old_security_answer_2', '').strip()
+
+        # 身份验证：旧密码 / 旧密保1 / 旧密保2，答对任一即可
+        verified = False
+        if old_pwd and user.check_password(old_pwd):
+            verified = True
+        elif old_ans1 and (user.check_any_security_answer(old_ans1) or user.check_security_answers(old_ans1, old_ans2)):
+            verified = True
+
+        if not verified:
+            flash('身份验证失败！请输入正确的旧密码或原密保答案后再修改密保问题。', 'danger')
+            return redirect(url_for('profile_security'))
+
+        q1 = request.form.get('security_question_1', '').strip()
+        a1 = request.form.get('security_answer_1', '').strip()
+        q2 = request.form.get('security_question_2', '').strip()
+        a2 = request.form.get('security_answer_2', '').strip()
+
+        # 校验：密保问题 1 和答案 1 必填
+        if not q1 or not a1:
+            flash('密保问题 1 和答案 1 不能为空！', 'warning')
+            return redirect(url_for('profile_security'))
+
+        # 校验：密保问题 2 与答案 2 必须成对出现
+        if (q2 and not a2) or (a2 and not q2):
+            flash('密保问题 2 与答案 2 必须成对填写！', 'warning')
+            return redirect(url_for('profile_security'))
+
+        # 校验：两个新密保问题不能相同
+        if q1 and q2 and q1 == q2:
+            flash('两个新密保问题不能相同，请输入不同的问题！', 'warning')
+            return redirect(url_for('profile_security'))
+
+        user.set_security_answers(q1, a1, q2, a2)
+        db.session.commit()
+
+        log_action('修改密保问题', f'用户 [{user.username}] 自助修改了密保问题与答案')
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'修改密保 [{user.username}]',
+                f'操作人：{user.username} | 页面：个人安全设置',
+                page_key='security', user_name=user.username,
+                operator_id=user.id
+            )
+        except Exception:
+            pass
+        flash('密保问题修改成功！' + ('新问题 1：' + q1 + '；新问题 2：' + q2 if q2 else '新问题：' + q1), 'success')
+        return redirect(url_for('profile_security'))
+
+    # GET：渲染页面
+    return render_template('profile_security.html')
+
 @app.route('/admin/users')
 @login_required
 def admin_users():

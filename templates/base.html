@@ -132,6 +132,7 @@
                             {% if current_user.is_admin %}<span class="badge bg-danger ms-1">管理员</span>{% endif %}
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end shadow">
+                            <li><a class="dropdown-item" href="{{ url_for('profile_security') }}"><i class="fa-solid fa-shield-halved me-2 text-warning"></i>个人安全设置</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('export_csv') }}"><i class="fa-solid fa-file-csv me-2 text-success"></i>导出数据(CSV)</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}"><i class="fa-solid fa-right-from-bracket me-2"></i>退出登录</a></li>

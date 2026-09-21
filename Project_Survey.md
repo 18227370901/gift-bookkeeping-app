@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '26412492-8e8c-4871-aafd-54dc43cb2405'
-  PropagateID: '26412492-8e8c-4871-aafd-54dc43cb2405'
-  ReservedCode1: 'adcbdde3-5f4e-4aab-bdc7-eab6b8ca3c36'
-  ReservedCode2: 'adcbdde3-5f4e-4aab-bdc7-eab6b8ca3c36'
+  ProduceID: '4bd17e70-15b2-44dc-b32d-7fee12f93917'
+  PropagateID: '4bd17e70-15b2-44dc-b32d-7fee12f93917'
+  ReservedCode1: 'c23eb7ba-e40e-40f6-9bca-a51f902ba203'
+  ReservedCode2: 'c23eb7ba-e40e-40f6-9bca-a51f902ba203'
 ---
 
 # 礼金记账与金融数据集成系统技术调研与架构决策报告 (Project Survey)
@@ -748,4 +748,60 @@ AIGC:
 ### 5. 涉及文件
 - `run.sh`（传统版 + Docker 版同步修改，`should_overwrite` 逐字一致）
 - `README.md`（两版）：V10.10.3 更新条目
+- `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
+
+## 14. V10.10.6 密保问题下拉菜单与个人安全设置页面复盘 (2026年9月21日更新)
+
+### 1. 需求背景
+- **需求 1**：管理员重置密保时，密保问题由可编辑文本框改为下拉菜单（显示预置的 12 个问题 + 一个"自定义"选项，选择后用户可自定义密保问题）。
+- **需求 2**：管理员查看凭证时，安全验证区从只显示 1 个密保改为显示 2 个密保，输入密码或任意一个密保答案均可查看凭证。
+- **需求 3**：新增普通用户登录后可查看/修改自身密码或密保（重置需先认证，输入旧密码或两个旧密保任意一个即可），该页面数据须与管理员用户管理页面同步。
+- **需求 4**：注册页密保问题也同步改为下拉菜单 + 自定义选项。
+
+### 2. 实现方案
+
+#### 优化 1：重置密保下拉菜单（`admin_users.html`）
+- 将重置密保模态框中两个密保问题的 `<input type="text">` 改为 `<select>` + 隐藏 `<input>` 的复合控件。
+- 下拉菜单统一包含 12 个预置密保问题 + 1 个"自定义问题..."选项，两组共用同一列表。
+- JS 函数 `onSecurityQuestionSelectChange(selectEl)` 处理切换逻辑：选择预置问题直接写入隐藏 input 并隐藏自定义框；选择"自定义问题..."时显示自定义输入框。
+- `DOMContentLoaded` 时根据当前密保问题值初始化下拉选中状态：匹配预置问题则选中对应选项，否则选中"自定义"并显示输入框。
+
+#### 优化 2：查看凭证双密保验证（`admin_users.html`）
+- 安全验证区 HTML 从 1 个密保问题标签 + 1 个答案输入框改为 2 个密保问题标签 + 2 个答案输入框（`credVerifyAnsInput1` / `credVerifyAnsInput2`）。
+- 问题 2 条件显示（`{% if u.security_question_2 %}`）。
+- JS `fetchAndRenderCredentials` 增加第 4 参数 `ans2Verify`，`submitAdminVerifyCred` 读取两个答案输入框并传递给后端。
+- 后端 `admin_user_credentials` 路由已支持 `verify_security_answer_2` 参数（L2660），无需修改后端代码。
+
+#### 新增 3：普通用户个人安全设置页面
+- **新建 `templates/profile_security.html`**：卡片 A 修改密码（表单 POST 到 `/change-password` 路由）+ 卡片 B 修改密保（表单 POST 到 `/profile/security` 路由）。
+- 修改密保卡片包含：当前密保信息展示区、安全验证区（旧密码 + 原密保问题 1 答案 + 原密保问题 2 答案，三选一）、新密保问题输入区（双下拉菜单 + 自定义输入复合控件）。
+- **新增 `app.py` 路由 `/profile/security`**：
+  - GET：渲染 `profile_security.html`
+  - POST：身份验证（`check_password` 或 `check_any_security_answer` 或 `check_security_answers`，答对任一即可）→ 校验密保问题 1 和答案 1 必填 → 校验密保问题 2 与答案 2 成对 → 校验两新密保问题不同 → `set_security_answers` → `db.session.commit` → `log_action` 审计日志 → `trigger_webhook_event` Webhook 推送
+- **`base.html` 导航栏**：用户下拉菜单在"导出数据"上方新增"个人安全设置"入口（`url_for('profile_security')`）。
+
+#### 注册页自定义密保选项（`register.html`）
+- 两个密保问题下拉框从各 6 个固定选项扩展为统一的 12 个预置问题 + "自定义问题..."选项。
+- 选择自定义时显示隐藏的 `<input>` 供用户输入自定义问题。
+- JS 提交校验逻辑适配：从 `getElementById` 读取 `<select>` 值改为 `querySelector` 读取隐藏 `<input>` 值。
+
+### 3. 验证结论
+- Python AST 编译通过（两版 app.py，3.12 环境）
+- 两版 5 个共享文件 MD5 一致性校验全部通过（app.py、admin_users.html、base.html、register.html、profile_security.html）
+- Flask 服务重启成功（PID 54768，端口 11443 监听正常）
+- 浏览器端到端验证：
+  - **导航栏入口**：admin 用户下拉菜单正确显示"个人安全设置"链接，URL 指向 `/profile/security`
+  - **个人安全设置页面**：修改密码卡片和修改密保卡片正常渲染，当前密保信息正确展示，安全验证区三个输入框，新密保下拉菜单 12 个预置 + 自定义选项，页面加载时自动识别当前密保问题类型
+  - **修改密保流程**：输入旧密码验证通过 → 选择预置问题 + 输入答案 → 提交成功，flash 显示成功消息，当前密保信息自动更新
+  - **重置密保模态框**：两组下拉菜单 + 自定义复合控件正确渲染，自动回显当前密保问题
+  - **查看凭证模态框**：双密保问题 + 双答案输入框正确展示，密码验证通过后凭证显示最新数据（证明普通用户修改密保后管理员页面同步）
+  - 测试数据已恢复到测试前状态
+
+### 4. 涉及文件
+- `templates/admin_users.html`（两版同步修改：重置密保下拉菜单 + 查看凭证双密保验证）
+- `templates/profile_security.html`（两版同步新增：普通用户个人安全设置页面）
+- `templates/base.html`（两版同步修改：导航栏添加个人安全设置入口）
+- `templates/register.html`（两版同步修改：注册页密保问题下拉菜单 + 自定义选项）
+- `app.py`（两版同步修改：新增 `profile_security` 路由）
+- `README.md`（两版）：V10.10.6 更新条目
 - `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节

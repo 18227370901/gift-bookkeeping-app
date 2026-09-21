@@ -650,19 +650,50 @@
                         {% endif %}
                         <div class="mb-3">
                           <label class="form-label small text-muted">新密保问题 1：</label>
-                          <input type="text" name="security_question_1" class="form-control" placeholder="例如：我的高中母校名称？" value="{{ u.security_question_1 or u.security_question }}" required>
+                          <select class="form-select form-select-sm sq-select" name="security_question_1_select" data-target="security_question_1" onchange="onSecurityQuestionSelectChange(this)">
+                            <option value="__custom__">自定义问题...</option>
+                            <option value="您母亲的姓名是？">您母亲的姓名是？</option>
+                            <option value="您第一所小学的名字是？">您第一所小学的名字是？</option>
+                            <option value="您拥有的第一辆汽车品牌是？">您拥有的第一辆汽车品牌是？</option>
+                            <option value="您出生的城市是？">您出生的城市是？</option>
+                            <option value="您最喜欢的食物是什么？">您最喜欢的食物是什么？</option>
+                            <option value="您父亲的生日是？">您父亲的生日是？</option>
+                            <option value="您父亲的姓名是？">您父亲的姓名是？</option>
+                            <option value="您童年最好的朋友名字是？">您童年最好的朋友名字是？</option>
+                            <option value="您的第一只宠物名字是？">您的第一只宠物名字是？</option>
+                            <option value="您高中班主任的姓名是？">您高中班主任的姓名是？</option>
+                            <option value="您最喜欢的一部电影是？">您最喜欢的一部电影是？</option>
+                            <option value="您毕业的学校名称是？">您毕业的学校名称是？</option>
+                          </select>
+                          <input type="text" name="security_question_1" class="form-control form-control-sm mt-1 d-none sq-custom-input" placeholder="请输入自定义密保问题 1" value="{{ u.security_question_1 or u.security_question }}" required>
                         </div>
                         <div class="mb-3">
                           <label class="form-label small text-muted">新密保答案 1：</label>
-                          <input type="text" name="security_answer_1" class="form-control" placeholder="请输入新密保问题 1 的答案" required>
+                          <input type="text" name="security_answer_1" class="form-control form-control-sm" placeholder="请输入新密保问题 1 的答案" required>
                         </div>
                         <div class="mb-3">
                           <label class="form-label small text-muted">新密保问题 2：</label>
-                          <input type="text" name="security_question_2" class="form-control" placeholder="例如：我的出生地是哪里？" value="{{ u.security_question_2 or '' }}">
+                          <select class="form-select form-select-sm sq-select" name="security_question_2_select" data-target="security_question_2" onchange="onSecurityQuestionSelectChange(this)">
+                            <option value="">不设置第 2 个密保</option>
+                            <option value="__custom__">自定义问题...</option>
+                            <option value="您母亲的姓名是？">您母亲的姓名是？</option>
+                            <option value="您第一所小学的名字是？">您第一所小学的名字是？</option>
+                            <option value="您拥有的第一辆汽车品牌是？">您拥有的第一辆汽车品牌是？</option>
+                            <option value="您出生的城市是？">您出生的城市是？</option>
+                            <option value="您最喜欢的食物是什么？">您最喜欢的食物是什么？</option>
+                            <option value="您父亲的生日是？">您父亲的生日是？</option>
+                            <option value="您父亲的姓名是？">您父亲的姓名是？</option>
+                            <option value="您童年最好的朋友名字是？">您童年最好的朋友名字是？</option>
+                            <option value="您的第一只宠物名字是？">您的第一只宠物名字是？</option>
+                            <option value="您高中班主任的姓名是？">您高中班主任的姓名是？</option>
+                            <option value="您最喜欢的一部电影是？">您最喜欢的一部电影是？</option>
+                            <option value="您毕业的学校名称是？">您毕业的学校名称是？</option>
+                          </select>
+                          <input type="text" name="security_question_2" class="form-control form-control-sm mt-1 d-none sq-custom-input" placeholder="请输入自定义密保问题 2" value="{{ u.security_question_2 or '' }}">
                         </div>
                         <div class="mb-3">
                           <label class="form-label small text-muted">新密保答案 2：</label>
-                          <input type="text" name="security_answer_2" class="form-control" placeholder="请输入新密保问题 2 的答案（如不想设置第 2 个密保可留空）">
+                          <input type="text" name="security_answer_2" class="form-control form-control-sm" placeholder="请输入新密保问题 2 的答案（如不设置第 2 个密保可留空）">
                         </div>
                       </div>
                       <div class="modal-footer border-0 pt-0">
@@ -708,6 +739,59 @@
 </div>
 
 <script>
+// 密保问题下拉菜单切换：选择预置问题直接写入隐藏 input，选择自定义则显示输入框
+function onSecurityQuestionSelectChange(selectEl) {
+  const targetName = selectEl.getAttribute('data-target');
+  const hiddenInput = selectEl.parentElement.querySelector('input[name="' + targetName + '"]');
+  if (!hiddenInput) return;
+  const val = selectEl.value;
+  if (val === '__custom__') {
+    // 显示自定义输入框，清空隐藏字段让用户手动输入
+    hiddenInput.classList.remove('d-none');
+    hiddenInput.focus();
+  } else if (val === '') {
+    // 不设置第 2 个密保（仅问题2有此选项）
+    hiddenInput.classList.add('d-none');
+    hiddenInput.value = '';
+  } else {
+    // 选择了预置问题，隐藏自定义输入框，将值写入隐藏字段
+    hiddenInput.classList.add('d-none');
+    hiddenInput.value = val;
+  }
+}
+
+// 页面加载时初始化所有密保问题下拉框的默认选中状态
+document.addEventListener('DOMContentLoaded', function() {
+  document.querySelectorAll('.sq-select').forEach(function(sel) {
+    const targetName = sel.getAttribute('data-target');
+    const hiddenInput = sel.parentElement.querySelector('input[name="' + targetName + '"]');
+    if (!hiddenInput) return;
+    const currentVal = hiddenInput.value || '';
+    if (!currentVal) {
+      // 无现有值：问题1选第一个预置，问题2选"不设置"
+      if (targetName === 'security_question_1') {
+        // 默认不选，让用户选
+      }
+      return;
+    }
+    // 检查当前值是否在下拉选项中
+    let found = false;
+    Array.from(sel.options).forEach(function(opt) {
+      if (opt.value === currentVal) {
+        found = true;
+      }
+    });
+    if (found) {
+      sel.value = currentVal;
+      hiddenInput.classList.add('d-none');
+    } else {
+      // 当前值不在预置列表中，选自定义并显示输入框
+      sel.value = '__custom__';
+      hiddenInput.classList.remove('d-none');
+    }
+  });
+});
+
 function togglePassVisibility(inputId, btn) {
   const input = document.getElementById(inputId);
   if (!input) return;
@@ -855,7 +939,7 @@ let currentViewingUserId = null;
 let currentViewingUsername = '';
 let currentViewingIsAdmin = false;
 
-function fetchAndRenderCredentials(userId, username, pwdVerify, ansVerify) {
+function fetchAndRenderCredentials(userId, username, pwdVerify, ans1Verify, ans2Verify) {
   document.getElementById('credLoading').classList.remove('d-none');
   document.getElementById('credContent').classList.add('d-none');
   document.getElementById('credError').classList.add('d-none');
@@ -864,7 +948,8 @@ function fetchAndRenderCredentials(userId, username, pwdVerify, ansVerify) {
   let url = `/admin/user/${userId}/credentials`;
   const params = new URLSearchParams();
   if (pwdVerify) params.set('verify_password', pwdVerify);
-  if (ansVerify) params.set('verify_security_answer', ansVerify);
+  if (ans1Verify) params.set('verify_security_answer', ans1Verify);
+  if (ans2Verify) params.set('verify_security_answer_2', ans2Verify);
   if (params.toString()) url += '?' + params.toString();
 
   fetch(url, {
@@ -888,9 +973,18 @@ function fetchAndRenderCredentials(userId, username, pwdVerify, ansVerify) {
     } else if (res.code === 401 && res.need_verify) {
       // 展示管理员安全二次验证界面
       document.getElementById('credVerifySection').classList.remove('d-none');
-      const qLabel = document.getElementById('credVerifyQuestionLabel');
-      if (qLabel) qLabel.textContent = '问题：' + (res.q1 || '默认安全问题');
-      if (pwdVerify || ansVerify) {
+      // 显示双密保问题标签
+      const q1Label = document.getElementById('credVerifyQuestion1Label');
+      if (q1Label) q1Label.textContent = res.q1 || '默认安全问题';
+      const q2Label = document.getElementById('credVerifyQuestion2Label');
+      const ans2Wrapper = document.getElementById('credVerifyAns2Wrapper');
+      if (res.q2) {
+        if (q2Label) q2Label.textContent = res.q2;
+        if (ans2Wrapper) ans2Wrapper.style.display = '';
+      } else {
+        if (ans2Wrapper) ans2Wrapper.style.display = 'none';
+      }
+      if (pwdVerify || ans1Verify || ans2Verify) {
         const vErr = document.getElementById('credVerifyError');
         if (vErr) {
           vErr.textContent = '原密码或密保答案不正确，验证失败！请重新输入。';
@@ -918,10 +1012,12 @@ function viewUserCredentials(userId, username, isAdmin) {
   const modal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
   document.getElementById('credUsername').textContent = username;
   const pwdIn = document.getElementById('credVerifyPwdInput');
-  const ansIn = document.getElementById('credVerifyAnsInput');
+  const ans1In = document.getElementById('credVerifyAnsInput1');
+  const ans2In = document.getElementById('credVerifyAnsInput2');
   const vErr = document.getElementById('credVerifyError');
   if (pwdIn) pwdIn.value = '';
-  if (ansIn) ansIn.value = '';
+  if (ans1In) ans1In.value = '';
+  if (ans2In) ans2In.value = '';
   if (vErr) vErr.classList.add('d-none');
 
   modal.show();
@@ -930,16 +1026,17 @@ function viewUserCredentials(userId, username, isAdmin) {
 
 function submitAdminVerifyCred() {
   const pwd = (document.getElementById('credVerifyPwdInput').value || '').trim();
-  const ans = (document.getElementById('credVerifyAnsInput').value || '').trim();
-  if (!pwd && !ans) {
+  const ans1 = (document.getElementById('credVerifyAnsInput1').value || '').trim();
+  const ans2 = (document.getElementById('credVerifyAnsInput2').value || '').trim();
+  if (!pwd && !ans1 && !ans2) {
     const vErr = document.getElementById('credVerifyError');
     if (vErr) {
-      vErr.textContent = '请至少输入原密码或原密保答案其一！';
+      vErr.textContent = '请至少输入原密码或任意一个密保答案！';
       vErr.classList.remove('d-none');
     }
     return;
   }
-  fetchAndRenderCredentials(currentViewingUserId, currentViewingUsername, pwd, ans);
+  fetchAndRenderCredentials(currentViewingUserId, currentViewingUsername, pwd, ans1, ans2);
 }
 
 function toggleCredPassword() {
@@ -987,7 +1084,7 @@ function copyCredPassword() {
         <div id="credVerifySection" class="d-none">
           <div class="alert alert-warning-subtle border border-warning-subtle py-2 px-3 small rounded-3 mb-3">
             <i class="fa-solid fa-triangle-exclamation me-1 text-warning"></i>
-            <strong>安全验证：</strong>管理员账号的凭证受保护，请先验证原密码或原密保答案。
+            <strong>安全验证：</strong>管理员账号的凭证受保护，请输入原密码或任意一个密保答案即可查看。
           </div>
           <div class="mb-3">
             <label class="form-label small fw-bold text-secondary">原密码</label>
@@ -997,8 +1094,12 @@ function copyCredPassword() {
             </div>
           </div>
           <div class="mb-2">
-            <label class="form-label small fw-bold text-secondary">密保答案 <span id="credVerifyQuestionLabel" class="text-muted fw-normal"></span></label>
-            <input type="text" id="credVerifyAnsInput" class="form-control form-control-sm" placeholder="输入密保答案（若配置了双密保请同时输入）">
+            <div class="small text-muted mb-1">问题 1：<span id="credVerifyQuestion1Label">默认安全问题</span></div>
+            <input type="text" id="credVerifyAnsInput1" class="form-control form-control-sm" placeholder="输入密保问题 1 的答案">
+          </div>
+          <div class="mb-2" id="credVerifyAns2Wrapper" style="display:none;">
+            <div class="small text-muted mb-1">问题 2：<span id="credVerifyQuestion2Label">未设置</span></div>
+            <input type="text" id="credVerifyAnsInput2" class="form-control form-control-sm" placeholder="输入密保问题 2 的答案">
           </div>
           <div id="credVerifyError" class="alert alert-danger d-none py-1 px-2 small mb-2"></div>
           <div class="text-end">
