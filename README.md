@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '25f5d003-b5ff-413e-8c06-e64b5aa5e711'
-  PropagateID: '25f5d003-b5ff-413e-8c06-e64b5aa5e711'
-  ReservedCode1: '001fbeb3-e441-46bb-a7da-3a099246ac5a'
-  ReservedCode2: '001fbeb3-e441-46bb-a7da-3a099246ac5a'
+  ProduceID: '9e10e728-5163-4408-bf55-f4e1eee4cac8'
+  PropagateID: '9e10e728-5163-4408-bf55-f4e1eee4cac8'
+  ReservedCode1: '0d8b1482-36e2-4303-8a00-66625dd39c24'
+  ReservedCode2: '0d8b1482-36e2-4303-8a00-66625dd39c24'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -748,6 +748,19 @@ PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.s
 
 #### 涉及文件
 - `app.py`（两版同步修改：`init_database()` 管理员同步逻辑增加用户名冲突检测）
+
+### V10.10.8 补丁2：移除 `__main__` 冗余管理员初始化（2026-09-22）
+
+#### 问题背景
+补丁1修复了 `init_database()` 中的用户名冲突，但 `__main__` 入口块仍残留 `--admin-user`/`--admin-pass` 参数和重复的管理员创建/更新逻辑。该冗余代码与 `init_database()`（模块级 L912 自动执行）功能重叠，可能导致双管理员或用户名冲突隐患。
+
+#### 修复
+- 移除 `__main__` 块中的 `init_database()` 重复调用（模块级已自动执行）
+- 移除 `--admin-user` / `--admin-pass` 命令行参数及其对应的管理员创建/更新逻辑
+- 添加注释说明管理员初始化统一由 `init_database()` 负责
+
+#### 涉及文件
+- `app.py`（两版同步修改：`__main__` 块移除冗余管理员初始化，-16 行）
 
 ## 📂 项目文件结构
 
