@@ -652,6 +652,30 @@ def num2cn_filter(num):
 
 def init_database():
     with app.app_context():
+        # V5: 在 db.create_all() 之前，先用原生 sqlite3 修复可能存在的 orphan index 问题
+        # 这个问题在恢复旧版备份后尤为常见：malformed database schema (sqlite_autoindex_xxx) - orphan index
+        try:
+            import sqlite3 as _sqlite3_raw
+            _raw_db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
+            if _raw_db_path and os.path.exists(_raw_db_path):
+                _fix_conn = _sqlite3_raw.connect(_raw_db_path)
+                _fix_conn.execute("PRAGMA writable_schema=1")
+                # 查找并删除所有孤儿索引（有 index 记录但对应的表 SQL 为空或不存在）
+                _orphan_indexes = _fix_conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'sqlite_autoindex_%' AND tbl_name NOT IN (SELECT name FROM sqlite_master WHERE type='table')"
+                ).fetchall()
+                for (_idx_name,) in _orphan_indexes:
+                    try:
+                        _fix_conn.execute(f"DROP INDEX IF EXISTS \"{_idx_name}\"")
+                        print(f"[V5-Fix] 已删除孤儿索引: {_idx_name}")
+                    except Exception:
+                        pass
+                _fix_conn.execute("PRAGMA writable_schema=0")
+                _fix_conn.commit()
+                _fix_conn.close()
+        except Exception as _fix_err:
+            print(f"[V5-Fix] orphan index 修复跳过: {_fix_err}")
+
         db.create_all()
         # 自动迁移检查缺失字段
         migration_sqls = [

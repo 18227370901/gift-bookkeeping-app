@@ -4075,17 +4075,19 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     flash(f'恢复失败：{msg}', 'danger')
                 return redirect(url_for('admin_backups'))
 
-            # 管理员：保持原文件级替换逻辑
-            # 修复：先释放数据库连接池，防止覆盖正在使用的文件导致损坏
+            # 管理员：保持原文件级替换逻辑（V5: 改用 sqlite3.backup() 原子操作，避免 WAL 不一致）
+            # 第1步：释放数据库连接池，防止覆盖正在使用的文件导致损坏
             db.engine.dispose()
-            
-            # 保存上传文件到临时路径，验证完整性后再替换
+            import time as _time
+            _time.sleep(0.5)
+
+            # 第2步：保存上传文件到临时路径，验证完整性后再替换
             import tempfile
             tmp_dir = tempfile.mkdtemp(prefix='gift_upload_')
             tmp_db_path = os.path.join(tmp_dir, 'uploaded.db')
             file.save(tmp_db_path)
-            
-            # 验证上传的数据库文件完整性
+
+            # 第3步：验证上传的数据库文件完整性
             import sqlite3 as _sqlite3
             try:
                 test_conn = _sqlite3.connect(tmp_db_path)
@@ -4099,16 +4101,32 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 shutil.rmtree(tmp_dir, ignore_errors=True)
                 flash(f'恢复失败：无法读取上传的数据库文件 ({str(ie)})', 'danger')
                 return redirect(url_for('admin_backups'))
-            
-            # 备份现有数据库防止损坏
+
+            # 第4步：备份现有数据库防止损坏
             if os.path.exists(db_path):
                 shutil.copy2(db_path, db_path + f".bak_{int(time.time())}")
-            
-            # 替换数据库文件
-            shutil.copy2(tmp_db_path, db_path)
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            
-            # 清理 WAL/SHM 文件，防止旧 WAL 日志导致数据库损坏
+
+            # 第5步：用 sqlite3.backup() 原子性替换数据库内容（不操作文件，避免 WAL 不一致）
+            try:
+                # 先删除 WAL/SHM 文件，确保干净状态
+                for suffix in ('-wal', '-shm'):
+                    p = db_path + suffix
+                    if os.path.exists(p):
+                        try:
+                            os.remove(p)
+                        except Exception:
+                            pass
+                src_conn = _sqlite3.connect(tmp_db_path)
+                dst_conn = _sqlite3.connect(db_path)
+                src_conn.backup(dst_conn)
+                dst_conn.close()
+                src_conn.close()
+            except Exception as backup_err:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                flash(f'恢复失败：数据库原子复制失败 ({str(backup_err)})', 'danger')
+                return redirect(url_for('admin_backups'))
+
+            # 第6步：清理 WAL/SHM 文件（此时连接已关闭，文件句柄已释放）
             for suffix in ('-wal', '-shm'):
                 wal_path = db_path + suffix
                 if os.path.exists(wal_path):
@@ -4116,6 +4134,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                         os.remove(wal_path)
                     except Exception:
                         pass
+
+            shutil.rmtree(tmp_dir, ignore_errors=True)
             
             # 重新执行数据库初始化（补建缺失的表/字段）
             try:
@@ -4305,16 +4325,32 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                         flash(f'恢复失败：{msg}', 'danger')
                     return redirect(url_for('admin_backups'))
 
-                # 管理员：保持原文件级替换逻辑
-                # 备份当前数据库防止恢复失败
+                # 管理员：保持原文件级替换逻辑（V5: 改用 sqlite3.backup() 原子操作，避免 WAL 不一致）
+                # 第4步：备份当前数据库防止恢复失败
                 if os.path.exists(db_path):
                     shutil.copy2(db_path, db_path + f".bak_{int(time.time())}")
-                
-                # 替换数据库文件
-                shutil.copy2(tmp_db_path, db_path)
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-                
-                # 清理 WAL/SHM 文件，防止旧 WAL 日志导致数据库损坏
+
+                # 第5步：用 sqlite3.backup() 原子性替换数据库内容（不操作文件，避免 WAL 不一致）
+                try:
+                    # 先删除 WAL/SHM 文件，确保干净状态
+                    for suffix in ('-wal', '-shm'):
+                        p = db_path + suffix
+                        if os.path.exists(p):
+                            try:
+                                os.remove(p)
+                            except Exception:
+                                pass
+                    src_conn = _sqlite3.connect(tmp_db_path)
+                    dst_conn = _sqlite3.connect(db_path)
+                    src_conn.backup(dst_conn)
+                    dst_conn.close()
+                    src_conn.close()
+                except Exception as backup_err:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                    flash(f'恢复失败：数据库原子复制失败 ({str(backup_err)})', 'danger')
+                    return redirect(url_for('admin_backups'))
+
+                # 第6步：清理 WAL/SHM 文件（连接已关闭，文件句柄已释放）
                 for suffix in ('-wal', '-shm'):
                     wal_path = db_path + suffix
                     if os.path.exists(wal_path):
@@ -4322,6 +4358,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                             os.remove(wal_path)
                         except Exception:
                             pass
+
+                shutil.rmtree(tmp_dir, ignore_errors=True)
                 
                 # 重新执行数据库初始化（补建缺失的表/字段）
                 try:
