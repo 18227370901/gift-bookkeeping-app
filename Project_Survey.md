@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '663c5dfc-9bd9-410a-b451-e6d97da3039a'
-  PropagateID: '663c5dfc-9bd9-410a-b451-e6d97da3039a'
-  ReservedCode1: '493b9497-093f-4116-8789-097761a23ed5'
-  ReservedCode2: '493b9497-093f-4116-8789-097761a23ed5'
+  ProduceID: 'cb4f0b44-78f9-48bc-801c-69849af06a4a'
+  PropagateID: 'cb4f0b44-78f9-48bc-801c-69849af06a4a'
+  ReservedCode1: '99fa6096-397c-4630-9ca1-c9d336f90273'
+  ReservedCode2: '99fa6096-397c-4630-9ca1-c9d336f90273'
 ---
 
 # 礼金记账与金融数据集成系统技术调研与架构决策报告 (Project Survey)
@@ -992,4 +992,57 @@ db.session.commit()             # ← UNIQUE constraint failed
 
 - `app.py`（两版同步修改：`__main__` 块移除冗余管理员初始化，-16/+2 行）
 - `README.md`（两版）：V10.10.8 补丁2 更新条目
+- `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
+
+## 19. V10.10.8 补丁3：合入 V5 修复 — sqlite3.backup() 原子恢复 + orphan index 自动修复 (2026年9月22日更新)
+
+### 1. 问题背景
+
+在审查传统版 git 分支时发现，`feature/ai-assistant-v5` 分支有一个独有提交（commit `2ef8054`），包含两项重要修复，但从未合入 main 分支，Docker 版同样缺失：
+
+1. **管理员恢复备份的文件级替换风险**：`routes_ext.py` 中两处管理员恢复路由（`admin_upload_local_backup` 和 `admin_restore_webdav_backup`）使用 `shutil.copy2()` 进行文件级替换。SQLite WAL 模式下，直接替换 .db 文件后 WAL/SHM 残留文件可能导致 schema 不一致，引发全站 500 错误。
+2. **orphan index 导致 malformed database schema**：`init_database()` 缺少对 orphan index（孤儿索引）的自动修复逻辑。当恢复旧版本备份后，`sqlite_autoindex_*` 孤儿索引可能残留，导致 `db.create_all()` 时触发 `malformed database schema` 错误。
+
+### 2. 根因分析
+
+- **shutil.copy2 问题**：`shutil.copy2()` 仅替换 .db 主文件，不处理 -wal 和 -shm 侧文件。旧 WAL 文件中的页面结构与新 .db 的 schema 不匹配时，SQLite 引擎可能在下一次查询时崩溃。正确的做法是使用 `sqlite3.backup()` API 做数据库级别的原子复制，然后清理所有侧文件。
+- **orphan index 问题**：SQLite 的 `sqlite_master` 表中可能残留 `type='index'` 且 `name LIKE 'sqlite_autoindex_%'` 的条目，但其对应的表已被删除或重建。`db.create_all()` 遇到这些孤儿索引时，SQLAlchemy 尝试创建同名索引导致冲突。需要在 `db.create_all()` 前通过 `PRAGMA writable_schema=1` 查找并 DROP 这些孤儿索引。
+
+### 3. 修复方案
+
+#### routes_ext.py — 两处管理员恢复路由
+
+将 `shutil.copy2()` 文件级替换改为 `sqlite3.backup()` 原子操作，8 步安全恢复流程：
+
+1. `engine.dispose()` — 释放所有数据库连接
+2. 创建临时文件路径（在原 .db 同目录下）
+3. `PRAGMA integrity_check` — 校验源备份文件完整性
+4. `shutil.copy2()` 将备份复制到临时文件（作为失败后备）
+5. `sqlite3.backup()` — 打开临时文件，将备份数据库内容原子写入运行库 .db
+6. 清理 WAL/SHM 侧文件（`-wal`、`-shm`）
+7. `init_database()` — 重新初始化（触发迁移、管理员同步、orphan index 修复）
+8. 删除临时文件
+
+#### app.py — init_database() 新增 orphan index 修复
+
+在 `db.create_all()` 调用前，新增 orphan index 检测与清理逻辑（约 24 行）：
+
+- 执行 `PRAGMA writable_schema=1` 进入可写 schema 模式
+- 查询 `sqlite_master` 中 `type='index'` AND `name LIKE 'sqlite_autoindex_%'` 的条目
+- 对每个孤儿索引执行 `DROP INDEX IF EXISTS`
+- 执行 `PRAGMA writable_schema=0` 恢复
+- 记录日志
+
+### 4. 验证结果
+
+- Python AST 编译通过（两版 app.py、两版 routes_ext.py）
+- 两版 app.py MD5 一致性校验通过
+- 两版 routes_ext.py MD5 一致性校验通过
+- Flask 服务重启成功（PID 54028，端口 11443），`/login` 页面 HTTP 200 正常响应
+
+### 5. 涉及文件
+
+- `app.py`（两版同步修改：`init_database()` 新增 orphan index 检测与清理，+24 行）
+- `routes_ext.py`（两版同步修改：两处管理员恢复路由改用 `sqlite3.backup()` 原子操作）
+- `README.md`（两版）：V10.10.8 补丁3 更新条目
 - `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
