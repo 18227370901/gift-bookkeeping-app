@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '9e10e728-5163-4408-bf55-f4e1eee4cac8'
-  PropagateID: '9e10e728-5163-4408-bf55-f4e1eee4cac8'
-  ReservedCode1: '0d8b1482-36e2-4303-8a00-66625dd39c24'
-  ReservedCode2: '0d8b1482-36e2-4303-8a00-66625dd39c24'
+  ProduceID: 'd7b4bc72-5adb-4b46-84df-3016c43193e2'
+  PropagateID: 'd7b4bc72-5adb-4b46-84df-3016c43193e2'
+  ReservedCode1: 'fc6292d2-ef3e-46c5-9964-fde89711064f'
+  ReservedCode2: 'fc6292d2-ef3e-46c5-9964-fde89711064f'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -761,6 +761,26 @@ PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com SNI_DEFAULT_SERVER=0 ./run.s
 
 #### 涉及文件
 - `app.py`（两版同步修改：`__main__` 块移除冗余管理员初始化，-16 行）
+
+### V10.10.8 补丁3：合入 V5 修复 — sqlite3.backup() 原子恢复 + orphan index 自动修复（2026-09-22）
+
+#### 问题背景
+`feature/ai-assistant-v5` 分支有一个独有提交（V5 修复），包含两项重要修复未合入 main 和 Docker 版：
+1. 管理员恢复备份时使用 `shutil.copy2()` 文件级替换，WAL/SHM 残留导致 schema 不一致，可能引发全站 500
+2. `init_database()` 缺少 orphan index 自动修复，恢复旧版备份后可能 malformed database schema
+
+#### 修复内容
+- **`routes_ext.py`**：两处管理员恢复路由（`admin_upload_local_backup` + `admin_restore_webdav_backup`）从 `shutil.copy2` 改为 `sqlite3.backup()` 原子操作，8 步安全恢复流程（dispose → 临时文件 → integrity_check → 备份 → sqlite3.backup 原子替换 → 清理 WAL/SHM → init_database 迁移）
+- **`app.py`**：`init_database()` 在 `db.create_all()` 前新增 orphan index 检测与清理（`PRAGMA writable_schema=1` 查找 `sqlite_autoindex_%` 孤儿索引并 DROP）
+
+#### 验证结果
+- 两版 AST 编译通过
+- 两版 app.py MD5 一致、routes_ext.py MD5 一致
+- Flask 服务重启成功（PID 54028，端口 11443），`/login` 页面 HTTP 200 正常响应
+
+#### 涉及文件
+- `app.py`（两版同步修改：`init_database()` 新增 orphan index 修复）
+- `routes_ext.py`（两版同步修改：两处管理员恢复路由改用 `sqlite3.backup()` 原子操作）
 
 ## 📂 项目文件结构
 
