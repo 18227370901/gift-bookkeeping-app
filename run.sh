@@ -12,7 +12,7 @@ LOG_FILE="$APP_DIR/app.log"
 
 # ===== SNI 多项目共用端口配置（全部支持环境变量覆盖，多项目部署时各项目设不同值即可） =====
 PROJECT_NAME="${PROJECT_NAME:-gift_app}"        # 项目标识：决定 Nginx 配置文件名($PROJECT_NAME.conf)与 upstream 名(${PROJECT_NAME}_backend)
-SNI_DOMAIN="${SNI_DOMAIN:-localhost}"            # SNI 域名：写入 server_name 与自签证书 CN/SAN，多项目各设一个域名
+SNI_DOMAIN="${SNI_DOMAIN:-localhost}"            # SNI 域名：写入 server_name 与自签证书 CN/SAN，支持空格分隔多域名（如 SNI_DOMAIN="a.com b.com"），第一个域名为证书 CN，全部写入 SAN 与 server_name
 SSL_CERT="${SSL_CERT:-$APP_DIR/ssl/server.crt}" # SSL 证书路径（可指向正式证书）
 SSL_KEY="${SSL_KEY:-$APP_DIR/ssl/server.key}"   # SSL 私钥路径
 SNI_DEFAULT_SERVER="${SNI_DEFAULT_SERVER:-1}"   # 是否作为该监听端口的兑底 default_server（1=是 0=否，多项目共端口时只应有一个项目为 1）
@@ -189,6 +189,7 @@ ensure_ssl_certs() {
     # 两份证书文件均不存在时，无需询问，直接创建（首次部署场景）
     if [ ! -f "$SSL_CERT" ] && [ ! -f "$SSL_KEY" ]; then
         echo_e "${GREEN}未检测到 SSL 证书文件，正在生成自签名证书 (域名: $SNI_DOMAIN)...${NC}"
+        # SNI_DOMAIN 支持空格分隔多域名，第一个写入 CN，全部写入 SAN
         mkdir -p "$APP_DIR/ssl"
         local cert_script="$APP_DIR/generate_ssl_certs.py"
         # 固定在 APP_DIR 下执行，确保证书始终输出到 $APP_DIR/ssl（不依赖调用时所在目录）
@@ -202,6 +203,7 @@ ensure_ssl_certs() {
     # 文件已存在：必须先取得用户/环境变量许可，才允许覆盖更新（保护自定义证书、正式证书）
     elif should_overwrite "$SSL_CERT" "$SSL_FORCE_UPDATE" "SSL_FORCE_UPDATE"; then
         echo_e "${GREEN}确认更新，正在重新生成 SSL 自签名证书 (域名: $SNI_DOMAIN)...${NC}"
+        # SNI_DOMAIN 支持空格分隔多域名，第一个写入 CN，全部写入 SAN
         mkdir -p "$APP_DIR/ssl"
         local cert_script="$APP_DIR/generate_ssl_certs.py"
         # 固定在 APP_DIR 下执行，确保证书始终输出到 $APP_DIR/ssl（不依赖调用时所在目录）
@@ -372,9 +374,11 @@ start_service() {
     sleep 2
     if check_status; then
         # 标准端口(443)不附加端口号；非标准端口则以 域名:端口 形式提示
-        local access_url="https://$SNI_DOMAIN/"
+        # 多域名时取第一个作为访问地址提示
+        local primary_domain="${SNI_DOMAIN%% *}"
+        local access_url="https://$primary_domain/"
         if [ "$NGINX_PORT" != "443" ]; then
-            access_url="https://$SNI_DOMAIN:$NGINX_PORT/"
+            access_url="https://$primary_domain:$NGINX_PORT/"
         fi
         echo_e "${GREEN}✅ 服务启动成功!${NC}"
         echo_e "   PID: $(cat $PID_FILE)"
@@ -516,12 +520,14 @@ case "$1" in
         echo "多项目共用 443 端口 SNI 分流的环境变量（均有默认值，可按项目覆盖）:"
         echo "  PROJECT_NAME        项目标识，决定 Nginx 配置文件名与 upstream 名 (默认: gift_app)"
         echo "  SNI_DOMAIN          SNI 域名，写入 server_name 与证书 CN/SAN (默认: localhost)"
+        echo "                      支持空格分隔多域名，如 SNI_DOMAIN=\"a.com b.com\"，第一个为证书 CN，全部写入 SAN 与 server_name"
         echo "  NGINX_PORT          Nginx 对外监听端口 (默认: 443)"
         echo "  SSL_CERT/SSL_KEY    证书与私钥路径 (默认: \$APP_DIR/ssl/server.crt|key)"
         echo "  SNI_DEFAULT_SERVER  是否作为兜底 default_server，1=是 0=否 (默认: 1)"
         echo "  SSL_FORCE_UPDATE=1          SSL 证书已存在时强制覆盖更新，不询问 (默认: 询问/非交互时保留)"
         echo "  NGINX_CONF_FORCE_UPDATE=1   Nginx 配置已存在时强制覆盖渲染，不询问 (默认: 询问/非交互时保留)"
         echo "  示例: PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com ./$0 start"
+        echo "  多域名示例: SNI_DOMAIN=\"gift.example.com gift2.example.com\" ./$0 start"
         echo "  示例: SSL_FORCE_UPDATE=1 NGINX_CONF_FORCE_UPDATE=1 ./$0 restart  # cron/自动化场景强制更新"
         exit 1
         ;;

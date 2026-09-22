@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'cb4f0b44-78f9-48bc-801c-69849af06a4a'
-  PropagateID: 'cb4f0b44-78f9-48bc-801c-69849af06a4a'
-  ReservedCode1: '99fa6096-397c-4630-9ca1-c9d336f90273'
-  ReservedCode2: '99fa6096-397c-4630-9ca1-c9d336f90273'
+  ProduceID: 'c207c1e9-c4e7-405b-9ff4-1a5430a07434'
+  PropagateID: 'c207c1e9-c4e7-405b-9ff4-1a5430a07434'
+  ReservedCode1: '59264665-ba13-4641-8550-a7a4a83191e3'
+  ReservedCode2: '59264665-ba13-4641-8550-a7a4a83191e3'
 ---
 
 # 礼金记账与金融数据集成系统技术调研与架构决策报告 (Project Survey)
@@ -1045,4 +1045,53 @@ db.session.commit()             # ← UNIQUE constraint failed
 - `app.py`（两版同步修改：`init_database()` 新增 orphan index 检测与清理，+24 行）
 - `routes_ext.py`（两版同步修改：两处管理员恢复路由改用 `sqlite3.backup()` 原子操作）
 - `README.md`（两版）：V10.10.8 补丁3 更新条目
+- `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
+
+## 20. V10.10.9：SNI_DOMAIN 多域名支持 — 一个项目绑定多个域名 (2026年9月22日更新)
+
+### 1. 问题背景
+
+此前 `SNI_DOMAIN` 环境变量仅支持单个域名，`run.sh` 将其原样传入 `generate_ssl_certs.py --domain` 参数和 Nginx `server_name`。若一个项目需要同时通过多个域名访问（如 `gift.example.com` 和 `gift2.example.com`），只能手动修改 Nginx 配置和重新生成证书，且下次 `run.sh` 重新渲染时会覆盖手动修改。
+
+### 2. 修复方案
+
+将 `SNI_DOMAIN` 升级为支持**空格分隔的多个域名**，统一处理证书生成与 Nginx 配置：
+
+#### generate_ssl_certs.py 改造
+
+- `--domain` 参数接收空格分隔字符串，内部用 `split()` 拆分为域名列表
+- 第一个域名写入证书 CN（主域名），全部域名去重后写入 SAN
+- OpenSSL 路径：构建 `subjectAltName=DNS:localhost,DNS:a.com,DNS:b.com,IP:127.0.0.1` 格式
+- cryptography 回退路径：构建 `x509.DNSName` 列表，逐一追加（去重 localhost 和 127.0.0.1）
+- 每个域名自动判断是 DNS 名称还是 IP 地址，分别写入 `DNS:` 或 `IP:` 前缀
+
+#### run.sh 改造
+
+- `SNI_DOMAIN` 变量注释更新，说明空格分隔多域名用法
+- `server_name` 渲染：`sed -e "s|__SNI_DOMAIN__|$SNI_DOMAIN|g"` — 空格分隔值直接替换到 `server_name` 后，Nginx 原生支持空格分隔多域名语法
+- `--domain "$SNI_DOMAIN"`：引号包裹传递完整多域名字符串给 `generate_ssl_certs.py`
+- 访问地址提示：用 `${SNI_DOMAIN%% *}`（POSIX sh 参数扩展）取第一个域名显示
+- 帮助文本新增多域名使用示例
+
+### 3. 使用方式
+
+```bash
+# 单域名（完全向后兼容）
+SNI_DOMAIN=gift.example.com ./run.sh start
+
+# 多域名：第一个为证书 CN，全部写入 SAN 与 server_name
+SNI_DOMAIN="gift.example.com gift2.example.com" ./run.sh start
+```
+
+### 4. 验证结果
+
+- 两版 generate_ssl_certs.py MD5 一致性校验通过（`EE06FD6F6FEE1D60F01D71DF22805B23`）
+- 两版 AST 编译通过
+- run.sh 因传统版/Docker 版设计差异（Python 进程管理 vs Docker 容器管理），不要求 MD5 一致，逻辑对应一致
+
+### 5. 涉及文件
+
+- `generate_ssl_certs.py`（两版同步修改：多域名解析、CN/SAN 处理，重写约 60 行）
+- `run.sh`（两版同步修改：注释、日志提示、访问地址、帮助文本）
+- `README.md`（两版）：V10.10.9 更新条目 + SNI_DOMAIN 说明更新
 - `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
