@@ -12,4 +12,8 @@ dist/
 *.pid
 *.db-shm
 *.db-wal
+*.db.bak_*
+*.db.corrupted_*
+*.db.malformed_bak
+.temp/
 *.dist-info/
