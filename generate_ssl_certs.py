@@ -20,9 +20,19 @@ def generate_self_signed_cert(cert_file='server.crt', key_file='server.key', day
         cert_file: 证书输出文件名（相对于 ssl/ 目录）
         key_file: 私钥输出文件名（相对于 ssl/ 目录）
         days: 证书有效期（天）
-        domain: 要写入 CN 和 SAN 的域名（支持域名或 IP，默认 localhost）
+        domain: 要写入 CN 和 SAN 的域名，支持空格分隔的多个域名（如 "a.com b.com"），
+                第一个域名写入 CN，全部域名写入 SAN（支持域名或 IP，默认 localhost）
     """
     print("[INFO] Generating self-signed SSL certificate...")
+
+    # 解析多域名：空格分隔，第一个为 CN（主域名），全部写入 SAN
+    domains = domain.strip().split()
+    if not domains:
+        domains = ['localhost']
+    primary_domain = domains[0]
+    print(f"[INFO] Primary domain (CN): {primary_domain}")
+    if len(domains) > 1:
+        print(f"[INFO] All domains ({len(domains)}): {', '.join(domains)}")
 
     # 确保 ssl 目录存在
     ssl_dir = ensure_ssl_directory()
@@ -31,36 +41,35 @@ def generate_self_signed_cert(cert_file='server.crt', key_file='server.key', day
     cert_path = os.path.join(ssl_dir, cert_file)
     key_path = os.path.join(ssl_dir, key_file)
 
-    # 判断 domain 是 IP 地址还是 DNS 名称（决定写入 SAN 的条目类型）
-    try:
-        ipaddress.ip_address(domain)
-        domain_is_ip = True
-    except ValueError:
-        domain_is_ip = False
+    # 为每个域名判断是 IP 还是 DNS 名称
+    domain_entries = []  # [(raw_value, entry_type, entry_str)]
+    for d in domains:
+        try:
+            ipaddress.ip_address(d)
+            domain_entries.append((d, 'ip', f'IP:{d}'))
+        except ValueError:
+            domain_entries.append((d, 'dns', f'DNS:{d}'))
 
     # 尝试使用 OpenSSL 命令行生成（省略 -rand /dev/urandom 保持 Windows/Linux 跨平台兼容）
     # 注意：-addext 需要 OpenSSL 1.1.1+，旧版本会执行失败并自动回退到 Python cryptography
     try:
-        if domain_is_ip:
-            domain_entry = f'IP:{domain}'
-        else:
-            domain_entry = f'DNS:{domain}'
-
-        # domain 与基础条目重复时不重复写入 SAN
-        san_value = 'DNS:localhost,IP:127.0.0.1'
-        if domain_entry not in ('DNS:localhost', 'IP:127.0.0.1'):
-            san_value = f'DNS:localhost,{domain_entry},IP:127.0.0.1'
+        # 构建 SAN 值：始终包含 localhost + 127.0.0.1，再追加用户域名（去重）
+        san_parts = ['DNS:localhost', 'IP:127.0.0.1']
+        for raw, dtype, entry_str in domain_entries:
+            if entry_str not in san_parts:
+                san_parts.append(entry_str)
+        san_value = ','.join(san_parts)
 
         cmd = [
             'openssl', 'req', '-x509', '-nodes', '-days', str(days),
             '-newkey', 'rsa:2048',
             '-keyout', key_path,
             '-out', cert_path,
-            '-subj', f'/CN={domain}/O=GiftBookkeeping/C=CN',
+            '-subj', f'/CN={primary_domain}/O=GiftBookkeeping/C=CN',
             '-addext', f'subjectAltName={san_value}'
         ]
         subprocess.run(cmd, check=True)
-        print(f"[SUCCESS] SSL certificate generated successfully (domain: {domain}):\n  - Certificate: {cert_path}\n  - Private key: {key_path}")
+        print(f"[SUCCESS] SSL certificate generated successfully (domains: {', '.join(domains)}):\n  - Certificate: {cert_path}\n  - Private key: {key_path}")
         return True
     except Exception as e:
         print(f"[WARNING] OpenSSL command not found or execution failed: {e}")
@@ -82,17 +91,22 @@ def generate_self_signed_cert(cert_file='server.crt', key_file='server.key', day
         current_time = datetime.datetime.now(datetime.timezone.utc)
 
         subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, domain),
+            x509.NameAttribute(NameOID.COMMON_NAME, primary_domain),
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "GiftBookkeeping")
         ])
 
-        # SAN 基础条目：localhost + 127.0.0.1；domain 为新条目时插入中间位置
+        # 构建 SAN 列表：始终包含 localhost + 127.0.0.1，再追加用户域名（去重）
         san_names = [x509.DNSName("localhost"), x509.IPAddress(ipaddress.IPv4Address("127.0.0.1"))]
-        if domain_is_ip:
-            if domain != "127.0.0.1":
-                san_names.insert(1, x509.IPAddress(ipaddress.ip_address(domain)))
-        elif domain != "localhost":
-            san_names.insert(1, x509.DNSName(domain))
+        for raw, dtype, entry_str in domain_entries:
+            if dtype == 'ip':
+                ip_obj = ipaddress.ip_address(raw)
+                # 去重：跳过已存在的 127.0.0.1
+                if raw != "127.0.0.1":
+                    san_names.append(x509.IPAddress(ip_obj))
+            else:
+                # 去重：跳过已存在的 localhost
+                if raw != "localhost":
+                    san_names.append(x509.DNSName(raw))
 
         cert = x509.CertificateBuilder().subject_name(
             subject
@@ -121,7 +135,7 @@ def generate_self_signed_cert(cert_file='server.crt', key_file='server.key', day
         with open(cert_path, "wb") as f:
             f.write(cert.public_bytes(serialization.Encoding.PEM))
 
-        print(f"[SUCCESS] SSL certificate generated successfully using Python cryptography (domain: {domain}):\n  - Certificate: {cert_path}\n  - Private key: {key_path}")
+        print(f"[SUCCESS] SSL certificate generated successfully using Python cryptography (domains: {', '.join(domains)}):\n  - Certificate: {cert_path}\n  - Private key: {key_path}")
         return True
     except Exception as e:
         print(f"[ERROR] Certificate generation failed. Please install openssl or python cryptography library. Error: {e}")
@@ -131,7 +145,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Generate a self-signed SSL certificate for HTTPS deployment')
     parser.add_argument('--domain', default='localhost',
-                        help='SNI domain to embed into certificate CN/SAN, supports domain or IP (default: localhost)')
+                        help='SNI domain(s) to embed into certificate CN/SAN, supports space-separated multiple domains or IPs (e.g. "a.com b.com", default: localhost)')
     parser.add_argument('--days', type=int, default=365,
                         help='Certificate validity in days (default: 365)')
     args = parser.parse_args()
