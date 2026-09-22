@@ -3155,29 +3155,15 @@ register_ai_routes(app, log_action=log_action)
 
 
 if __name__ == '__main__':
-    init_database()
     import argparse
     import os
 
     parser = argparse.ArgumentParser(description='礼金记账系统 Linux/云服务器启动脚本')
     parser.add_argument('--host', type=str, default=os.environ.get('HOST', '0.0.0.0'), help='监听 IP 地址 (默认: 0.0.0.0)')
     parser.add_argument('--port', type=int, default=int(os.environ.get('PORT', 11443)), help='服务端口 (默认: 11443)')
-    parser.add_argument('--admin-user', type=str, default=os.environ.get('ADMIN_USER', None), help='自定义初始管理员账号')
-    parser.add_argument('--admin-pass', type=str, default=os.environ.get('ADMIN_PASS', None), help='自定义初始管理员密码')
     args = parser.parse_args()
 
-    # 如果命令行或环境变量指定了初始管理员账号密码，重新/初始化管理员账户
-    if args.admin_user and args.admin_pass:
-        with app.app_context():
-            admin = User.query.filter_by(username=args.admin_user).first()
-            if not admin:
-                admin = User(username=args.admin_user, is_admin=True)
-                admin.set_password(args.admin_pass)
-                db.session.add(admin)
-            else:
-                admin.set_password(args.admin_pass)
-                admin.is_admin = True
-            db.session.commit()
-            print(f"[Init] 管理员账号 [{args.admin_user}] 配置/更新成功！")
+    # 管理员账号初始化统一由 init_database() 负责（模块级 L912 已自动执行）
+    # 此处不再重复管理员创建/同步逻辑，避免双管理员与用户名冲突隐患
 
     app.run(host=args.host, port=args.port, debug=False)
