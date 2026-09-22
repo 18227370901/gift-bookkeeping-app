@@ -15,5 +15,9 @@ dist/
 *.db.bak_*
 *.db.corrupted_*
 *.db.malformed_bak
+# 运行数据库（含真实用户数据与敏感配置，禁止追踪）
+data/gift_bookkeeping.db
+# 用户上传附件（可能含私人文档，禁止追踪）
+data/attachments/
 .temp/
 *.dist-info/
