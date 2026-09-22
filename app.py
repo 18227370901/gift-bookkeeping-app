@@ -893,12 +893,20 @@ def init_database():
             print(f"[Init] 已创建初始管理员账号: {initial_user}")
         else:
             # 每次重启应用时，同步确保管理员用户名、密码与激活状态更新为最新配置
-            admin.username = initial_user
+            # 检查目标用户名是否与当前管理员用户名不同，不同时需检查是否被其他用户占用
+            if admin.username != initial_user:
+                existing = User.query.filter_by(username=initial_user).first()
+                if existing and existing.id != admin.id:
+                    # 目标用户名已被其他用户占用，跳过用户名修改，只更新密码和状态
+                    print(f"[Init] 警告: 用户名 '{initial_user}' 已被其他用户(id={existing.id})占用，"
+                          f"保留当前管理员用户名 '{admin.username}'")
+                else:
+                    admin.username = initial_user
             admin.set_password(initial_pass)
             admin.is_admin = True
             admin.is_active = True
             db.session.commit()
-            print(f"[Init] 已同步更新管理员账号 [{initial_user}] 密码为最新配置并确保处于激活状态")
+            print(f"[Init] 已同步更新管理员账号 [{admin.username}] 密码为最新配置并确保处于激活状态")
 
 # 应用加载时自动执行数据库初始化与版本迁移（支持 Gunicorn / WSGI / App 启动）
 try:
