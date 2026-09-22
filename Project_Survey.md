@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'f20271f7-2bae-49ef-84cb-c91b14c2a83c'
-  PropagateID: 'f20271f7-2bae-49ef-84cb-c91b14c2a83c'
-  ReservedCode1: 'cf38eda7-1e56-4c4d-881f-221a83a7aeea'
-  ReservedCode2: 'cf38eda7-1e56-4c4d-881f-221a83a7aeea'
+  ProduceID: '72ee4585-7e60-4dce-9867-3753ba48124b'
+  PropagateID: '72ee4585-7e60-4dce-9867-3753ba48124b'
+  ReservedCode1: '9d51209e-ee29-47af-837b-f855ae032e6c'
+  ReservedCode2: '9d51209e-ee29-47af-837b-f855ae032e6c'
 ---
 
 # 礼金记账与金融数据集成系统技术调研与架构决策报告 (Project Survey)
@@ -925,4 +925,44 @@ V10.10.7 完成后，用户提出两项新需求：
 - `run.sh`（传统版：移除互斥逻辑 + 新增 `check_port_conflict()` + `start_service` 调用 + `default_server` 降级）
 - `run.sh`（Docker 版：同上，检测 `$HOST_PORT` 而非 `$PORT`，无 `check_status` 依赖）
 - `README.md`（两版）：V10.10.8 更新条目
+- `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
+
+## 17. V10.10.8 补丁：init_database() 管理员用户名冲突修复 (2026年9月22日更新)
+
+### 1. 问题背景
+
+V10.10.8 部署到服务器后，传统版启动时报错 `UNIQUE constraint failed: users.username`，导致服务无法启动。Docker 版也存在同样的隐患。
+
+### 2. 根因分析
+
+`init_database()` 函数中每次应用启动时，都会执行管理员账号同步逻辑（L894-901）：
+
+```python
+admin = User.query.filter_by(is_admin=True).first()   # 查到数据库中的管理员
+initial_user = os.environ.get('ADMIN_USER', 'admin')
+# ...
+admin.username = initial_user   # 直接赋值为环境变量的值
+admin.set_password(initial_pass)
+db.session.commit()             # ← UNIQUE constraint failed
+```
+
+当数据库中已有一个普通用户使用了与环境变量 `ADMIN_USER` 相同的用户名时，`admin.username = initial_user` 的 UPDATE 操作会触发 `users.username` 列的 UNIQUE 约束冲突，commit 抛出异常，服务启动失败。
+
+### 3. 修复方案
+
+在 `else` 分支中增加用户名冲突检测：
+1. 先检查 `admin.username != initial_user`，如果相同则跳过 username 赋值
+2. 如果不同，先查数据库是否已有其他用户占用该用户名（`User.query.filter_by(username=initial_user).first()`）
+3. 被占用则跳过用户名修改，只更新密码和激活状态，并打印警告
+4. 未被占用才执行 `admin.username = initial_user`
+5. 日志中显示实际管理员用户名而非环境变量值
+
+### 4. 验证结果
+- Python AST 编译通过（两版 app.py）
+- 两版 app.py MD5 一致性校验通过
+- Flask 服务重启成功（PID 59764，端口 11443），无报错
+
+### 5. 涉及文件
+- `app.py`（两版同步修改：`init_database()` 管理员同步逻辑增加用户名冲突检测）
+- `README.md`（两版）：V10.10.8 补丁更新条目
 - `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
