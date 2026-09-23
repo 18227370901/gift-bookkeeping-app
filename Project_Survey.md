@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'c207c1e9-c4e7-405b-9ff4-1a5430a07434'
-  PropagateID: 'c207c1e9-c4e7-405b-9ff4-1a5430a07434'
-  ReservedCode1: '59264665-ba13-4641-8550-a7a4a83191e3'
-  ReservedCode2: '59264665-ba13-4641-8550-a7a4a83191e3'
+  ProduceID: '4978138a-9e23-465f-b6db-34ddbfbc3406'
+  PropagateID: '4978138a-9e23-465f-b6db-34ddbfbc3406'
+  ReservedCode1: '665e8014-d71d-43e4-a88f-bdc5d1eb64d4'
+  ReservedCode2: '665e8014-d71d-43e4-a88f-bdc5d1eb64d4'
 ---
 
 # 礼金记账与金融数据集成系统技术调研与架构决策报告 (Project Survey)
@@ -1094,4 +1094,45 @@ SNI_DOMAIN="gift.example.com gift2.example.com" ./run.sh start
 - `generate_ssl_certs.py`（两版同步修改：多域名解析、CN/SAN 处理，重写约 60 行）
 - `run.sh`（两版同步修改：注释、日志提示、访问地址、帮助文本）
 - `README.md`（两版）：V10.10.9 更新条目 + SNI_DOMAIN 说明更新
+- `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
+
+## 21. V10.10.10：run.sh 自动清理 Docker 构建缓存 (2026年9月22日更新，仅 Docker 版)
+
+### 1. 问题背景
+
+Docker 版 `docker compose up -d --build` 每次构建都会产生构建缓存层和悬空镜像（dangling images）。长期累积后，这些残留数据会占用大量磁盘空间。此前 Docker 版 `run.sh` 的 `cleanup_cache()` 只清理 Git 垃圾和 Python 缓存，完全未涉及 Docker 构建缓存清理；`stop_service()` 也只执行 `docker compose down`，不做任何清理。
+
+传统版为纯 Python 进程管理（VENV + 直接运行 app.py），无 Docker 构建环节，因此本节修复仅涉及 Docker 版。
+
+### 2. 修复方案（仅 Docker 版 run.sh）
+
+#### cleanup_cache() 新增 Docker 清理
+
+- `docker image prune -f`：清理悬空镜像（`<none>:<none>` 标签的残留层），不影响正在使用的镜像
+- `docker builder prune -f`：清理 Docker 构建缓存（`--build` 产生的中间层缓存），不影响正在运行的容器
+- 加 `-f` 跳过交互确认，兼容 cron 非交互场景
+- 不加 `--all` 标志，不清理其他项目的未使用镜像
+
+#### stop_service() 新增 cleanup_cache() 调用
+
+容器停止后自动调用 `cleanup_cache()` 清理上一次构建的残留层。
+
+### 3. 触发时机
+
+| 命令 | 清理时机 | 说明 |
+|------|----------|------|
+| `start` | 构建前 | 清理旧缓存，再构建新镜像 |
+| `stop` | 容器停止后 | 容器已停，清理残留层 |
+| `restart` | 停止时 + 启动前 | 双重清理（stop + start 各一次） |
+
+### 4. 安全性
+
+- 清理操作不影响正在运行的容器
+- 清理操作不影响其他项目的镜像（只用 prune 默认范围，不加 --all）
+- 非交互环境（cron/CI）安全执行（-f 跳过确认）
+
+### 5. 涉及文件
+
+- `run.sh`（仅 Docker 版）：`cleanup_cache()` 新增 docker image/builder prune + `stop_service()` 新增 cleanup_cache 调用
+- `README.md`（两版）：V10.10.10 更新条目（传统版标注"仅 Docker 版"）
 - `Project_Survey.md` / `Project_Survey_Docker.md`：本复盘章节
