@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '28948102-f55f-479d-9f2e-32b01047d5cd'
-  PropagateID: '28948102-f55f-479d-9f2e-32b01047d5cd'
-  ReservedCode1: '20a8fb63-1e59-44cf-9430-90eb3a6c3d29'
-  ReservedCode2: '20a8fb63-1e59-44cf-9430-90eb3a6c3d29'
+  ProduceID: '02913087-d773-4c43-9ed7-99a9831b390a'
+  PropagateID: '02913087-d773-4c43-9ed7-99a9831b390a'
+  ReservedCode1: '00b32332-2080-4ce8-8e58-42cd44a61527'
+  ReservedCode2: '00b32332-2080-4ce8-8e58-42cd44a61527'
 ---
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
@@ -56,15 +56,15 @@ AIGC:
 | `routes_ext.py` | 5,231 | 40.3% | 业务扩展路由（最大单体文件） |
 | `app.py` | 3,193 | 24.6% | Flask 核心 + 礼金 CRUD + 用户管理 |
 | 21 个 HTML 模板 | 11,785 | — | 前端视图层（最大 1,527 行） |
-| `models.py` | 1,071 | 8.3% | 22+ 张数据表模型定义 |
+| `models.py` | 1,071 | 8.2% | 22+ 张数据表模型定义 |
 | `webhook_utils.py` | 918 | 7.1% | Webhook 推送引擎 |
 | `webdav_utils.py` | 556 | 4.3% | WebDAV 客户端 |
-| `run.sh` | 537 | 4.1% | 部署脚本 |
+| `run.sh` | 551 | 4.2% | 部署脚本 |
 | `ai_service.py` | 424 | 3.3% | AI 核心服务 |
 | `routes_ai.py` | 423 | 3.3% | AI 路由 |
 | `gift_utils.py` | 322 | 2.5% | NLP 与对账工具 |
 | 其他 | 302 | 2.3% | SSL 生成（152）、Web 搜索（81）、Nginx 配置（69） |
-| **核心代码合计** | **12,977** | — | 不含模板；含模板共 24,762 行 |
+| **核心代码合计** | **12,991** | — | 不含模板；含模板共 24,776 行 |
 
 #### 模板文件行数
 
@@ -141,7 +141,7 @@ AIGC:
 | **企微 SDK 运行依赖** | websockets + pyee | >=12.0 / >=11.0 | `requirements.txt:12-13`（长连接与事件循环） |
 | **Webhook 网络** | requests + aiohttp | >=2.31.0 / >=3.9.0 | `requirements.txt:9-10`、`webhook_utils.py:18,47` |
 | **加密备份** | pyzipper | >=0.3.1 | `requirements.txt:16`、`webdav_utils.py` |
-| **部署脚本** | POSIX Shell (`#!/bin/sh`) | — | `run.sh:1`（537 行，兼容 dash/sh） |
+| **部署脚本** | POSIX Shell (`#!/bin/sh`) | — | `run.sh:1`（551 行，兼容 dash/sh） |
 | **SSL 证书** | 自签（cryptography 库生成） | — | `generate_ssl_certs.py` |
 
 ### 1.3 端到端架构拓扑图

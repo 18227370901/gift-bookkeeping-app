@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'ac2486e8-66a8-4af0-ac7f-20eca4c60b27'
-  PropagateID: 'ac2486e8-66a8-4af0-ac7f-20eca4c60b27'
-  ReservedCode1: 'ba04a379-9b98-408b-b7d6-e06d57136e68'
-  ReservedCode2: 'ba04a379-9b98-408b-b7d6-e06d57136e68'
+  ProduceID: '552a9659-9e16-4f40-aa5e-d4675b1fad22'
+  PropagateID: '552a9659-9e16-4f40-aa5e-d4675b1fad22'
+  ReservedCode1: 'dc31fa3d-1748-498b-b646-308c02f2b491'
+  ReservedCode2: 'dc31fa3d-1748-498b-b646-308c02f2b491'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -828,6 +828,19 @@ Docker 版 `docker compose up -d --build` 每次构建都会产生构建缓存�
 
 #### 涉及文件
 - `run.sh`（仅 Docker 版：`cleanup_cache()` 新增 Docker 清理 + `stop_service()` 新增清理调用）
+
+### V10.10.11：run.sh 多域名启动提示展示全部访问地址（2026-09-23，仅传统版）
+
+#### 问题背景
+V10.10.9 支持 SNI_DOMAIN 空格分隔多域名（全部写入证书 SAN 与 Nginx server_name，即每个域名都是本服务的有效入口），但启动成功提示中访问地址仅取第一个域名，其余域名入口未展示。
+
+#### 修复内容（仅传统版 run.sh；Docker 版行为不变）
+- `start_service()` 启动成功提示：多域名时逐行列出全部访问地址并标注域名计数；单域名输出与原格式完全一致；非 443 端口时每行地址仍带 `:端口` 后缀
+- 保持 POSIX sh 兼容（`wc -w` 计数 + `for` 分词遍历），`dash -n` 语法检查通过，沙盒验证 4 种组合（单域名 / 多域名 443 / 多域名非 443 / 域名间多余空格）输出全部符合预期
+
+#### 涉及文件
+- `run.sh`（仅传统版：`start_service()` 启动提示逻辑，537 → 551 行）
+- `PSD_Design_Document.md` / `PSD_Design_Document.html`（行数口径同步：run.sh 551 行、核心代码合计 12,991、含模板共 24,776）
 
 ## 📂 项目文件结构
 

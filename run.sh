@@ -374,15 +374,29 @@ start_service() {
     sleep 2
     if check_status; then
         # 标准端口(443)不附加端口号；非标准端口则以 域名:端口 形式提示
-        # 多域名时取第一个作为访问地址提示
-        local primary_domain="${SNI_DOMAIN%% *}"
-        local access_url="https://$primary_domain/"
-        if [ "$NGINX_PORT" != "443" ]; then
-            access_url="https://$primary_domain:$NGINX_PORT/"
-        fi
+        # SNI_DOMAIN 空格分隔的全部域名均已写入证书 SAN 与 Nginx server_name，
+        # 因此多域名时逐个展示全部访问地址（单域名保持原有单行输出）
+        local domain_count
+        domain_count=$(echo "$SNI_DOMAIN" | wc -w)
         echo_e "${GREEN}✅ 服务启动成功!${NC}"
         echo_e "   PID: $(cat $PID_FILE)"
-        echo_e "   访问地址: $access_url"
+        if [ "$domain_count" -gt 1 ]; then
+            echo_e "   访问地址 (共 ${domain_count} 个域名):"
+            for domain in $SNI_DOMAIN; do
+                if [ "$NGINX_PORT" = "443" ]; then
+                    echo_e "     - https://$domain/"
+                else
+                    echo_e "     - https://$domain:$NGINX_PORT/"
+                fi
+            done
+        else
+            local primary_domain="${SNI_DOMAIN%% *}"
+            local access_url="https://$primary_domain/"
+            if [ "$NGINX_PORT" != "443" ]; then
+                access_url="https://$primary_domain:$NGINX_PORT/"
+            fi
+            echo_e "   访问地址: $access_url"
+        fi
         echo_e "   后端本地直连: http://127.0.0.1:$PORT"
         echo_e "   日志文件: $LOG_FILE"
     else
