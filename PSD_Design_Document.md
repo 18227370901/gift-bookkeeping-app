@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'fb1f130b-7cec-426a-9096-fd0080823f7f'
-  PropagateID: 'fb1f130b-7cec-426a-9096-fd0080823f7f'
-  ReservedCode1: '06f8e684-e8af-4b72-81f3-6ab24a2a8bd2'
-  ReservedCode2: '06f8e684-e8af-4b72-81f3-6ab24a2a8bd2'
+  ProduceID: '28948102-f55f-479d-9f2e-32b01047d5cd'
+  PropagateID: '28948102-f55f-479d-9f2e-32b01047d5cd'
+  ReservedCode1: '20a8fb63-1e59-44cf-9430-90eb3a6c3d29'
+  ReservedCode2: '20a8fb63-1e59-44cf-9430-90eb3a6c3d29'
 ---
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
@@ -49,48 +49,49 @@ AIGC:
 
 ### 0.2 代码骨架与技术栈初判
 
-#### 代码体量分布
+#### 代码体量分布（行数为编辑器总行数口径，2026-09-23 实测）
 
 | 文件 | 行数 | 占比 | 职责 |
 |------|------|------|------|
-| `routes_ext.py` | 4,744 | 31.9% | 业务扩展路由（最大单体文件） |
-| `app.py` | 2,842 | 19.1% | Flask 核心 + 礼金 CRUD + 用户管理 |
-| 21 个 HTML 模板 | 10,975 | — | 前端视图层（最大 1,426 行） |
-| `models.py` | 927 | 6.2% | 22+ 张数据表模型定义 |
-| `webhook_utils.py` | 808 | 5.4% | Webhook 推送引擎 |
-| `webdav_utils.py` | 489 | 3.3% | WebDAV 客户端 |
-| `run.sh` | 467 | 3.1% | 部署脚本 |
-| `ai_service.py` | 362 | 2.4% | AI 核心服务 |
-| `routes_ai.py` | 356 | 2.4% | AI 路由 |
-| `gift_utils.py` | 282 | 1.9% | NLP 与对账工具 |
-| 其他 | ~315 | 2.1% | SSL 生成、Web 搜索、Nginx 配置 |
-| **核心代码合计** | **~14,892** | — | — |
+| `routes_ext.py` | 5,231 | 40.3% | 业务扩展路由（最大单体文件） |
+| `app.py` | 3,193 | 24.6% | Flask 核心 + 礼金 CRUD + 用户管理 |
+| 21 个 HTML 模板 | 11,785 | — | 前端视图层（最大 1,527 行） |
+| `models.py` | 1,071 | 8.3% | 22+ 张数据表模型定义 |
+| `webhook_utils.py` | 918 | 7.1% | Webhook 推送引擎 |
+| `webdav_utils.py` | 556 | 4.3% | WebDAV 客户端 |
+| `run.sh` | 537 | 4.1% | 部署脚本 |
+| `ai_service.py` | 424 | 3.3% | AI 核心服务 |
+| `routes_ai.py` | 423 | 3.3% | AI 路由 |
+| `gift_utils.py` | 322 | 2.5% | NLP 与对账工具 |
+| 其他 | 302 | 2.3% | SSL 生成（152）、Web 搜索（81）、Nginx 配置（69） |
+| **核心代码合计** | **12,977** | — | 不含模板；含模板共 24,762 行 |
 
 #### 模板文件行数
 
 | 文件 | 行数 |
 |------|------|
-| `admin_webhooks.html` | 1426 |
-| `admin_users.html` | 1293 |
-| `admin_backups.html` | 1201 |
-| `index.html` | 1030 |
-| `banquet_detail.html` | 923 |
-| `reminders.html` | 807 |
-| `banquets.html` | 601 |
-| `ai_assistant.html` | 453 |
-| `permission_tickets.html` | 443 |
-| `admin_ai_config.html` | 421 |
-| `base.html` | 379 |
-| `recycle_bin.html` | 350 |
-| `reconciliation.html` | 345 |
-| `admin_logs.html` | 252 |
-| `profile_security.html` | 242 |
-| `admin_broadcasts.html` | 223 |
-| `login.html` | 189 |
-| `forgot_password.html` | 177 |
-| `register.html` | 162 |
-| `shared_ledger.html` | 162 |
-| `change_password.html` | 49 |
+| `admin_webhooks.html` | 1527 |
+| `admin_users.html` | 1359 |
+| `admin_backups.html` | 1249 |
+| `index.html` | 1079 |
+| `banquet_detail.html` | 994 |
+| `reminders.html` | 862 |
+| `banquets.html` | 648 |
+| `ai_assistant.html` | 484 |
+| `permission_tickets.html` | 461 |
+| `admin_ai_config.html` | 449 |
+| `base.html` | 398 |
+| `recycle_bin.html` | 370 |
+| `reconciliation.html` | 368 |
+| `admin_logs.html` | 265 |
+| `profile_security.html` | 262 |
+| `admin_broadcasts.html` | 231 |
+| `login.html` | 199 |
+| `forgot_password.html` | 193 |
+| `register.html` | 171 |
+| `shared_ledger.html` | 164 |
+| `change_password.html` | 52 |
+| **合计** | **11,785** |
 
 ### 0.3 文档采纳决策
 
@@ -100,6 +101,8 @@ AIGC:
 | `README.md` | **功能现状与版本演进主源** | 版本变更日志完整到 V10.10.10，功能清单与部署指南准确 |
 | `AI_ASSISTANT_DESIGN.md` | **AI 模块与 V2~V10.7 修复细节参考** | ER 图、API 规范、前端设计详实，但需标注 V10.8+ 记录缺失 |
 | `V8_修复设计方案.md` | **排除**（已被 AI_ASSISTANT_DESIGN.md 第十二章完整吸收） | 独立草稿，无增量信息 |
+
+> **归档说明**（2026-09-23）：上表所列 Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md 三份历史文档，已在本 PSD 定稿后移入回收站归档。全文对其引用均记录审计时点状态，不影响本 PSD 的代码事实结论。
 
 ---
 
@@ -126,6 +129,7 @@ AIGC:
 | **密码哈希** | Werkzeug | 3.0.3 | `requirements.txt:5`、`models.py:9` |
 | **对称加密** | cryptography (AES-256-GCM) | 42.0.8 | `requirements.txt:7`、`models.py:10,27-43` |
 | **数据库** | SQLite (WAL) / PostgreSQL (可选) | — | `app.py:68-78`，`DATABASE_URL` 环境变量切换 |
+| **PostgreSQL 驱动** | psycopg2-binary | 2.9.9 | `requirements.txt:8`（切换 PostgreSQL 的必要依赖） |
 | **WSGI 容器** | Gunicorn (已声明但**未实际使用**) | 22.0.0 | `requirements.txt:6`；`run.sh:362-368` 实际用 `python3 app.py` |
 | **反向代理** | Nginx (SNI 多项目 443) | — | `nginx_ssl.conf`、`run.sh:224-291` |
 | **前端** | Jinja2 + Bootstrap 5 + 原生 JS | — | `templates/base.html:13-14`（**CDN 加载**） |
@@ -134,9 +138,10 @@ AIGC:
 | **AI 接入** | OpenAI Python SDK | >=1.0.0 | `requirements.txt:14`、`ai_service.py` |
 | **联网搜索** | DuckDuckGo Search | >=4.0.0 | `requirements.txt:15`、`web_search.py` |
 | **企微机器人** | wecom-aibot-python-sdk | >=1.0.2 | `requirements.txt:11`、`aibot/` 目录 |
+| **企微 SDK 运行依赖** | websockets + pyee | >=12.0 / >=11.0 | `requirements.txt:12-13`（长连接与事件循环） |
 | **Webhook 网络** | requests + aiohttp | >=2.31.0 / >=3.9.0 | `requirements.txt:9-10`、`webhook_utils.py:18,47` |
 | **加密备份** | pyzipper | >=0.3.1 | `requirements.txt:16`、`webdav_utils.py` |
-| **部署脚本** | POSIX Shell (`#!/bin/sh`) | — | `run.sh:1`（467 行，兼容 dash/sh） |
+| **部署脚本** | POSIX Shell (`#!/bin/sh`) | — | `run.sh:1`（537 行，兼容 dash/sh） |
 | **SSL 证书** | 自签（cryptography 库生成） | — | `generate_ssl_certs.py` |
 
 ### 1.3 端到端架构拓扑图
@@ -153,13 +158,13 @@ graph TB
     end
 
     subgraph "应用层 Flask 单体"
-        APP[app.py 2842行<br/>核心路由 + 认证 + 权限引擎<br/>礼金CRUD + 用户管理 + 审计日志]
-        EXT[routes_ext.py 4744行<br/>宴席/对账/纪念日/回收站<br/>广播/备份/工单/Webhook CRUD<br/>WeCom回调 + 定时调度器]
-        AI[routes_ai.py 356行<br/>AI 聊天/会话/配置/授权]
-        GIFT[gift_utils.py 282行<br/>NLP分词 + 中文大写 + 对账聚合]
-        WHK[webhook_utils.py 808行<br/>推送矩阵 + 模板 + 脱敏<br/>企微SDK长连接 + 监控过滤]
-        WDV[webdav_utils.py 489行<br/>WebDAV客户端 + 加密zip]
-        AIS[ai_service.py 362行<br/>多配置优先级 + 联网搜索 + 兜底]
+        APP[app.py 3193行<br/>核心路由 + 认证 + 权限引擎<br/>礼金CRUD + 用户管理 + 审计日志]
+        EXT[routes_ext.py 5231行<br/>宴席/对账/纪念日/回收站<br/>广播/备份/工单/Webhook CRUD<br/>WeCom回调 + 定时调度器]
+        AI[routes_ai.py 423行<br/>AI 聊天/会话/配置/授权]
+        GIFT[gift_utils.py 322行<br/>NLP分词 + 中文大写 + 对账聚合]
+        WHK[webhook_utils.py 918行<br/>推送矩阵 + 模板 + 脱敏<br/>企微SDK长连接 + 监控过滤]
+        WDV[webdav_utils.py 556行<br/>WebDAV客户端 + 加密zip]
+        AIS[ai_service.py 424行<br/>多配置优先级 + 联网搜索 + 兜底]
     end
 
     subgraph "后台守护线程"
@@ -263,8 +268,8 @@ graph TB
 理想分层:                          实际分层:
 ┌─────────────────┐               ┌─────────────────────┐
 │  Controller     │               │  Route Handler      │  ← 胖 Controller
-│  (薄路由)        │               │  (路由+业务+数据访问  │     (app.py 2842行
-├─────────────────┤               │   +权限校验+日志     │      routes_ext.py 4744行)
+│  (薄路由)        │               │  (路由+业务+数据访问  │     (app.py 3193行
+├─────────────────┤               │   +权限校验+日志     │      routes_ext.py 5231行)
 │  Service        │               │   +Webhook推送       │
 │  (业务逻辑)     │  ← 缺失       ├─────────────────────┤
 ├─────────────────┤               │  Model              │
@@ -281,7 +286,7 @@ graph TB
 | 通信类型 | 实现方式 | 代码依据 |
 |---------|---------|---------|
 | **同步 HTTP** | Flask 路由处理 → Jinja2 渲染 → 返回 HTML | 全部 `@app.route` |
-| **AJAX 异步** | 前端 `fetch()` → 后端 `jsonify()` | `templates/base.html:232-251` 全局 Fetch 拦截器 |
+| **AJAX 异步** | 前端 `fetch()` → 后端 `jsonify()` | `templates/base.html:233-259` 全局 Fetch 拦截器 |
 | **后台线程** | `threading.Thread(daemon=True)` 三常驻线程 | `routes_ext.py` 三个 worker 函数 |
 | **外部 HTTP** | `requests.Session()` 连接池 | `webhook_utils.py:47`、`webdav_utils.py` |
 | **WebSocket 长连接** | `aibot.WSClient` 企微官方 SDK | `webhook_utils.py:29` `from aibot import WSClient` |
@@ -311,9 +316,9 @@ graph TB
 | **全部路由处理** | `app.py` + `routes_ext.py` + `routes_ai.py` | ~7,942 | `@app.route`、`request`/`flash`/`redirect`/`url_for`/`jsonify`、`render_template` |
 | **认证中间件** | `app.py:155-261` | ~107 | `@app.before_request`、`current_user`、`login_user`/`logout_user`、`session` |
 | **CSRF 保护** | `app.py:214-238` | ~25 | Flask `request.form`/`session`/`abort` |
-| **模板渲染** | 21 个 HTML 模板 | 10,975 | Jinja2 模板语法 `{% %}`、`{{ }}`、`url_for()` |
-| **ORM 模型** | `models.py` 全量 | 927 | `db.Model`、`db.Column`、`db.relationship`、`db.session` |
-| **Webhook 推送引擎** | `webhook_utils.py` | 808 | `trigger_webhook_event` 直接操作 `WebhookConfig.query` |
+| **模板渲染** | 21 个 HTML 模板 | 11,785 | Jinja2 模板语法 `{% %}`、`{{ }}`、`url_for()` |
+| **ORM 模型** | `models.py` 全量 | 1,071 | `db.Model`、`db.Column`、`db.relationship`、`db.session` |
+| **Webhook 推送引擎** | `webhook_utils.py` | 918 | `trigger_webhook_event` 直接操作 `WebhookConfig.query` |
 | **权限引擎** | `app.py` `can_user_*` 系列 + `models.py` `get_menu_perm` | ~200 | 与 Flask `current_user`、SQLAlchemy `query` 深度耦合 |
 
 **强侵入代码占比估计：约 80-85%**
@@ -336,7 +341,7 @@ graph TB
 
 #### 坏味道 2：SQL 外露 — ORM 之外直接执行原生 SQL
 
-**典型代码**：`routes_ext.py:36-96` `build_user_scoped_backup_db`
+**典型代码**：`routes_ext.py:47-105` `build_user_scoped_backup_db`
 
 ```python
 # 直接 sqlite3.connect 而非 SQLAlchemy
@@ -376,14 +381,14 @@ for sql in migration_sqls:
 
 | 文件 | 行数 | 路由数量（估计） | 单文件职责 |
 |------|------|---------------|---------|
-| `routes_ext.py` | 4,744 | ~82 个路由 | 宴席/对账/纪念日/回收站/广播/备份/工单/Webhook/WeCom/定时任务 |
-| `app.py` | 2,842 | ~36 个路由 | 礼金CRUD/认证/用户管理/审计日志/安全配置/导出导入 |
+| `routes_ext.py` | 5,231 | ~82 个路由 | 宴席/对账/纪念日/回收站/广播/备份/工单/Webhook/WeCom/定时任务 |
+| `app.py` | 3,193 | ~37 个路由 | 礼金CRUD/认证/用户管理/审计日志/安全配置/导出导入 |
 
-**影响**：单文件 4744 行已超出可维护阈值，模块边界模糊。
+**影响**：单文件 5231 行已超出可维护阈值，模块边界模糊。
 
 #### 坏味道 5：前端逻辑内联 — JS 与 HTML 混杂
 
-`admin_webhooks.html`（1426 行）中包含大量内联 `<script>`，矩阵配置/事件绑定/AJAX 逻辑全部嵌在 HTML 中，无独立 JS 模块。
+`admin_webhooks.html`（1527 行）中包含大量内联 `<script>`，矩阵配置/事件绑定/AJAX 逻辑全部嵌在 HTML 中，无独立 JS 模块。
 
 ---
 
@@ -395,7 +400,7 @@ for sql in migration_sqls:
 |---------|---------|------------|
 | **框架重量** | Flask 3.0 轻量级，无过度抽象 | **否** — Flask 本身足够轻量，非瓶颈 |
 | **并发性能** | Werkzeug 开发服务器单线程 | **是** — 生产部署仍用 `python3 app.py`，无多 Worker（D-02 漂移） |
-| **代码可维护性** | 4744 行单文件，无 Service 层 | **是** — 胖 Controller 已导致修改回归风险高 |
+| **代码可维护性** | 5231 行单文件，无 Service 层 | **是** — 胖 Controller 已导致修改回归风险高 |
 | **前端体验** | Jinja2 SSR + CDN 依赖 + 内联 JS | **部分** — CDN 在内网不可用（D-03 漂移），但 SSR 本身满足业务需求 |
 | **数据库扩展** | SQLite WAL 足够单机场景 | **否** — 已支持 PostgreSQL 无缝切换 |
 | **部署复杂度** | 单文件部署 + run.sh 自动化 | **否** — 部署体验优秀 |
@@ -418,7 +423,7 @@ for sql in migration_sqls:
 | **Level 1** | 纯业务复用（零框架依赖，可直接搬运） | `cn2num`、`split_gift_nlp_text`、`calculate_reconciliation`、`encrypt_credential`/`decrypt_credential`、`_cron_match` | ~2,200 |
 | **Level 2** | 轻度适配可复用（改 import 和接口签名即可） | `webdav_utils.py`（WebDAV 协议无关）、`ai_service.py`（OpenAI SDK 无框架绑定）、`web_search.py`、`gift_utils.py` 的 `parse_gift_nlp` | ~1,000 |
 | **Level 3** | 强框架耦合，替换需大幅重写 | 全部 `@app.route` 路由（~7,942 行）、`models.py`（SQLAlchemy 模型）、`webhook_utils.py`（依赖 `WebhookConfig.query`）、权限引擎、CSRF 中间件 | ~9,500 |
-| **Level 4** | 架构级推倒重写 | 21 个 Jinja2 模板（10,975 行）— 换前端框架必须全量重写 | ~10,975 |
+| **Level 4** | 架构级推倒重写 | 21 个 Jinja2 模板（11,785 行）— 换前端框架必须全量重写 | ~11,785 |
 
 ### 5.4 最终结论
 
@@ -460,7 +465,7 @@ for sql in migration_sqls:
 | 图表库 | Chart.js（模板内 CDN 引入） | `index.html` 内引用 |
 | JavaScript | 原生 JS（无框架、无构建工具），`fetch()` API 做 AJAX 通信 | 全部模板内联 `<script>` |
 | PWA | `static/manifest.json` + `static/sw.js`（仅 manifest 壳，无 fetch 拦截） | `base.html:9-10` |
-| CSRF | 全局 `<meta name="csrf-token">` 注入，fetch 请求头携带 `X-CSRF-Token` | `base.html:6`、`base.html:232-251` |
+| CSRF | 全局 `<meta name="csrf-token">` 注入，fetch 请求头携带 `X-CSRF-Token` | `base.html:6`、`base.html:233-259` |
 
 #### 6.1.2 路由（前端导航）
 
@@ -478,7 +483,7 @@ for sql in migration_sqls:
 
 #### 6.1.3 前端全局 Fetch 拦截器
 
-`base.html:232-251` 定义全局 fetch 响应拦截逻辑：
+`base.html:233-259` 定义全局 fetch 响应拦截逻辑：
 - HTTP 401 + JSON 含 `need_verify` 字段 → 豁免跳转（V10.7 修复凭证验证误跳转）
 - HTTP 401（非 need_verify）→ 判定登录失效，`alert()` + `window.location.href = '/login'`
 - 其余响应透传
@@ -487,14 +492,14 @@ for sql in migration_sqls:
 
 | 模板 | 行数 | 核心职责 |
 |------|------|---------|
-| `base.html` | 379 | 全局布局、导航栏、Flash 提示、全局 JS/CSS 引入 |
-| `index.html` | 1030 | 礼金账本首页：列表/搜索/分页/统计/新增编辑模态框/NLP 录入/CSV 导入导出 |
-| `admin_webhooks.html` | 1426 | Webhook 管理：4-Tab 配置（事件开关/页面×事件矩阵/消息模板/监控范围）+ 推送日志 |
-| `admin_users.html` | 1293 | 用户管理：列表/权限配置模态框/AI+备份授权/凭证查看/重置密码+密保 |
-| `admin_backups.html` | 1201 | WebDAV 备份：配置/定时任务/云端备份列表/本地备份/附件恢复/授权管理 |
-| `banquet_detail.html` | 923 | 宴席明细：现场收礼/分页/搜索/批量操作/分享链接 |
-| `reminders.html` | 807 | 纪念日备忘：列表/搜索/批量推送模态框/多通道选择/定时调度 |
-| `banquets.html` | 601 | 宴席总览：卡片/表格双视图/搜索/批量删除 |
+| `base.html` | 398 | 全局布局、导航栏、Flash 提示、全局 JS/CSS 引入 |
+| `index.html` | 1079 | 礼金账本首页：列表/搜索/分页/统计/新增编辑模态框/NLP 录入/CSV 导入导出 |
+| `admin_webhooks.html` | 1527 | Webhook 管理：4-Tab 配置（事件开关/页面×事件矩阵/消息模板/监控范围）+ 推送日志 |
+| `admin_users.html` | 1359 | 用户管理：列表/权限配置模态框/AI+备份授权/凭证查看/重置密码+密保 |
+| `admin_backups.html` | 1249 | WebDAV 备份：配置/定时任务/云端备份列表/本地备份/附件恢复/授权管理 |
+| `banquet_detail.html` | 994 | 宴席明细：现场收礼/分页/搜索/批量操作/分享链接 |
+| `reminders.html` | 862 | 纪念日备忘：列表/搜索/批量推送模态框/多通道选择/定时调度 |
+| `banquets.html` | 648 | 宴席总览：卡片/表格双视图/搜索/批量删除 |
 
 ### 6.2 后端核心服务分层
 
@@ -502,9 +507,9 @@ for sql in migration_sqls:
 
 ```
 app.py (Flask app 实例创建)
-  ├── @app.route 核心路由 (36 个) → 直接定义在 app.py
+  ├── @app.route 核心路由 (37 个) → 直接定义在 app.py
   ├── register_routes_ext(app) → 从 routes_ext.py 注册扩展路由 (82 个)
-  └── register_ai_routes(app, log_action) → 从 routes_ai.py 注册 AI 路由 (13 个)
+  └── register_ai_routes(app, log_action) → 从 routes_ai.py 注册 AI 路由 (14 个)
 ```
 
 **代码依据**：`app.py:33` `from routes_ext import register_routes_ext`；`routes_ai.py:17` `def register_ai_routes(app, log_action=None)`
@@ -623,7 +628,7 @@ app.py (Flask app 实例创建)
 
 | 属性 | 值 |
 |------|-----|
-| 路径 | `POST /admin/backup/upload_local` + `POST /admin/backups/restore_webdav` |
+| 路径 | `POST /admin/backup/upload_local` + `POST /admin/backup/restore`（代码注册别名：`/admin/backups/restore`、`/admin/backups/restore/<path:filename>`，`routes_ext.py:4221-4223`） |
 | 鉴权 | `@login_required` + `can_use_backup()` |
 | 代码 | `routes_ext.py` `admin_upload_local_backup` / `admin_restore_webdav_backup` |
 | 管理员路径 | `sqlite3.backup()` 原子替换 + WAL/SHM 清理 + `init_database()` 迁移 |
@@ -634,7 +639,7 @@ app.py (Flask app 实例创建)
 
 | 属性 | 值 |
 |------|-----|
-| 路径 | `GET/POST /admin/user/<id>/credentials` |
+| 路径 | `GET/POST /admin/user/<int:user_id>/credentials` |
 | 鉴权 | 管理员专属 + 管理员目标需二次验证 |
 | 代码 | `app.py:2743-2802` |
 | 特性 | 管理员查看管理员凭证需验证原密码或密保；HTTP 200 + JSON `code:401` + `need_verify:true`（V10.7 修复避免全局拦截器误判） |
@@ -643,9 +648,9 @@ app.py (Flask app 实例创建)
 
 | 属性 | 值 |
 |------|-----|
-| 路径 | `POST /permission_tickets/<id>/approve` |
+| 路径 | `POST /permission_tickets/<int:ticket_id>/approve` |
 | 鉴权 | 管理员专属 |
-| 代码 | `routes_ext.py:4990-5034` |
+| 代码 | `routes_ext.py:4977-5034` |
 | 逻辑 | 工单 status → approved；勾选的菜单合并到 `user.allowed_menus`；Webhook 推送 + 审计日志 |
 
 ---
@@ -970,10 +975,10 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 
 | # | 技术债 | 严重度 | 代码依据 | 影响 |
 |---|--------|--------|---------|------|
-| CQ-01 | `routes_ext.py` 4744 行单文件膨胀 | 高 | `routes_ext.py` 全文 | 模块边界模糊，修改回归风险高 |
+| CQ-01 | `routes_ext.py` 5231 行单文件膨胀 | 高 | `routes_ext.py` 全文 | 模块边界模糊，修改回归风险高 |
 | CQ-02 | 无 Service 层，业务逻辑全在路由函数内 | 高 | `routes_ext.py:admin_upload_local_backup`（~130 行单函数） | 函数职责超 10 个，测试困难 |
 | CQ-03 | 数据库迁移硬编码 SQL，无版本管理 | 中 | `app.py:681-817` ~60 条 `ALTER TABLE` | 迁移失败静默吞没，无回滚 |
-| CQ-04 | 前端 JS 与 HTML 混杂，无模块化 | 中 | `admin_webhooks.html`（1426 行含大量内联 JS） | 前端逻辑不可复用、不可测试 |
+| CQ-04 | 前端 JS 与 HTML 混杂，无模块化 | 中 | `admin_webhooks.html`（1527 行含大量内联 JS） | 前端逻辑不可复用、不可测试 |
 | CQ-05 | `app.py` 与 `gift_utils.py` 各有一份 `cn2num` 实现重复 | 低 | `app.py:425-462`、`gift_utils.py:13-55` | 逻辑重复，维护需同步两处 |
 | CQ-06 | `decrypt_credential` 函数内含两段完全相同的 try-except 块 | 低 | `models.py:45-73` | 死代码，第二段永不执行 |
 
@@ -992,7 +997,7 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 |---|--------|--------|---------|------|
 | EX-01 | 无消息队列，异步任务依赖 daemon 线程 | 中 | `routes_ext.py:380,499` | 线程内异常仅 print，无重试/死信；多进程部署时线程不共享 |
 | EX-02 | 权限方法中硬编码菜单列表 | 低 | `models.py:155` `ALL_MENUS = ['ledger','banquets',...]` | 新增菜单需修改多处代码 |
-| EX-03 | Webhook 推送全项目 ~82 处调用点手动传参 | 中 | 全项目 `trigger_webhook_event` 调用 | 每次新增路由需手动补全推送，遗漏风险高 |
+| EX-03 | Webhook 推送全项目 ~106 处调用点手动传参 | 中 | 全项目 `trigger_webhook_event` 调用（app.py 31 + routes_ext.py 70 + routes_ai.py 5） | 每次新增路由需手动补全推送，遗漏风险高 |
 
 #### 维度四：安全漏洞
 
@@ -1089,10 +1094,10 @@ graph LR
 | 文档版本 | V1.0 |
 | 生成日期 | 2026-09-23 |
 | 审计基线 | 代码 commit `6360bb6`（main），README.md V10.10.10，Project_Survey.md ADR-01~38 |
-| 代码审计范围 | 13 个 Python 文件（~14,892 行）+ 21 个 HTML 模板（~10,975 行）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
-| 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md |
+| 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,785 行）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
+| 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |
 | 漂移项总数 | 10（2 高影响 / 1 中影响 / 4 低影响 / 3 一致） |
-| 技术债总数 | 22（6 代码质量 / 4 性能 / 3 扩展性 / 4 安全 / 5 运维） |
+| 技术债总数 | 21（6 代码质量 / 4 性能 / 3 扩展性 / 4 安全 / 4 运维） |
 | 治理路线 | P0（2 项 1-2 人日）/ P1（4 项 1-2 周）/ P2（5 项 1-2 月） |
 | 最终结论 | 不建议替换框架，仅局部治理 |
 

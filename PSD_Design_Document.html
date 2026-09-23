@@ -139,21 +139,48 @@
 </table>
 
 <h2>0.2 代码骨架与技术栈初判</h2>
-<h3>代码体量分布</h3>
+<h3>代码体量分布（行数为编辑器总行数口径，2026-09-23 实测）</h3>
 <table>
 <tr><th>文件</th><th>行数</th><th>占比</th><th>职责</th></tr>
-<tr><td><code>routes_ext.py</code></td><td>4,744</td><td>31.9%</td><td>业务扩展路由（最大单体文件）</td></tr>
-<tr><td><code>app.py</code></td><td>2,842</td><td>19.1%</td><td>Flask 核心 + 礼金 CRUD + 用户管理</td></tr>
-<tr><td>21 个 HTML 模板</td><td>10,975</td><td>—</td><td>前端视图层（最大 1,426 行）</td></tr>
-<tr><td><code>models.py</code></td><td>927</td><td>6.2%</td><td>22+ 张数据表模型定义</td></tr>
-<tr><td><code>webhook_utils.py</code></td><td>808</td><td>5.4%</td><td>Webhook 推送引擎</td></tr>
-<tr><td><code>webdav_utils.py</code></td><td>489</td><td>3.3%</td><td>WebDAV 客户端</td></tr>
-<tr><td><code>run.sh</code></td><td>467</td><td>3.1%</td><td>部署脚本</td></tr>
-<tr><td><code>ai_service.py</code></td><td>362</td><td>2.4%</td><td>AI 核心服务</td></tr>
-<tr><td><code>routes_ai.py</code></td><td>356</td><td>2.4%</td><td>AI 路由</td></tr>
-<tr><td><code>gift_utils.py</code></td><td>282</td><td>1.9%</td><td>NLP 与对账工具</td></tr>
-<tr><td>其他</td><td>~315</td><td>2.1%</td><td>SSL 生成、Web 搜索、Nginx 配置</td></tr>
-<tr><td><strong>核心代码合计</strong></td><td><strong>~14,892</strong></td><td>—</td><td>—</td></tr>
+<tr><td><code>routes_ext.py</code></td><td>5,231</td><td>40.3%</td><td>业务扩展路由（最大单体文件）</td></tr>
+<tr><td><code>app.py</code></td><td>3,193</td><td>24.6%</td><td>Flask 核心 + 礼金 CRUD + 用户管理</td></tr>
+<tr><td>21 个 HTML 模板</td><td>11,785</td><td>—</td><td>前端视图层（最大 1,527 行）</td></tr>
+<tr><td><code>models.py</code></td><td>1,071</td><td>8.3%</td><td>22+ 张数据表模型定义</td></tr>
+<tr><td><code>webhook_utils.py</code></td><td>918</td><td>7.1%</td><td>Webhook 推送引擎</td></tr>
+<tr><td><code>webdav_utils.py</code></td><td>556</td><td>4.3%</td><td>WebDAV 客户端</td></tr>
+<tr><td><code>run.sh</code></td><td>537</td><td>4.1%</td><td>部署脚本</td></tr>
+<tr><td><code>ai_service.py</code></td><td>424</td><td>3.3%</td><td>AI 核心服务</td></tr>
+<tr><td><code>routes_ai.py</code></td><td>423</td><td>3.3%</td><td>AI 路由</td></tr>
+<tr><td><code>gift_utils.py</code></td><td>322</td><td>2.5%</td><td>NLP 与对账工具</td></tr>
+<tr><td>其他</td><td>302</td><td>2.3%</td><td>SSL 生成（152）、Web 搜索（81）、Nginx 配置（69）</td></tr>
+<tr><td><strong>核心代码合计</strong></td><td><strong>12,977</strong></td><td>—</td><td>不含模板；含模板共 24,762 行</td></tr>
+</table>
+
+<h3>模板文件行数</h3>
+<table>
+<tr><th>文件</th><th>行数</th></tr>
+<tr><td><code>admin_webhooks.html</code></td><td>1527</td></tr>
+<tr><td><code>admin_users.html</code></td><td>1359</td></tr>
+<tr><td><code>admin_backups.html</code></td><td>1249</td></tr>
+<tr><td><code>index.html</code></td><td>1079</td></tr>
+<tr><td><code>banquet_detail.html</code></td><td>994</td></tr>
+<tr><td><code>reminders.html</code></td><td>862</td></tr>
+<tr><td><code>banquets.html</code></td><td>648</td></tr>
+<tr><td><code>ai_assistant.html</code></td><td>484</td></tr>
+<tr><td><code>permission_tickets.html</code></td><td>461</td></tr>
+<tr><td><code>admin_ai_config.html</code></td><td>449</td></tr>
+<tr><td><code>base.html</code></td><td>398</td></tr>
+<tr><td><code>recycle_bin.html</code></td><td>370</td></tr>
+<tr><td><code>reconciliation.html</code></td><td>368</td></tr>
+<tr><td><code>admin_logs.html</code></td><td>265</td></tr>
+<tr><td><code>profile_security.html</code></td><td>262</td></tr>
+<tr><td><code>admin_broadcasts.html</code></td><td>231</td></tr>
+<tr><td><code>login.html</code></td><td>199</td></tr>
+<tr><td><code>forgot_password.html</code></td><td>193</td></tr>
+<tr><td><code>register.html</code></td><td>171</td></tr>
+<tr><td><code>shared_ledger.html</code></td><td>164</td></tr>
+<tr><td><code>change_password.html</code></td><td>52</td></tr>
+<tr><td><strong>合计</strong></td><td><strong>11,785</strong></td></tr>
 </table>
 
 <h2>0.3 文档采纳决策</h2>
@@ -164,6 +191,7 @@
 <tr><td><code>AI_ASSISTANT_DESIGN.md</code></td><td><strong>AI 模块与 V2~V10.7 修复细节参考</strong></td><td>ER 图、API 规范详实，但需标注 V10.8+ 记录缺失</td></tr>
 <tr><td><code>V8_修复设计方案.md</code></td><td><strong>排除</strong></td><td>已被完整吸收，无增量信息</td></tr>
 </table>
+<div class="callout warning"><strong>归档说明</strong>（2026-09-23）：上表所列 Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md 三份历史文档，已在本 PSD 定稿后移入回收站归档。全文对其引用均记录审计时点状态，不影响本 PSD 的代码事实结论。</div>
 </div>
 
 <!-- ==================== 第 1 部分 ==================== -->
@@ -190,6 +218,7 @@
 <tr><td>密码哈希</td><td>Werkzeug</td><td>3.0.3</td><td><code>requirements.txt:5</code>、<code>models.py:9</code></td></tr>
 <tr><td>对称加密</td><td>cryptography (AES-256-GCM)</td><td>42.0.8</td><td><code>requirements.txt:7</code>、<code>models.py:10,27-43</code></td></tr>
 <tr><td>数据库</td><td>SQLite (WAL) / PostgreSQL (可选)</td><td>—</td><td><code>app.py:68-78</code>，<code>DATABASE_URL</code> 切换</td></tr>
+<tr><td>PostgreSQL 驱动</td><td>psycopg2-binary</td><td>2.9.9</td><td><code>requirements.txt:8</code>（切换 PostgreSQL 的必要依赖）</td></tr>
 <tr><td>WSGI 容器</td><td>Gunicorn <span class="tag tag-drift">已声明未使用</span></td><td>22.0.0</td><td><code>requirements.txt:6</code>；<code>run.sh:362-368</code> 实际用 <code>python3 app.py</code></td></tr>
 <tr><td>反向代理</td><td>Nginx (SNI 多项目 443)</td><td>—</td><td><code>nginx_ssl.conf</code>、<code>run.sh:224-291</code></td></tr>
 <tr><td>前端</td><td>Jinja2 + Bootstrap 5 + 原生 JS</td><td>—</td><td><code>templates/base.html:13-14</code>（CDN 加载）</td></tr>
@@ -198,9 +227,10 @@
 <tr><td>AI 接入</td><td>OpenAI Python SDK</td><td>&gt;=1.0.0</td><td><code>requirements.txt:14</code>、<code>ai_service.py</code></td></tr>
 <tr><td>联网搜索</td><td>DuckDuckGo Search</td><td>&gt;=4.0.0</td><td><code>requirements.txt:15</code>、<code>web_search.py</code></td></tr>
 <tr><td>企微机器人</td><td>wecom-aibot-python-sdk</td><td>&gt;=1.0.2</td><td><code>requirements.txt:11</code>、<code>aibot/</code></td></tr>
+<tr><td>企微 SDK 运行依赖</td><td>websockets + pyee</td><td>&gt;=12.0 / &gt;=11.0</td><td><code>requirements.txt:12-13</code>（长连接与事件循环）</td></tr>
 <tr><td>Webhook 网络</td><td>requests + aiohttp</td><td>&gt;=2.31.0 / &gt;=3.9.0</td><td><code>requirements.txt:9-10</code></td></tr>
 <tr><td>加密备份</td><td>pyzipper</td><td>&gt;=0.3.1</td><td><code>requirements.txt:16</code></td></tr>
-<tr><td>部署脚本</td><td>POSIX Shell (<code>#!/bin/sh</code>)</td><td>—</td><td><code>run.sh:1</code>（467 行，兼容 dash/sh）</td></tr>
+<tr><td>部署脚本</td><td>POSIX Shell (<code>#!/bin/sh</code>)</td><td>—</td><td><code>run.sh:1</code>（537 行，兼容 dash/sh）</td></tr>
 </table>
 
 <h2>1.3 端到端架构拓扑图</h2>
@@ -215,13 +245,13 @@ graph TB
         NGINX[Nginx 反向代理<br/>SNI 多项目 443 端口<br/>TLS 1.2/1.3 + HTTP/2]
     end
     subgraph "应用层 Flask 单体"
-        APP[app.py 2842行<br/>核心路由 + 认证 + 权限引擎<br/>礼金CRUD + 用户管理 + 审计日志]
-        EXT[routes_ext.py 4744行<br/>宴席/对账/纪念日/回收站<br/>广播/备份/工单/Webhook CRUD<br/>WeCom回调 + 定时调度器]
-        AI[routes_ai.py 356行<br/>AI 聊天/会话/配置/授权]
-        GIFT[gift_utils.py 282行<br/>NLP分词 + 中文大写 + 对账聚合]
-        WHK[webhook_utils.py 808行<br/>推送矩阵 + 模板 + 脱敏<br/>企微SDK长连接 + 监控过滤]
-        WDV[webdav_utils.py 489行<br/>WebDAV客户端 + 加密zip]
-        AIS[ai_service.py 362行<br/>多配置优先级 + 联网搜索 + 兜底]
+        APP[app.py 3193行<br/>核心路由 + 认证 + 权限引擎<br/>礼金CRUD + 用户管理 + 审计日志]
+        EXT[routes_ext.py 5231行<br/>宴席/对账/纪念日/回收站<br/>广播/备份/工单/Webhook CRUD<br/>WeCom回调 + 定时调度器]
+        AI[routes_ai.py 423行<br/>AI 聊天/会话/配置/授权]
+        GIFT[gift_utils.py 322行<br/>NLP分词 + 中文大写 + 对账聚合]
+        WHK[webhook_utils.py 918行<br/>推送矩阵 + 模板 + 脱敏<br/>企微SDK长连接 + 监控过滤]
+        WDV[webdav_utils.py 556行<br/>WebDAV客户端 + 加密zip]
+        AIS[ai_service.py 424行<br/>多配置优先级 + 联网搜索 + 兜底]
     end
     subgraph "后台守护线程"
         T1[_anniversary_reminder_worker<br/>每60秒巡检纪念日]
@@ -336,8 +366,8 @@ graph TB
 理想分层:                          实际分层:
 ┌─────────────────┐               ┌─────────────────────┐
 │  Controller     │               │  Route Handler      │  ← 胖 Controller
-│  (薄路由)        │               │  (路由+业务+数据访问  │     (app.py 2842行
-├─────────────────┤               │   +权限校验+日志     │      routes_ext.py 4744行)
+│  (薄路由)        │               │  (路由+业务+数据访问  │     (app.py 3193行
+├─────────────────┤               │   +权限校验+日志     │      routes_ext.py 5231行)
 │  Service        │               │   +Webhook推送       │
 │  (业务逻辑)     │  ← 缺失       ├─────────────────────┤
 ├─────────────────┤               │  Model              │
@@ -351,7 +381,7 @@ graph TB
 <table>
 <tr><th>通信类型</th><th>实现方式</th><th>代码依据</th></tr>
 <tr><td>同步 HTTP</td><td>Flask 路由处理 → Jinja2 渲染 → 返回 HTML</td><td>全部 <code>@app.route</code></td></tr>
-<tr><td>AJAX 异步</td><td>前端 fetch() → 后端 jsonify()</td><td><code>base.html:232-251</code> 全局 Fetch 拦截器</td></tr>
+<tr><td>AJAX 异步</td><td>前端 fetch() → 后端 jsonify()</td><td><code>base.html:233-259</code> 全局 Fetch 拦截器</td></tr>
 <tr><td>后台线程</td><td>threading.Thread(daemon=True) 三常驻线程</td><td><code>routes_ext.py</code> 三个 worker 函数</td></tr>
 <tr><td>外部 HTTP</td><td>requests.Session() 连接池</td><td><code>webhook_utils.py:47</code></td></tr>
 <tr><td>WebSocket 长连接</td><td>aibot.WSClient 企微官方 SDK</td><td><code>webhook_utils.py:29</code></td></tr>
@@ -381,9 +411,9 @@ graph TB
 <tr><td>全部路由处理</td><td>app.py + routes_ext.py + routes_ai.py</td><td>~7,942</td><td>@app.route、request/flash/redirect/url_for/jsonify、render_template</td></tr>
 <tr><td>认证中间件</td><td><code>app.py:155-261</code></td><td>~107</td><td>@app.before_request、current_user、session</td></tr>
 <tr><td>CSRF 保护</td><td><code>app.py:214-238</code></td><td>~25</td><td>Flask request.form/session/abort</td></tr>
-<tr><td>模板渲染</td><td>21 个 HTML 模板</td><td>10,975</td><td>Jinja2 语法</td></tr>
-<tr><td>ORM 模型</td><td><code>models.py</code> 全量</td><td>927</td><td>db.Model、db.Column、db.relationship</td></tr>
-<tr><td>Webhook 推送引擎</td><td><code>webhook_utils.py</code></td><td>808</td><td>trigger_webhook_event 直接操作 WebhookConfig.query</td></tr>
+<tr><td>模板渲染</td><td>21 个 HTML 模板</td><td>11,785</td><td>Jinja2 语法</td></tr>
+<tr><td>ORM 模型</td><td><code>models.py</code> 全量</td><td>1,071</td><td>db.Model、db.Column、db.relationship</td></tr>
+<tr><td>Webhook 推送引擎</td><td><code>webhook_utils.py</code></td><td>918</td><td>trigger_webhook_event 直接操作 WebhookConfig.query</td></tr>
 <tr><td>权限引擎</td><td>app.py can_user_* + models.py get_menu_perm</td><td>~200</td><td>与 Flask current_user、SQLAlchemy query 深度耦合</td></tr>
 </table>
 <div class="callout"><strong>强侵入代码占比：约 80-85%</strong></div>
@@ -395,7 +425,7 @@ graph TB
 
 <h3>坏味道 2：SQL 外露 — ORM 之外直接执行原生 SQL</h3>
 <pre>
-# routes_ext.py:36-96 build_user_scoped_backup_db
+# routes_ext.py:47-105 build_user_scoped_backup_db
 _src_conn = _sqlite3.connect(db_path)   # 直接 sqlite3 而非 SQLAlchemy
 c.execute("DELETE FROM gift_records WHERE user_id != ?", (user.id,))  # 直接 DELETE
 c.execute(f'DROP TABLE IF EXISTS "{tbl}"')                              # 直接 DROP
@@ -416,12 +446,12 @@ for sql in migration_sqls:
 <h3>坏味道 4：路由文件膨胀失控</h3>
 <table>
 <tr><th>文件</th><th>行数</th><th>路由数量</th><th>单文件职责</th></tr>
-<tr><td><code>routes_ext.py</code></td><td>4,744</td><td>~82 个</td><td>宴席/对账/纪念日/回收站/广播/备份/工单/Webhook/WeCom/定时任务</td></tr>
-<tr><td><code>app.py</code></td><td>2,842</td><td>~36 个</td><td>礼金CRUD/认证/用户管理/审计日志/安全配置/导出导入</td></tr>
+<tr><td><code>routes_ext.py</code></td><td>5,231</td><td>~82 个</td><td>宴席/对账/纪念日/回收站/广播/备份/工单/Webhook/WeCom/定时任务</td></tr>
+<tr><td><code>app.py</code></td><td>3,193</td><td>~37 个</td><td>礼金CRUD/认证/用户管理/审计日志/安全配置/导出导入</td></tr>
 </table>
 
 <h3>坏味道 5：前端逻辑内联 — JS 与 HTML 混杂</h3>
-<p><code>admin_webhooks.html</code>（1426 行）中包含大量内联 <code>&lt;script&gt;</code>，矩阵配置/事件绑定/AJAX 逻辑全部嵌在 HTML 中，无独立 JS 模块。</p>
+<p><code>admin_webhooks.html</code>（1527 行）中包含大量内联 <code>&lt;script&gt;</code>，矩阵配置/事件绑定/AJAX 逻辑全部嵌在 HTML 中，无独立 JS 模块。</p>
 </div>
 
 <!-- ==================== 第 5 部分 ==================== -->
@@ -433,7 +463,7 @@ for sql in migration_sqls:
 <tr><th>评估维度</th><th>当前状态</th><th>是否存在瓶颈</th></tr>
 <tr><td>框架重量</td><td>Flask 3.0 轻量级，无过度抽象</td><td><span class="tag tag-ok">否</span> Flask 本身足够轻量</td></tr>
 <tr><td>并发性能</td><td>Werkzeug 开发服务器单线程</td><td><span class="tag tag-high">是</span> 生产部署仍用 python3 app.py（D-02 漂移）</td></tr>
-<tr><td>代码可维护性</td><td>4744 行单文件，无 Service 层</td><td><span class="tag tag-high">是</span> 胖 Controller 修改回归风险高</td></tr>
+<tr><td>代码可维护性</td><td>5231 行单文件，无 Service 层</td><td><span class="tag tag-high">是</span> 胖 Controller 修改回归风险高</td></tr>
 <tr><td>前端体验</td><td>Jinja2 SSR + CDN 依赖 + 内联 JS</td><td><span class="tag tag-mid">部分</span> CDN 在内网不可用（D-03）</td></tr>
 <tr><td>数据库扩展</td><td>SQLite WAL 足够单机场景</td><td><span class="tag tag-ok">否</span> 已支持 PostgreSQL 无缝切换</td></tr>
 <tr><td>部署复杂度</td><td>单文件部署 + run.sh 自动化</td><td><span class="tag tag-ok">否</span> 部署体验优秀</td></tr>
@@ -455,7 +485,7 @@ for sql in migration_sqls:
 <tr><td>Level 1</td><td>纯业务复用（零框架依赖）</td><td>cn2num、split_gift_nlp_text、encrypt/decrypt_credential、_cron_match</td><td>~2,200</td></tr>
 <tr><td>Level 2</td><td>轻度适配可复用</td><td>webdav_utils.py、ai_service.py、web_search.py、parse_gift_nlp</td><td>~1,000</td></tr>
 <tr><td>Level 3</td><td>强框架耦合，替换需大幅重写</td><td>全部路由、models.py、webhook_utils.py、权限引擎、CSRF 中间件</td><td>~9,500</td></tr>
-<tr><td>Level 4</td><td>架构级推倒重写</td><td>21 个 Jinja2 模板</td><td>~10,975</td></tr>
+<tr><td>Level 4</td><td>架构级推倒重写</td><td>21 个 Jinja2 模板</td><td>~11,785</td></tr>
 </table>
 
 <h2>5.4 最终结论</h2>
@@ -493,7 +523,7 @@ for sql in migration_sqls:
 <tr><td>图表库</td><td>Chart.js（模板内 CDN 引入）</td><td>index.html</td></tr>
 <tr><td>JavaScript</td><td>原生 JS（无框架、无构建工具），fetch() API</td><td>全部模板内联 &lt;script&gt;</td></tr>
 <tr><td>PWA</td><td>manifest.json + sw.js（仅 manifest 壳）</td><td>base.html:9-10</td></tr>
-<tr><td>CSRF</td><td>全局 meta 标签注入 + fetch 请求头携带</td><td>base.html:6, 232-251</td></tr>
+<tr><td>CSRF</td><td>全局 meta 标签注入 + fetch 请求头携带</td><td>base.html:6, 233-259</td></tr>
 </table>
 
 <h3>6.1.2 全局导航栏菜单</h3>
@@ -507,7 +537,7 @@ for sql in migration_sqls:
 </table>
 
 <h3>6.1.3 前端全局 Fetch 拦截器</h3>
-<p><code>base.html:232-251</code> 定义全局 fetch 响应拦截逻辑：</p>
+<p><code>base.html:233-259</code> 定义全局 fetch 响应拦截逻辑：</p>
 <ul style="margin: 8px 0 8px 24px;">
 <li>HTTP 401 + JSON 含 <code>need_verify</code> 字段 → 豁免跳转（V10.7 修复凭证验证误跳转）</li>
 <li>HTTP 401（非 need_verify）→ 判定登录失效，alert() + 跳转 /login</li>
@@ -517,23 +547,23 @@ for sql in migration_sqls:
 <h3>6.1.4 模板清单与职责</h3>
 <table>
 <tr><th>模板</th><th>行数</th><th>核心职责</th></tr>
-<tr><td>base.html</td><td>379</td><td>全局布局、导航栏、Flash 提示、全局 JS/CSS 引入</td></tr>
-<tr><td>index.html</td><td>1030</td><td>礼金账本首页：列表/搜索/分页/统计/新增编辑模态框/NLP 录入/CSV 导入导出</td></tr>
-<tr><td>admin_webhooks.html</td><td>1426</td><td>Webhook 管理：4-Tab 配置（事件开关/页面×事件矩阵/消息模板/监控范围）+ 推送日志</td></tr>
-<tr><td>admin_users.html</td><td>1293</td><td>用户管理：列表/权限配置/AI+备份授权/凭证查看/重置密码+密保</td></tr>
-<tr><td>admin_backups.html</td><td>1201</td><td>WebDAV 备份：配置/定时任务/云端备份列表/本地备份/附件恢复</td></tr>
-<tr><td>banquet_detail.html</td><td>923</td><td>宴席明细：现场收礼/分页/搜索/批量操作/分享链接</td></tr>
-<tr><td>reminders.html</td><td>807</td><td>纪念日备忘：列表/搜索/批量推送模态框/多通道选择/定时调度</td></tr>
-<tr><td>banquets.html</td><td>601</td><td>宴席总览：卡片/表格双视图/搜索/批量删除</td></tr>
+<tr><td>base.html</td><td>398</td><td>全局布局、导航栏、Flash 提示、全局 JS/CSS 引入</td></tr>
+<tr><td>index.html</td><td>1079</td><td>礼金账本首页：列表/搜索/分页/统计/新增编辑模态框/NLP 录入/CSV 导入导出</td></tr>
+<tr><td>admin_webhooks.html</td><td>1527</td><td>Webhook 管理：4-Tab 配置（事件开关/页面×事件矩阵/消息模板/监控范围）+ 推送日志</td></tr>
+<tr><td>admin_users.html</td><td>1359</td><td>用户管理：列表/权限配置/AI+备份授权/凭证查看/重置密码+密保</td></tr>
+<tr><td>admin_backups.html</td><td>1249</td><td>WebDAV 备份：配置/定时任务/云端备份列表/本地备份/附件恢复</td></tr>
+<tr><td>banquet_detail.html</td><td>994</td><td>宴席明细：现场收礼/分页/搜索/批量操作/分享链接</td></tr>
+<tr><td>reminders.html</td><td>862</td><td>纪念日备忘：列表/搜索/批量推送模态框/多通道选择/定时调度</td></tr>
+<tr><td>banquets.html</td><td>648</td><td>宴席总览：卡片/表格双视图/搜索/批量删除</td></tr>
 </table>
 
 <h2>6.2 后端核心服务分层</h2>
 <h3>6.2.1 路由装配机制</h3>
 <pre>
 app.py (Flask app 实例创建)
-  ├── @app.route 核心路由 (36 个) → 直接定义在 app.py
+  ├── @app.route 核心路由 (37 个) → 直接定义在 app.py
   ├── register_routes_ext(app) → 从 routes_ext.py 注册扩展路由 (82 个)
-  └── register_ai_routes(app, log_action) → 从 routes_ai.py 注册 AI 路由 (13 个)
+  └── register_ai_routes(app, log_action) → 从 routes_ai.py 注册 AI 路由 (14 个)
 </pre>
 
 <h3>6.2.2 中间件流水线（@app.before_request 执行顺序）</h3>
@@ -637,7 +667,7 @@ app.py (Flask app 实例创建)
 <h3>API-08: 备份恢复</h3>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>路径</td><td>POST /admin/backup/upload_local + POST /admin/backups/restore_webdav</td></tr>
+<tr><td>路径</td><td>POST /admin/backup/upload_local + POST /admin/backup/restore（代码注册别名：/admin/backups/restore、/admin/backups/restore/&lt;path:filename&gt;，routes_ext.py:4221-4223）</td></tr>
 <tr><td>管理员路径</td><td>sqlite3.backup() 原子替换 + WAL/SHM 清理 + init_database() 迁移</td></tr>
 <tr><td>普通用户路径</td><td>merge_user_scoped_backup() 数据级合并（ATTACH DATABASE 跨库，仅本人三张业务表）</td></tr>
 <tr><td>安全</td><td>文件命名校验 + 归属校验 + 完整库拦截 + PRAGMA integrity_check</td></tr>
@@ -646,7 +676,7 @@ app.py (Flask app 实例创建)
 <h3>API-09: 管理员查看用户凭证</h3>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>路径</td><td>GET/POST /admin/user/&lt;id&gt;/credentials</td></tr>
+<tr><td>路径</td><td>GET/POST /admin/user/&lt;int:user_id&gt;/credentials</td></tr>
 <tr><td>鉴权</td><td>管理员专属 + 管理员目标需二次验证</td></tr>
 <tr><td>代码</td><td>app.py:2743-2802</td></tr>
 <tr><td>特性</td><td>HTTP 200 + JSON code:401 + need_verify:true（V10.7 修复避免全局拦截器误判）</td></tr>
@@ -655,9 +685,9 @@ app.py (Flask app 实例创建)
 <h3>API-10: 权限工单审批</h3>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>路径</td><td>POST /permission_tickets/&lt;id&gt;/approve</td></tr>
+<tr><td>路径</td><td>POST /permission_tickets/&lt;int:ticket_id&gt;/approve</td></tr>
 <tr><td>鉴权</td><td>管理员专属</td></tr>
-<tr><td>代码</td><td>routes_ext.py:4990-5034</td></tr>
+<tr><td>代码</td><td>routes_ext.py:4977-5034</td></tr>
 <tr><td>逻辑</td><td>工单 status → approved；菜单合并到 user.allowed_menus；Webhook 推送 + 审计日志</td></tr>
 </table>
 </div>
@@ -950,10 +980,10 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 <h3>维度一：代码质量</h3>
 <table>
 <tr><th>#</th><th>技术债</th><th>严重度</th><th>代码依据</th><th>影响</th></tr>
-<tr><td>CQ-01</td><td>routes_ext.py 4744 行单文件膨胀</td><td><span class="tag tag-high">高</span></td><td>routes_ext.py 全文</td><td>模块边界模糊，回归风险高</td></tr>
+<tr><td>CQ-01</td><td>routes_ext.py 5231 行单文件膨胀</td><td><span class="tag tag-high">高</span></td><td>routes_ext.py 全文</td><td>模块边界模糊，回归风险高</td></tr>
 <tr><td>CQ-02</td><td>无 Service 层，业务逻辑全在路由函数内</td><td><span class="tag tag-high">高</span></td><td>admin_upload_local_backup ~130 行</td><td>函数职责超 10 个，测试困难</td></tr>
 <tr><td>CQ-03</td><td>数据库迁移硬编码 SQL，无版本管理</td><td><span class="tag tag-mid">中</span></td><td>app.py:681-817 ~60 条 ALTER TABLE</td><td>迁移失败静默吞没，无回滚</td></tr>
-<tr><td>CQ-04</td><td>前端 JS 与 HTML 混杂，无模块化</td><td><span class="tag tag-mid">中</span></td><td>admin_webhooks.html 1426 行</td><td>前端逻辑不可复用、不可测试</td></tr>
+<tr><td>CQ-04</td><td>前端 JS 与 HTML 混杂，无模块化</td><td><span class="tag tag-mid">中</span></td><td>admin_webhooks.html 1527 行</td><td>前端逻辑不可复用、不可测试</td></tr>
 <tr><td>CQ-05</td><td>cn2num 实现重复（app.py + gift_utils.py）</td><td><span class="tag tag-low">低</span></td><td>app.py:425, gift_utils.py:13</td><td>逻辑重复，维护需同步两处</td></tr>
 <tr><td>CQ-06</td><td>decrypt_credential 含两段相同 try-except 块</td><td><span class="tag tag-low">低</span></td><td>models.py:45-73</td><td>死代码，第二段永不执行</td></tr>
 </table>
@@ -972,7 +1002,7 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 <tr><th>#</th><th>技术债</th><th>严重度</th><th>代码依据</th><th>影响</th></tr>
 <tr><td>EX-01</td><td>无消息队列，异步任务依赖 daemon 线程</td><td><span class="tag tag-mid">中</span></td><td>routes_ext.py:380,499</td><td>线程异常仅 print，多进程不共享</td></tr>
 <tr><td>EX-02</td><td>权限方法中硬编码菜单列表</td><td><span class="tag tag-low">低</span></td><td>models.py:155 ALL_MENUS</td><td>新增菜单需修改多处</td></tr>
-<tr><td>EX-03</td><td>Webhook 推送 ~82 处调用点手动传参</td><td><span class="tag tag-mid">中</span></td><td>全项目 trigger_webhook_event</td><td>新增路由易遗漏推送</td></tr>
+<tr><td>EX-03</td><td>Webhook 推送 ~106 处调用点手动传参</td><td><span class="tag tag-mid">中</span></td><td>全项目 trigger_webhook_event（app.py 31 + routes_ext.py 70 + routes_ai.py 5）</td><td>新增路由易遗漏推送</td></tr>
 </table>
 
 <h3>维度四：安全漏洞</h3>
@@ -1068,10 +1098,10 @@ graph LR
 <tr><td>文档版本</td><td>V1.0</td></tr>
 <tr><td>生成日期</td><td>2026-09-23</td></tr>
 <tr><td>审计基线</td><td>代码 commit 6360bb6（main），README V10.10.10，Project_Survey ADR-01~38</td></tr>
-<tr><td>代码审计范围</td><td>13 个 Python 文件（~14,892 行）+ 21 个 HTML 模板（~10,975 行）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
-<tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md</td></tr>
+<tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,785 行）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
+<tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
 <tr><td>漂移项总数</td><td>10（2 高影响 / 1 中影响 / 4 低影响 / 3 一致）</td></tr>
-<tr><td>技术债总数</td><td>22（6 代码质量 / 4 性能 / 3 扩展性 / 4 安全 / 5 运维）</td></tr>
+<tr><td>技术债总数</td><td>21（6 代码质量 / 4 性能 / 3 扩展性 / 4 安全 / 4 运维）</td></tr>
 <tr><td>治理路线</td><td>P0（2 项 1-2 人日）/ P1（4 项 1-2 周）/ P2（5 项 1-2 月）</td></tr>
 <tr><td>最终结论</td><td>不建议替换框架，仅局部治理</td></tr>
 </table>
