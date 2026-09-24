@@ -3,15 +3,16 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '66cee8a7-2874-4deb-95d2-49977a9b49d8'
-  PropagateID: '66cee8a7-2874-4deb-95d2-49977a9b49d8'
-  ReservedCode1: '6e5c4e21-3541-45da-ba7c-cd929b7174b1'
-  ReservedCode2: '6e5c4e21-3541-45da-ba7c-cd929b7174b1'
+  ProduceID: '8a28e2fb-4d24-4346-9ae9-56b4facb3b1d'
+  PropagateID: '8a28e2fb-4d24-4346-9ae9-56b4facb3b1d'
+  ReservedCode1: '08883764-8b0a-4016-8f50-38ac415d803c'
+  ReservedCode2: '08883764-8b0a-4016-8f50-38ac415d803c'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🌗 **V10.10.13 黑夜/白天主题切换与输入框提示语美化**：新增全局双主题切换（基于 Bootstrap 5.3 `data-bs-theme`，localStorage 持久化，默认白天零回归），全站约 122 处输入框提示语统一美化（浅灰蓝、常规字重、聚焦淡出）。
 > - 🔔 **2.1 纪念日到期单次推送防重机制（周期锁架构）**：- 检查 if r.last_notified_target == target_cycle_str: continue，已成功推送过的周期直接跳过，杜绝 60 秒死循环；
 > - ☁️ **2.2 WebDAV 智能路径解析与递归自动建目录（MKCOL）**：- 智能识别坚果云等 WebDAV 根路径（如以 /dav 结尾），当未指定子目录时，自动挂载默认安全备份目录 /gift_backups/，防止根路径直写触发 404。
 > - 🔒 **2.3 容器依赖与敏感数据零明文加固**：2. **敏感凭据安全闭环**：WebDAV 账号密码、Webhook 密钥等高敏感数据全部强制以 AES-256-GCM 密文存储，日志自动脱敏掩码，保证生产环境数据安全。
@@ -860,6 +861,24 @@ V10.10.9 支持 SNI_DOMAIN 空格分隔多域名（全部写入证书 SAN 与 Ng
 #### 涉及文件
 - `gift_bookkeeping.db`（样例库数据清理 + Git 历史移除）
 - `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（样例说明、审计基线 hash 同步更新、样例库维护 9 项规则文档化）
+
+### V10.10.13：全局输入框提示语美化与黑夜/白天主题切换（2026-09-24，传统版 + Docker 版同步）
+
+#### 新增功能
+- **输入框提示语（placeholder）全局美化**：在 `base.html` 全局样式中新增 placeholder 美化规则——浅灰蓝配色、常规字重（替代视觉偏粗）、0.875em 字号、半透明淡出（聚焦时进一步淡化），一处改动覆盖全部 20 个含输入框的页面共约 122 处占位提示；仅改视觉样式，不改任何 placeholder 文案与输入功能逻辑
+- **黑夜/白天双主题切换**：
+  - 基于 Bootstrap 5.3 原生 `data-bs-theme` 属性实现，导航栏右侧新增月亮/太阳圆形切换按钮，登录、注册、找回密码等未登录页面同样可用
+  - 默认白天模式，切换后写入 `localStorage('gift_theme')` 持久化，刷新/重启服务后保持；`<head>` 首帧读取避免页面闪烁
+  - 全局硬编码色变量化：`base.html` 定义 6 个 CSS 变量（页面底色/卡片底色/卡片头/边框/footer/占位提示色），白天模式取值与原版完全一致，零视觉回归
+  - 暗色模式自动适配全部 Bootstrap 组件（表格/弹窗/下拉/表单/徽章），并统一覆盖 `bg-white`、`bg-light`、`text-dark`、`text-muted`、`table-light` 表头等浅色工具类
+  - 特殊页面同步适配：AI 助手聊天页（24 处硬编码色变量化）、AI 助手配置页（卡片边框/头部变量化）、免登录分享外链页（独立页内置主题变量 + 右上角悬浮切换按钮 + 暗色覆盖）
+
+#### 涉及文件（两套仓库同步修改，MD5 逐字一致）
+- `templates/base.html`（主题 CSS 变量、placeholder 美化、暗色覆盖规则、主题切换按钮与 JS、meta theme-color 动态化）
+- `templates/ai_assistant.html`（聊天界面硬编码色变量化 + 局部主题变量）
+- `templates/admin_ai_config.html`（AI 配置卡片硬编码色变量化）
+- `templates/shared_ledger.html`（外链页主题变量 + 悬浮切换按钮 + 暗色覆盖）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（本变更记录与前端规格同步）
 
 ## 📂 项目文件结构
 

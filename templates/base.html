@@ -7,20 +7,86 @@
     <title>{% block title %}人情礼金记账系统{% endblock %}</title>
     <!-- PWA Manifest and Theme -->
     <link rel="manifest" href="/static/manifest.json">
-    <meta name="theme-color" content="#0d6efd">
+    <meta name="theme-color" content="#0d6efd" id="themeColorMeta">
+    <script>
+        // 主题初始化：首帧读取本地偏好，避免页面闪烁（默认白天模式）
+        (function() {
+            var t = localStorage.getItem('gift_theme');
+            if (t === 'dark') {
+                document.documentElement.setAttribute('data-bs-theme', 'dark');
+            }
+        })();
+    </script>
     <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎁</text></svg>">
     
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
-        body { background-color: #f4f6f9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
+        /* ===== 全局主题 CSS 变量（默认白天模式，值与原版一致） ===== */
+        :root {
+            --app-bg: #f4f6f9;
+            --app-card-bg: #ffffff;
+            --app-card-header-bg: #ffffff;
+            --app-border: #e9ecef;
+            --app-border-soft: #edf2f7;
+            --app-footer-bg: #ffffff;
+            --app-hover-bg: #f8f9fa;
+            --app-ai-bg: #f8f9fa;
+            --app-ai-text: #212529;
+            --ph-color: #9aa5b1;
+            --ph-opacity: 0.75;
+        }
+        [data-bs-theme="dark"] {
+            --app-bg: #121417;
+            --app-card-bg: #1b2128;
+            --app-card-header-bg: #20262e;
+            --app-border: #2b354a;
+            --app-border-soft: #2b354a;
+            --app-footer-bg: #1b2128;
+            --app-hover-bg: #232a33;
+            --app-ai-bg: #232a33;
+            --app-ai-text: #e6eaef;
+            --ph-color: #7d8794;
+            --ph-opacity: 0.7;
+        }
+
+        body { background-color: var(--app-bg); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; min-height: 100vh; display: flex; flex-direction: column; transition: background-color 0.25s ease; }
         .navbar-brand { font-weight: bold; color: #dc3545 !important; }
         .main-container { flex: 1; padding-top: 20px; padding-bottom: 40px; }
         .card { border: none; box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075); border-radius: 10px; }
-        .card-header { background-color: #ffffff; border-bottom: 1px solid #edf2f7; font-weight: 600; }
-        footer { background-color: #ffffff; border-top: 1px solid #e9ecef; padding: 15px 0; margin-top: auto; }
+        .card-header { background-color: var(--app-card-header-bg); border-bottom: 1px solid var(--app-border-soft); font-weight: 600; transition: background-color 0.25s ease; }
+        footer { background-color: var(--app-footer-bg); border-top: 1px solid var(--app-border); padding: 15px 0; margin-top: auto; transition: background-color 0.25s ease; }
         .broadcast-banner { border-left: 4px solid #0dcaf0; }
+
+        /* ===== 输入框提示语（placeholder）美化：更轻更淡更精致 ===== */
+        .form-control::placeholder,
+        .form-control::-webkit-input-placeholder,
+        .form-control::-moz-placeholder,
+        .form-control:-ms-input-placeholder {
+            color: var(--ph-color);
+            font-weight: 400;
+            font-size: 0.875em;
+            opacity: var(--ph-opacity);
+            letter-spacing: 0.01em;
+            transition: opacity 0.2s ease;
+        }
+        .form-control:focus::placeholder {
+            opacity: 0.4;
+        }
+
+        /* ===== 黑夜模式覆盖：适配大量使用 Bootstrap 浅色工具类的页面 ===== */
+        [data-bs-theme="dark"] .bg-white { background-color: var(--app-card-bg) !important; }
+        [data-bs-theme="dark"] .bg-light { background-color: var(--app-hover-bg) !important; }
+        [data-bs-theme="dark"] .text-dark { color: var(--bs-body-color) !important; }
+        [data-bs-theme="dark"] .text-muted { color: var(--bs-secondary-color) !important; }
+        [data-bs-theme="dark"] .table-light,
+        [data-bs-theme="dark"] .table-light > th,
+        [data-bs-theme="dark"] .table-light > td {
+            --bs-table-bg: var(--app-hover-bg);
+            --bs-table-color: var(--bs-body-color);
+            color: var(--bs-body-color);
+        }
 
         /* 防偷窥遮罩模式样式 */
         body.privacy-mode .privacy-blur {
@@ -114,6 +180,11 @@
                     {% endif %}
                 </ul>
                 <ul class="navbar-nav ms-auto align-items-center">
+                    <li class="nav-item me-2">
+                        <button class="btn btn-sm btn-outline-light rounded-pill px-2 py-1" type="button" onclick="toggleTheme()" id="themeToggleBtn" title="切换黑夜/白天模式">
+                            <i class="fa-solid fa-moon me-1" id="themeIcon"></i><span class="small d-none d-md-inline" id="themeBtnText">黑夜</span>
+                        </button>
+                    </li>
                     {% if current_user.is_authenticated %}
                     <li class="nav-item me-2">
                         <button class="btn btn-sm btn-outline-light rounded-pill px-2 py-1" type="button" onclick="togglePrivacyMode()" id="privacyToggleBtn" title="一键切换防偷窥遮罩模式">
@@ -260,6 +331,29 @@
 
 
 
+        // 黑夜/白天模式切换与持久化（Bootstrap 5.3 data-bs-theme）
+        function toggleTheme() {
+            const html = document.documentElement;
+            const isDark = html.getAttribute('data-bs-theme') === 'dark';
+            const next = isDark ? 'light' : 'dark';
+            html.setAttribute('data-bs-theme', next);
+            localStorage.setItem('gift_theme', next);
+            updateThemeBtn(next === 'dark');
+            const meta = document.getElementById('themeColorMeta');
+            if (meta) meta.setAttribute('content', next === 'dark' ? '#121417' : '#0d6efd');
+        }
+
+        function updateThemeBtn(isDark) {
+            const icon = document.getElementById('themeIcon');
+            const text = document.getElementById('themeBtnText');
+            if (icon) {
+                icon.className = isDark ? 'fa-solid fa-sun me-1' : 'fa-solid fa-moon me-1';
+            }
+            if (text) {
+                text.textContent = isDark ? '白天' : '黑夜';
+            }
+        }
+
         // 防偷窥遮罩模式切换与持久化
         function togglePrivacyMode() {
             const isPrivacy = document.body.classList.toggle('privacy-mode');
@@ -332,8 +426,9 @@
                 .catch(() => {});
         }
 
-        // 初始化防偷窥状态与广播通知红点
+        // 初始化主题、防偷窥状态与广播通知红点
         document.addEventListener('DOMContentLoaded', () => {
+            updateThemeBtn(document.documentElement.getAttribute('data-bs-theme') === 'dark');
             if (localStorage.getItem('privacy_mode') === '1') {
                 document.body.classList.add('privacy-mode');
                 updatePrivacyBtn(true);

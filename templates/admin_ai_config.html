@@ -5,18 +5,19 @@
 {% block extra_css %}
 <style>
     .config-card {
-        border: 1px solid #e9ecef;
+        border: 1px solid var(--app-border);
         border-radius: 10px;
         margin-bottom: 12px;
         overflow: hidden;
     }
     .config-card-header {
-        background: #f8f9fa;
+        background: var(--app-hover-bg);
         padding: 10px 16px;
-        border-bottom: 1px solid #e9ecef;
+        border-bottom: 1px solid var(--app-border);
         display: flex;
         align-items: center;
         justify-content: space-between;
+        transition: background-color 0.25s ease;
     }
     .config-card-body {
         padding: 16px;
@@ -38,7 +39,7 @@
         transition: background 0.2s;
     }
     .auth-row:hover {
-        background: #f8f9fa;
+        background: var(--app-hover-bg);
     }
     .auth-row .form-check-input {
         cursor: pointer;
