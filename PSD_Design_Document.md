@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '3626e459-e174-4661-bf09-0b176597b4f0'
-  PropagateID: '3626e459-e174-4661-bf09-0b176597b4f0'
-  ReservedCode1: '1dafe2b1-d290-4358-862e-af842baff822'
-  ReservedCode2: '1dafe2b1-d290-4358-862e-af842baff822'
+  ProduceID: '827cc1c1-b27d-42ef-b344-d983604d1eae'
+  PropagateID: '827cc1c1-b27d-42ef-b344-d983604d1eae'
+  ReservedCode1: '40f2fdb6-ab7c-4d79-97ac-256e0143564b'
+  ReservedCode2: '40f2fdb6-ab7c-4d79-97ac-256e0143564b'
 ---
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
@@ -928,7 +928,7 @@ flowchart TD
 | **防越权红线** | 普通用户不得修改/删除管理员创建的实体（`is_entity_owner_admin` 拦截） | `app.py:479-488,522,538` |
 | **备份隔离** | 普通用户备份 DROP 19 张全局表；恢复用数据级合并不越界 | `routes_ext.py:47-96,113-205` |
 | **ProxyFix** | 信任 Nginx 透传的 `X-Forwarded-*` | `app.py:57` |
-| **样例库防泄漏** | `check_sample_data.py` 推送前校验（真实用户名/冻结状态/会话令牌/WebDAV·Webhook 凭据密文/邀请码/口令密文共 9 项规则，异常即拦截推送） | `check_sample_data.py`；V10.10.12 建立 |
+| **样例库防泄漏** | 推送前 9 项规则校验（真实用户名/冻结状态/会话令牌/WebDAV·Webhook 凭据密文/邀请码/口令密文，异常即拦截推送；规则与工具解耦，明细见 README"样例库维护约定"） | README 样例库维护约定；V10.10.12 建立 |
 
 ### 8.4 部署架构
 
