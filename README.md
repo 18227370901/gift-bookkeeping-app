@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '552a9659-9e16-4f40-aa5e-d4675b1fad22'
-  PropagateID: '552a9659-9e16-4f40-aa5e-d4675b1fad22'
-  ReservedCode1: 'dc31fa3d-1748-498b-b646-308c02f2b491'
-  ReservedCode2: 'dc31fa3d-1748-498b-b646-308c02f2b491'
+  ProduceID: 'c3a2fdd6-771d-41f6-bb80-77a793883dcb'
+  PropagateID: 'c3a2fdd6-771d-41f6-bb80-77a793883dcb'
+  ReservedCode1: '73efc3ea-fe86-40fa-bb9f-b069a18c0cbd'
+  ReservedCode2: '73efc3ea-fe86-40fa-bb9f-b069a18c0cbd'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -842,6 +842,22 @@ V10.10.9 支持 SNI_DOMAIN 空格分隔多域名（全部写入证书 SAN 与 Ng
 - `run.sh`（仅传统版：`start_service()` 启动提示逻辑，537 → 551 行）
 - `PSD_Design_Document.md` / `PSD_Design_Document.html`（行数口径同步：run.sh 551 行、核心代码合计 12,991、含模板共 24,776）
 
+### V10.10.12：样例库敏感数据彻底清理与 Git 历史重写（2026-09-24，传统版 + Docker 版同步）
+
+#### 问题背景
+随仓库分发的根目录样例库 `gift_bookkeeping.db`（历史遗留自早期运行库路径）中残留了部分真实配置数据：真实 WebDAV 完整地址与密码密文、Webhook 签名凭据密文、真实注册邀请码、`ghca` 用户标识及其密保问题与早期密码哈希等。克隆部署时（`data/` 目录不存在，`app.py` 回退使用根目录 db），WebDAV 与 Webhook 配置页输入框会回填显示这些真实数据。
+
+#### 修复内容（传统版与 Docker 版样例库字节级一致）
+- **字段级清理**：真实用户 `ghca` 重命名为 `demo_user_frozen` 并冻结（`is_active=0`，登录拦截），密码/密保哈希与密文全部替换为样例值；凭据/令牌/密文清空（WebDAV 应用密码、Webhook `secret_token`/`bot_secret`、`admin` 有效会话令牌）；6 条真实注册邀请码删除
+- **演示体验保留**：151 条样例礼金、4 场宴席、6 条纪念日、样例分享外链口令（`123456`/`666888`，以默认密钥重新加密写入）等开箱功能不变
+- **文件级抹除**：`VACUUM` 重建数据库文件，清除被删数据的磁盘残留页
+- **Git 历史重写**：`git filter-repo` 从全部历史（传统版 25 个提交、Docker 版 10 个提交）彻底移除旧版 db 后 force push；**全部历史 commit hash 已变更**，旧克隆副本请重新克隆
+- APK 版仓库经检查从未追踪过 db 文件，无泄露，无需处理
+
+#### 涉及文件
+- `gift_bookkeeping.db`（样例库内容清理 + Git 历史移除）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（样例说明与审计基线 hash 同步更新）
+
 ## 📂 项目文件结构
 
 ```text
@@ -1013,6 +1029,7 @@ git stash pop
 1. **多角色用户账户**：
    - 超级管理员：`admin` / `admin123`（具备全部子菜单与系统管理控制权，密保答案经加盐哈希安全存储）
    - 普通测试用户：`testuser` / `test123456`（具备记账、宴席、对账与备忘权限）
+   - 冻结演示用户：`demo_user_frozen`（初始状态为冻结 `is_active=0`，登录会被拦截，仅用于演示用户管理与解冻流程；V10.10.12 样例库安全清理产物）
 2. **专属宴席台账 (4 场标准典范)**：
    - `2026年 儿子大婚浪漫喜宴`（事由：结婚，预算 6.8 万，花销 6.28 万，已关联收礼明细）
    - `2026年 宝宝周岁满月答谢宴`（事由：满月酒，预算 2 万，花销 1.68 万，已关联收礼明细）
@@ -1028,13 +1045,13 @@ git stash pop
    - 企业微信官方智能机器人（WebSocket 长连接 openws 模式）
    - 企业微信群机器人（Webhook URL 模式）
    - 钉钉群机器人（Webhook URL 模式）
-   - *安全说明*：所有机器人的密钥（`bot_secret` 与 `secret_token`）在数据库底层均经过 **AES-256-GCM 强加密存储**，开箱默认状态为已禁用（`is_enabled=0`），零明文落盘，绝无凭证泄露风险。
+    - *安全说明*：机器人密钥字段（`bot_secret` 与 `secret_token`）默认为空，用户配置后经 **AES-256-GCM 强加密存储**；开箱默认状态为已禁用（`is_enabled=0`），零明文落盘，绝无凭证泄露风险。
 5. **大账本只读共享外链 (2 组)**：
    - 儿子大婚与宝宝满月对外分享外链，口令（`123456` / `666888`）底层通过 AES-256-GCM 强加密存储，支持设置隐藏金额/备注等安全查看策略。
 6. **系统广播通知 (2 条)**：
    - 涵盖版本升级全量功能特性公告及初次使用安全提醒。
 7. **WebDAV 外部云端备份配置**：
-   - 预设坚果云标准 WebDAV 接入示例，应用密码经 AES-256-GCM 强加密存储，默认禁用自动备份。
+   - 预设坚果云标准 WebDAV 接入示例（通用公共端点与演示账号名，应用密码默认为空，配置后经 AES-256-GCM 强加密存储），默认禁用自动备份。
 
 ---
 
