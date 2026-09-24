@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: 'c3a2fdd6-771d-41f6-bb80-77a793883dcb'
-  PropagateID: 'c3a2fdd6-771d-41f6-bb80-77a793883dcb'
-  ReservedCode1: '73efc3ea-fe86-40fa-bb9f-b069a18c0cbd'
-  ReservedCode2: '73efc3ea-fe86-40fa-bb9f-b069a18c0cbd'
+  ProduceID: '1f67171f-22b6-4f1c-8321-61a0f7fbc922'
+  PropagateID: '1f67171f-22b6-4f1c-8321-61a0f7fbc922'
+  ReservedCode1: '5fbdbba7-5380-4282-8e6f-14f27b78eadb'
+  ReservedCode2: '5fbdbba7-5380-4282-8e6f-14f27b78eadb'
 ---
 
 # 人情礼金记账系统 (Gift Bookkeeping App)
@@ -856,6 +856,7 @@ V10.10.9 支持 SNI_DOMAIN 空格分隔多域名（全部写入证书 SAN 与 Ng
 
 #### 涉及文件
 - `gift_bookkeeping.db`（样例库内容清理 + Git 历史移除）
+- `check_sample_data.py`（新增：推送前敏感数据校验防线，9 项规则异常即拦截）
 - `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（样例说明与审计基线 hash 同步更新）
 
 ## 📂 项目文件结构
@@ -1052,6 +1053,11 @@ git stash pop
    - 涵盖版本升级全量功能特性公告及初次使用安全提醒。
 7. **WebDAV 外部云端备份配置**：
    - 预设坚果云标准 WebDAV 接入示例（通用公共端点与演示账号名，应用密码默认为空，配置后经 AES-256-GCM 强加密存储），默认禁用自动备份。
+
+**样例库维护约定（V10.10.12）**：
+- 样例库 `gift_bookkeeping.db` 随仓库分发，严禁将真实配置数据（WebDAV 凭据、Webhook 密钥、真实用户、注册邀请码等）写入后推送
+- **每次推送前必跑校验**：`python check_sample_data.py`（9 项规则：真实用户名、冻结状态、会话令牌、WebDAV/Webhook 凭据密文、邀请码、分享口令密文等）
+- 退出码 `0` = 校验通过可推送；`1` = 发现敏感数据残留，禁止推送，需先按 V10.10.12 流程清理
 
 ---
 
