@@ -3,10 +3,10 @@ AIGC:
   ContentProducer: '001191110102MAD55U9H0F10002'
   ContentPropagator: '001191110102MAD55U9H0F10002'
   Label: '1'
-  ProduceID: '827cc1c1-b27d-42ef-b344-d983604d1eae'
-  PropagateID: '827cc1c1-b27d-42ef-b344-d983604d1eae'
-  ReservedCode1: '40f2fdb6-ab7c-4d79-97ac-256e0143564b'
-  ReservedCode2: '40f2fdb6-ab7c-4d79-97ac-256e0143564b'
+  ProduceID: '1b232354-e410-498f-9bf7-470d56e411d1'
+  PropagateID: '1b232354-e410-498f-9bf7-470d56e411d1'
+  ReservedCode1: '9d894392-9c41-47c7-b912-2ac2560b67ef'
+  ReservedCode2: '9d894392-9c41-47c7-b912-2ac2560b67ef'
 ---
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
@@ -77,10 +77,10 @@ AIGC:
 | `banquet_detail.html` | 994 |
 | `reminders.html` | 862 |
 | `banquets.html` | 648 |
-| `ai_assistant.html` | 484 |
+| `ai_assistant.html` | 502 |
 | `permission_tickets.html` | 461 |
-| `admin_ai_config.html` | 449 |
-| `base.html` | 398 |
+| `admin_ai_config.html` | 450 |
+| `base.html` | 493 |
 | `recycle_bin.html` | 370 |
 | `reconciliation.html` | 368 |
 | `admin_logs.html` | 265 |
@@ -89,9 +89,9 @@ AIGC:
 | `login.html` | 199 |
 | `forgot_password.html` | 193 |
 | `register.html` | 171 |
-| `shared_ledger.html` | 164 |
+| `shared_ledger.html` | 261 |
 | `change_password.html` | 52 |
-| **合计** | **11,785** |
+| **合计** | **11,990** |
 
 ### 0.3 文档采纳决策
 
@@ -466,6 +466,8 @@ for sql in migration_sqls:
 | JavaScript | 原生 JS（无框架、无构建工具），`fetch()` API 做 AJAX 通信 | 全部模板内联 `<script>` |
 | PWA | `static/manifest.json` + `static/sw.js`（仅 manifest 壳，无 fetch 拦截） | `base.html:9-10` |
 | CSRF | 全局 `<meta name="csrf-token">` 注入，fetch 请求头携带 `X-CSRF-Token` | `base.html:6`、`base.html:233-259` |
+| 主题系统 | Bootstrap 5.3 原生 `data-bs-theme` 双主题（白天/黑夜），CSS 变量（`--app-bg`/`--app-card-bg` 等 6 个）驱动；导航栏主题切换按钮 + `localStorage('gift_theme')` 持久化，默认白天零回归；暗色下统一覆盖 `bg-white/bg-light/text-dark/text-muted/table-light` 等浅色工具类 | `base.html` 全局 `<style>`、`V10.10.13` 新增 |
+| 输入框提示语 | 全局 `::placeholder` 统一美化（浅灰蓝 `--ph-color`、常规字重 400、0.875em、半透明、聚焦淡出），覆盖全部 20 个含输入框页面约 122 处 | `base.html` 全局 `<style>`、`V10.10.13` 新增 |
 
 #### 6.1.2 路由（前端导航）
 
@@ -1092,10 +1094,10 @@ graph LR
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V1.0 |
-| 生成日期 | 2026-09-23 |
-| 审计基线 | 代码 commit `f1e6744`（main，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38 |
-| 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,785 行）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
+| 文档版本 | V1.1 |
+| 生成日期 | 2026-09-24（V1.1 修订） |
+| 审计基线 | 代码 commit `f1e6744`（main，filter-repo 重写后；原 6360bb6），README.md V10.10.13，Project_Survey.md ADR-01~38 |
+| 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |
 | 漂移项总数 | 10（2 高影响 / 1 中影响 / 4 低影响 / 3 一致） |
 | 技术债总数 | 21（6 代码质量 / 4 性能 / 3 扩展性 / 4 安全 / 4 运维） |
