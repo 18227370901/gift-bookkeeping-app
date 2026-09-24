@@ -935,6 +935,7 @@ flowchart TD
 <tr><td>防越权红线</td><td>普通用户不得修改/删除管理员创建的实体</td><td>app.py:479-488,522,538</td></tr>
 <tr><td>备份隔离</td><td>普通用户备份 DROP 19 张全局表；恢复用数据级合并不越界</td><td>routes_ext.py:47-96,113-205</td></tr>
 <tr><td>ProxyFix</td><td>信任 Nginx 透传的 X-Forwarded-*</td><td>app.py:57</td></tr>
+<tr><td>样例库防泄漏</td><td>check_sample_data.py 推送前校验（真实用户名/冻结状态/会话令牌/WebDAV·Webhook 凭据密文/邀请码/口令密文共 9 项规则，异常即拦截推送）</td><td>check_sample_data.py；V10.10.12 建立</td></tr>
 </table>
 
 <h2>8.4 部署架构</h2>
