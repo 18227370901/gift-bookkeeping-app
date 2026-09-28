@@ -5,16 +5,29 @@ AI 助手联网搜索模块
 """
 import re
 
-# 尝试导入 DuckDuckGo Search（可选依赖，未安装时降级）
-try:
-    from duckduckgo_search import DDGS
-    _HAS_DDS = True
-except ImportError:
+# 延迟导入 DuckDuckGo Search（可选依赖，未安装时降级）
+# V10.10.16 性能优化：duckduckgo_search 含 primp Rust 扩展 + lxml ~12-20MB，
+# 移至首次实际搜索时才加载
+DDGS = None
+_HAS_DDS = None  # None=未检测, True/False=已检测
+
+def _ensure_dds():
+    """首次调用时延迟导入 DDGS，后续从 sys.modules 缓存获取"""
+    global DDGS, _HAS_DDS
+    if _HAS_DDS is not None:
+        return DDGS
     try:
-        from ddgs import DDGS
+        from duckduckgo_search import DDGS as _DDGS
+        DDGS = _DDGS
         _HAS_DDS = True
     except ImportError:
-        _HAS_DDS = False
+        try:
+            from ddgs import DDGS as _DDGS
+            DDGS = _DDGS
+            _HAS_DDS = True
+        except ImportError:
+            _HAS_DDS = False
+    return DDGS
 
 # 需要联网搜索的关键词正则模式
 _SEARCH_PATTERNS = [
@@ -43,6 +56,7 @@ def web_search(query, max_results=5):
     DuckDuckGo 搜索
     返回 [{title, body, href}] 列表
     """
+    _ensure_dds()
     if not _HAS_DDS or not query:
         return []
     try:
@@ -65,6 +79,7 @@ def search_and_summarize(query):
     搜索并格式化为 prompt 注入文本
     返回格式化字符串，搜索失败返回"无网络搜索结果"占位
     """
+    _ensure_dds()
     if not _HAS_DDS:
         return "（无网络搜索结果）"
 

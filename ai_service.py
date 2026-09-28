@@ -8,13 +8,24 @@ import re
 import time
 from datetime import datetime
 
-# 尝试导入 OpenAI SDK（可选依赖，未安装时降级为本地引擎）
-try:
-    from openai import OpenAI
-    _HAS_OPENAI = True
-except ImportError:
-    OpenAI = None
-    _HAS_OPENAI = False
+# 延迟导入 OpenAI SDK（可选依赖，未安装时降级为本地引擎）
+# V10.10.16 性能优化：openai SDK 含 pydantic v2 Rust 扩展 + httpx ~40-55MB，
+# 移至首次实际调用时才加载，进程启动不再预载
+OpenAI = None
+_HAS_OPENAI = None  # None=未检测, True/False=已检测
+
+def _ensure_openai():
+    """首次调用时延迟导入 OpenAI SDK，后续从 sys.modules 缓存获取"""
+    global OpenAI, _HAS_OPENAI
+    if _HAS_OPENAI is not None:
+        return OpenAI
+    try:
+        from openai import OpenAI as _OpenAI
+        OpenAI = _OpenAI
+        _HAS_OPENAI = True
+    except ImportError:
+        _HAS_OPENAI = False
+    return OpenAI
 
 from models import db, User, ChatSession, ChatMessage, AIQueryLog
 from models import encrypt_credential, decrypt_credential
@@ -129,6 +140,7 @@ def _call_openai(prompt, api_key, base_url, model):
     调用 OpenAI API
     返回 (success: bool, response: str, error: str)
     """
+    _ensure_openai()
     if not _HAS_OPENAI:
         return False, '', 'OpenAI SDK 未安装'
 
@@ -170,6 +182,7 @@ def test_ai_config(api_key, base_url, model):
     if not model:
         model = 'gpt-4o-mini'  # 未填模型时使用默认值
 
+    _ensure_openai()
     if not _HAS_OPENAI:
         return {'success': False, 'message': 'OpenAI SDK 未安装，无法测试', 'latency_ms': 0,
                 'detail': '请在服务器上执行 pip install openai 安装 SDK'}

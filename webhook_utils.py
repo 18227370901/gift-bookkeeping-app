@@ -25,11 +25,26 @@ logger.setLevel(logging.DEBUG)
 # 禁用 self-signed SSL 证书警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-try:
-    from aibot import WSClient, WSClientOptions, generate_req_id
-    HAS_AIBOT_SDK = True
-except ImportError:
-    HAS_AIBOT_SDK = False
+# 延迟导入企业微信 aibot SDK（可选依赖）
+# V10.10.16 性能优化：aibot SDK 间接拉入 aiohttp + websockets ~10-16MB，
+# 移至首次长连接认证/发送/监听时才加载；普通 Webhook URL 模式永不触发
+HAS_AIBOT_SDK = None  # None=未检测, True/False=已检测
+
+def _import_aibot():
+    """首次调用时延迟导入 aibot SDK，返回 (WSClient, WSClientOptions, generate_req_id) 或 None"""
+    global HAS_AIBOT_SDK
+    if HAS_AIBOT_SDK is True:
+        from aibot import WSClient, WSClientOptions, generate_req_id
+        return WSClient, WSClientOptions, generate_req_id
+    if HAS_AIBOT_SDK is False:
+        return None, None, None
+    try:
+        from aibot import WSClient, WSClientOptions, generate_req_id
+        HAS_AIBOT_SDK = True
+        return WSClient, WSClientOptions, generate_req_id
+    except ImportError:
+        HAS_AIBOT_SDK = False
+        return None, None, None
 
 # V10.10.15：监听线程通过 raw sqlite3 读取 bot_secret，需调用 decrypt_credential 解密
 # （models.py 的 bot_secret 是 property，raw SQL 读取的是 AES-256-GCM 密文）
@@ -37,6 +52,8 @@ try:
     from models import decrypt_credential
 except Exception:
     decrypt_credential = None
+
+from _daemon_lock import try_acquire_daemon_lock
 
 
 def _run_async(coro):
@@ -116,15 +133,27 @@ def _resolve_db_file():
             return c
     return candidates[0] if os.path.isdir(os.path.join(base, 'data')) else candidates[1]
 
+# V10.10.17: 统一数据库连接辅助函数，支持 SQLite 与 PostgreSQL 双模式
+# 返回 (connection, placeholder)：SQLite 用 '?'，PG 用 '%s'
+# 不依赖 Flask app context，与监听线程/推送线程完全兼容
+def _get_db_conn():
+    """获取原生数据库连接与占位符，PG 用 psycopg2，SQLite 用 sqlite3"""
+    _db_url = os.environ.get('DATABASE_URL', '').strip()
+    if _db_url.startswith('postgresql://'):
+        import psycopg2
+        return psycopg2.connect(_db_url), '%s'
+    else:
+        return sqlite3.connect(_resolve_db_file(), timeout=10), '?'
+
 def record_webhook_log(user_id, webhook_id, event_type, payload, status_code, response_body, is_success, operator_id=None):
-    """线程安全写入 Webhook 推送日志表"""
+    """线程安全写入 Webhook 推送日志表（V10.10.17: 支持 PG）"""
     try:
-        conn = sqlite3.connect(_resolve_db_file(), timeout=10)
+        conn, ph = _get_db_conn()
         c = conn.cursor()
         c.execute(
-            """INSERT INTO webhook_logs
+            f"""INSERT INTO webhook_logs
                (user_id, operator_id, webhook_id, event_type, payload, status_code, response_body, is_success, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES ({ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph}, {ph})""",
             (
                 user_id or 1,
                 operator_id,
@@ -155,6 +184,7 @@ def validate_wecom_credentials(bot_id, bot_secret):
     if b_id.lower() in invalid_patterns or b_sec.lower() in invalid_patterns:
         return False, "检测到测试/无效占位符，请输入真实有效的企业微信机器人 Bot ID 与 Secret"
 
+    WSClient, WSClientOptions, _ = _import_aibot()
     if not HAS_AIBOT_SDK:
         return False, "Python 环境缺少 wecom-aibot-python-sdk 库"
 
@@ -253,6 +283,7 @@ def send_wecom_long_connection_message(bot_id, bot_secret, title, details=None, 
     if not is_valid:
         return False, 400, f"凭证校验失败: {val_msg}"
 
+    WSClient, WSClientOptions, _ = _import_aibot()
     if not HAS_AIBOT_SDK:
         return False, 500, "Python 环境缺少 wecom-aibot-python-sdk 库"
 
@@ -843,8 +874,12 @@ _listener_running = False
 def _wecom_listener_worker():
     global _listener_running
     while _listener_running:
+        # V10.10.16: 跨进程单实例锁，多 Worker 环境下仅一个进程建立 WebSocket 长连接
+        if not try_acquire_daemon_lock('wecom_listener'):
+            time.sleep(10)
+            continue
         try:
-            conn = sqlite3.connect(_resolve_db_file(), timeout=10)
+            conn, ph = _get_db_conn()
             c = conn.cursor()
             rows = c.execute("SELECT id, bot_id, bot_secret, webhook_url, connection_type FROM webhook_configs WHERE bot_id IS NOT NULL AND bot_id != '' AND is_enabled = 1").fetchall()
             conn.close()
@@ -854,6 +889,7 @@ def _wecom_listener_worker():
                 continue
 
             for wh_id, bot_id, bot_secret, current_url, conn_type in rows:
+                WSClient, WSClientOptions, _ = _import_aibot()
                 if not bot_id or not bot_secret or not HAS_AIBOT_SDK:
                     continue
 
@@ -878,16 +914,16 @@ def _wecom_listener_worker():
                             cid = body.get("chatid") or (body.get("from", {}) if isinstance(body.get("from"), dict) else {}).get("userid") or headers.get("chatid")
                             if cid:
                                 _cached_chatids[b_id] = cid
-                                conn_u = sqlite3.connect(_resolve_db_file(), timeout=10)
+                                conn_u, ph_u = _get_db_conn()
                                 c_u = conn_u.cursor()
-                                target_rows = c_u.execute("SELECT id, webhook_url, connection_type FROM webhook_configs WHERE (bot_id = ? OR id = ? OR bot_platform = 'wecom' OR webhook_url LIKE '%qyapi.weixin.qq.com%') AND is_enabled = 1", (b_id, w_id)).fetchall()
+                                target_rows = c_u.execute(f"SELECT id, webhook_url, connection_type FROM webhook_configs WHERE (bot_id = {ph_u} OR id = {ph_u} OR bot_platform = 'wecom' OR webhook_url LIKE '%qyapi.weixin.qq.com%') AND is_enabled = 1", (b_id, w_id)).fetchall()
                                 for tr_id, tr_url, tr_conn in target_rows:
                                     if tr_conn == "long_connection" or not tr_url or tr_url.startswith("wecom://"):
                                         new_url = f"wecom://bot/{b_id}?chatid={cid}"
                                     else:
                                         sep = "&" if "?" in tr_url else "?"
                                         new_url = tr_url if "chatid=" in tr_url else f"{tr_url}{sep}chatid={cid}"
-                                    c_u.execute("UPDATE webhook_configs SET webhook_url = ? WHERE id = ?", (new_url, tr_id))
+                                    c_u.execute(f"UPDATE webhook_configs SET webhook_url = {ph_u} WHERE id = {ph_u}", (new_url, tr_id))
                                 conn_u.commit()
                                 conn_u.close()
                                 record_webhook_log(1, w_id, "receive_chatid", {"bot_id": b_id, "chatid": cid}, 200, f"企微群内 @机器人 成功自动捕获群聊会话 chatid [{cid}] 并绑定到通道！", True)

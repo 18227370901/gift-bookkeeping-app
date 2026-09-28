@@ -11,8 +11,8 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V1.0  
-> **生成日期**：2026-09-23  
+> **版本**：V10.10.17  
+> **生成日期**：2026-09-28  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
 > **文档定位**：以代码为实现真相（Ground Truth），历史文档为设计意图真相，显式揭露漂移，证据链闭环。
@@ -1095,9 +1095,9 @@ graph LR
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V1.1 |
+| 文档版本 | V10.10.17 |
 | 生成日期 | 2026-09-28（V1.1 修订） |
-| 审计基线 | 代码 commit `f1e6744`（main，filter-repo 重写后；原 6360bb6），README.md V10.10.14，Project_Survey.md ADR-01~38 |
+| 审计基线 | 代码 commit main 分支 V10.10.17（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择） |
 | 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |
 | 漂移项总数 | 10（2 高影响 / 1 中影响 / 4 低影响 / 3 一致） |

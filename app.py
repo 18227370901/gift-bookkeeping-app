@@ -650,31 +650,128 @@ def num2cn(num):
 def num2cn_filter(num):
     return num2cn(num)
 
+# V10.10.16: 数据库结构版本标记，用于幂等快速跳过迁移流程
+# V10.10.17: 支持 PostgreSQL（用 schema_version 表替代 PRAGMA user_version）
+_SCHEMA_VERSION = 1017
+
+def _is_db_schema_current():
+    """检查数据库结构版本是否已标记为当前版本（SQLite 用 PRAGMA user_version，PG 用 schema_version 表）"""
+    try:
+        if db_url.startswith('sqlite:'):
+            _p = db_url.replace('sqlite:///', '')
+            if _p and os.path.exists(_p):
+                import sqlite3 as _vc
+                _cn = _vc.connect(_p, timeout=5)
+                _ver = _cn.execute("PRAGMA user_version").fetchone()[0]
+                _cn.close()
+                return _ver == _SCHEMA_VERSION
+        elif db_url.startswith('postgresql://'):
+            with db.engine.connect() as _conn:
+                _row = _conn.execute(db.text("SELECT version FROM schema_version WHERE id = 1")).fetchone()
+                return _row is not None and _row[0] == _SCHEMA_VERSION
+    except Exception:
+        pass
+    return False
+
+def _mark_db_schema_current():
+    """迁移完成后标记数据库结构版本（SQLite 用 PRAGMA user_version，PG 用 schema_version 表）"""
+    try:
+        if db_url.startswith('sqlite:'):
+            _p = db_url.replace('sqlite:///', '')
+            if _p:
+                import sqlite3 as _mc
+                _cn = _mc.connect(_p)
+                _cn.execute(f"PRAGMA user_version = {_SCHEMA_VERSION}")
+                _cn.commit()
+                _cn.close()
+        elif db_url.startswith('postgresql://'):
+            with db.engine.connect() as _conn:
+                _conn.execute(db.text("CREATE TABLE IF NOT EXISTS schema_version (id INT PRIMARY KEY DEFAULT 1, version INT NOT NULL, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"))
+                _conn.execute(db.text("INSERT INTO schema_version (id, version) VALUES (1, :v) ON CONFLICT (id) DO UPDATE SET version = :v, updated_at = CURRENT_TIMESTAMP"), {'v': _SCHEMA_VERSION})
+                _conn.commit()
+    except Exception:
+        pass
+
+def _do_startup_sync():
+    """每次容器/服务重启都需执行的轻量同步：风控重置 + 管理员账号同步"""
+    try:
+        LOGIN_FAIL_COUNTS.clear()
+        LOGIN_LOCK_UNTILS.clear()
+        FORGOT_SECURITY_FAIL_COUNTS.clear()
+        FORGOT_SECURITY_LOCK_UNTILS.clear()
+    except Exception:
+        pass
+
+    try:
+        reg_setting = SystemSetting.query.filter_by(key='registration_mode').first()
+        if not reg_setting:
+            SystemSetting.set_val('registration_mode', 'invite_only')
+    except Exception:
+        pass
+    admin = User.query.filter_by(is_admin=True).first()
+    initial_user = os.environ.get('ADMIN_USER', 'admin').strip()
+    initial_pass = os.environ.get('ADMIN_PASS', 'admin123').strip()
+    if not admin:
+        admin = User.query.filter_by(username=initial_user).first()
+
+    if not admin:
+        admin = User(
+            username=initial_user,
+            security_question='系统默认安全问题：您的默认备用验证码是？',
+            is_admin=True,
+            is_active=True
+        )
+        admin.set_password(initial_pass)
+        admin.set_security_answer('admin')
+        db.session.add(admin)
+        db.session.commit()
+        print(f"[Init] 已创建初始管理员账号: {initial_user}")
+    else:
+        if admin.username != initial_user:
+            existing = User.query.filter_by(username=initial_user).first()
+            if existing and existing.id != admin.id:
+                print(f"[Init] 警告: 用户名 '{initial_user}' 已被其他用户(id={existing.id})占用，"
+                      f"保留当前管理员用户名 '{admin.username}'")
+            else:
+                admin.username = initial_user
+        admin.set_password(initial_pass)
+        admin.is_admin = True
+        admin.is_active = True
+        db.session.commit()
+        print(f"[Init] 已同步更新管理员账号 [{admin.username}] 密码为最新配置并确保处于激活状态")
+
 def init_database():
     with app.app_context():
+        # V10.10.16: 幂等快速跳过——已标记最新版本的库跳过完整迁移流程
+        if _is_db_schema_current():
+            print(f"[Init] 数据库结构已最新 (v{_SCHEMA_VERSION})，跳过迁移流程")
+            _do_startup_sync()
+            return
+
         # V5: 在 db.create_all() 之前，先用原生 sqlite3 修复可能存在的 orphan index 问题
         # 这个问题在恢复旧版备份后尤为常见：malformed database schema (sqlite_autoindex_xxx) - orphan index
-        try:
-            import sqlite3 as _sqlite3_raw
-            _raw_db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
-            if _raw_db_path and os.path.exists(_raw_db_path):
-                _fix_conn = _sqlite3_raw.connect(_raw_db_path)
-                _fix_conn.execute("PRAGMA writable_schema=1")
-                # 查找并删除所有孤儿索引（有 index 记录但对应的表 SQL 为空或不存在）
-                _orphan_indexes = _fix_conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'sqlite_autoindex_%' AND tbl_name NOT IN (SELECT name FROM sqlite_master WHERE type='table')"
-                ).fetchall()
-                for (_idx_name,) in _orphan_indexes:
-                    try:
-                        _fix_conn.execute(f"DROP INDEX IF EXISTS \"{_idx_name}\"")
-                        print(f"[V5-Fix] 已删除孤儿索引: {_idx_name}")
-                    except Exception:
-                        pass
-                _fix_conn.execute("PRAGMA writable_schema=0")
-                _fix_conn.commit()
-                _fix_conn.close()
-        except Exception as _fix_err:
-            print(f"[V5-Fix] orphan index 修复跳过: {_fix_err}")
+        # V10.10.17: PG 模式跳过 SQLite 专有的 orphan index 修复
+        if db_url.startswith('sqlite:'):
+            try:
+                import sqlite3 as _sqlite3_raw
+                _raw_db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
+                if _raw_db_path and os.path.exists(_raw_db_path):
+                    _fix_conn = _sqlite3_raw.connect(_raw_db_path)
+                    _fix_conn.execute("PRAGMA writable_schema=1")
+                    _orphan_indexes = _fix_conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'sqlite_autoindex_%' AND tbl_name NOT IN (SELECT name FROM sqlite_master WHERE type='table')"
+                    ).fetchall()
+                    for (_idx_name,) in _orphan_indexes:
+                        try:
+                            _fix_conn.execute(f"DROP INDEX IF EXISTS \"{_idx_name}\"")
+                            print(f"[V5-Fix] 已删除孤儿索引: {_idx_name}")
+                        except Exception:
+                            pass
+                    _fix_conn.execute("PRAGMA writable_schema=0")
+                    _fix_conn.commit()
+                    _fix_conn.close()
+            except Exception as _fix_err:
+                print(f"[V5-Fix] orphan index 修复跳过: {_fix_err}")
 
         db.create_all()
         # 自动迁移检查缺失字段
@@ -881,56 +978,11 @@ def init_database():
             except Exception:
                 pass
 
-        # 容器/服务重启时重置登录与密保风控限制记录（清除锁定及失败计数）
-        try:
-            LOGIN_FAIL_COUNTS.clear()
-            LOGIN_LOCK_UNTILS.clear()
-            FORGOT_SECURITY_FAIL_COUNTS.clear()
-            FORGOT_SECURITY_LOCK_UNTILS.clear()
-        except Exception:
-            pass
+        # V10.10.16: 迁移完成，标记数据库结构版本
+        _mark_db_schema_current()
 
-        # 默认系统注册模式为仅邀请注册 (invite_only)
-        try:
-            reg_setting = SystemSetting.query.filter_by(key='registration_mode').first()
-            if not reg_setting:
-                SystemSetting.set_val('registration_mode', 'invite_only')
-        except Exception:
-            pass
-        admin = User.query.filter_by(is_admin=True).first()
-        initial_user = os.environ.get('ADMIN_USER', 'admin').strip()
-        initial_pass = os.environ.get('ADMIN_PASS', 'admin123').strip()
-        if not admin:
-            admin = User.query.filter_by(username=initial_user).first()
-
-        if not admin:
-            admin = User(
-                username=initial_user,
-                security_question='系统默认安全问题：您的默认备用验证码是？',
-                is_admin=True,
-                is_active=True
-            )
-            admin.set_password(initial_pass)
-            admin.set_security_answer('admin')
-            db.session.add(admin)
-            db.session.commit()
-            print(f"[Init] 已创建初始管理员账号: {initial_user}")
-        else:
-            # 每次重启应用时，同步确保管理员用户名、密码与激活状态更新为最新配置
-            # 检查目标用户名是否与当前管理员用户名不同，不同时需检查是否被其他用户占用
-            if admin.username != initial_user:
-                existing = User.query.filter_by(username=initial_user).first()
-                if existing and existing.id != admin.id:
-                    # 目标用户名已被其他用户占用，跳过用户名修改，只更新密码和状态
-                    print(f"[Init] 警告: 用户名 '{initial_user}' 已被其他用户(id={existing.id})占用，"
-                          f"保留当前管理员用户名 '{admin.username}'")
-                else:
-                    admin.username = initial_user
-            admin.set_password(initial_pass)
-            admin.is_admin = True
-            admin.is_active = True
-            db.session.commit()
-            print(f"[Init] 已同步更新管理员账号 [{admin.username}] 密码为最新配置并确保处于激活状态")
+        # V10.10.16: 每次重启都需执行的轻量同步（风控重置 + 管理员账号同步）
+        _do_startup_sync()
 
 # 应用加载时自动执行数据库初始化与版本迁移（支持 Gunicorn / WSGI / App 启动）
 try:
