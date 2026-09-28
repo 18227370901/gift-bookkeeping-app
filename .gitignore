@@ -2,6 +2,10 @@ __pycache__/
 *.pyc
 *.pyo
 bin/
+# V10.10.17b: 保留项目 bin/ 脚本目录（run.sh 模块化拆分产物）
+!bin/
+bin/*~
+bin/*.pyc
 .buildozer/
 venv/
 .venv/
