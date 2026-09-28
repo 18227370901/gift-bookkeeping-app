@@ -31,6 +31,13 @@ try:
 except ImportError:
     HAS_AIBOT_SDK = False
 
+# V10.10.15：监听线程通过 raw sqlite3 读取 bot_secret，需调用 decrypt_credential 解密
+# （models.py 的 bot_secret 是 property，raw SQL 读取的是 AES-256-GCM 密文）
+try:
+    from models import decrypt_credential
+except Exception:
+    decrypt_credential = None
+
 
 def _run_async(coro):
     """在同步线程中安全执行异步协程并返回结果"""
@@ -849,6 +856,10 @@ def _wecom_listener_worker():
             for wh_id, bot_id, bot_secret, current_url, conn_type in rows:
                 if not bot_id or not bot_secret or not HAS_AIBOT_SDK:
                     continue
+
+                # V10.10.15：raw sqlite3 读取的 bot_secret 是 AES-256-GCM 密文，需解密为明文后才能用于 SDK 认证
+                if decrypt_credential:
+                    bot_secret = decrypt_credential(bot_secret, fallback_plain=True) or bot_secret
 
                 async def _run_bot_client(b_id, b_sec, w_id, c_type):
                     options = WSClientOptions(

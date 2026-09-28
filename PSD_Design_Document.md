@@ -544,7 +544,7 @@ app.py (Flask app 实例创建)
 |---------|------|---------|------|
 | `_anniversary_reminder_worker` | `routes_ext.py:380` | 60 秒 | 巡检到达预警天数的纪念日，自动推送 Webhook（周期锁防重 `last_notified_target`） |
 | `_backup_scheduler_worker` | `routes_ext.py:499` | 60 秒 | 检查 `ScheduledBackupTask` 表中启用任务，按 cron 表达式执行加密备份 |
-| `_wecom_listener_worker` | `webhook_utils.py` | 常驻 | 企微 WebSocket 长连接监听，自动捕获群聊 `chatid` |
+| `_wecom_listener_worker` | `webhook_utils.py` | 常驻 | 企微 WebSocket 长连接监听，自动捕获群聊 `chatid`（V10.10.14 修正写库路径；V10.10.15 修正 `bot_secret` AES-256-GCM 密文解密——raw SQL 读取的是密文，需 `decrypt_credential()` 解密后传给 SDK 认证） |
 
 ### 6.3 核心 API 规范清单（10 个核心接口）
 
