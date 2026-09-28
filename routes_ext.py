@@ -2910,6 +2910,14 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             level = request.form.get('level', 'info').strip()
             scope = request.form.get('scope', 'all').strip() or 'all'
             
+            # V10.10.14 敏感内容防护：广播内容含管理员账号/密码等敏感关键词时，
+            # 强制限定为「仅管理员可见」，并跳过 Webhook 推送（防止敏感信息流出到群聊）
+            SENSITIVE_KEYWORDS = ('默认管理员', '初始密码', '管理员账号', 'admin123', '默认账号', '超级管理员账号')
+            content_lower = (content or '').lower()
+            is_sensitive = any(kw in content_lower for kw in SENSITIVE_KEYWORDS)
+            if is_sensitive:
+                scope = 'admin'
+
             is_active_val = request.form.get('is_active')
             if is_active_val is not None:
                 is_active = is_active_val in ('1', 'on', 'true', 'True')
@@ -2930,17 +2938,22 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 db.session.add(bc)
                 db.session.commit()
                 safe_log('创建系统广播', f"标题: {title or '无标题'}，等级: {level}，范围: {scope}，状态: {'上线' if is_active else '下线'}", user=current_user)
-                try:
-                    trigger_webhook_event(
-                        WebhookConfig.query.filter_by(is_enabled=True).all(), 'broadcast',
-                        f'{current_user.username} 发布广播：「{title or "系统公告"}」，等级：{level}',
-                        f'操作人：{current_user.username} | 页面：系统广播 | 标题：{title or "系统公告"} | 等级：{level} | 内容：{content[:100]}',
-                        page_key='admin_broadcasts', user_name=current_user.username,
-                        operator_id=current_user.id
-                    )
-                except Exception:
-                    pass
-                flash('系统广播已成功发布！', 'success')
+                # V10.10.14：仅管理员可见（scope=admin）的广播不推送 Webhook，避免敏感内容流出
+                if scope != 'admin':
+                    try:
+                        trigger_webhook_event(
+                            WebhookConfig.query.filter_by(is_enabled=True).all(), 'broadcast',
+                            f'{current_user.username} 发布广播：「{title or "系统公告"}」，等级：{level}',
+                            f'操作人：{current_user.username} | 页面：系统广播 | 标题：{title or "系统公告"} | 等级：{level} | 内容：{content[:100]}',
+                            page_key='admin_broadcasts', user_name=current_user.username,
+                            operator_id=current_user.id
+                        )
+                    except Exception:
+                        pass
+                if is_sensitive:
+                    flash('检测到广播内容含管理员账号/密码等敏感信息，已自动限定为「仅管理员可见」且不推送外部通知！', 'warning')
+                else:
+                    flash('系统广播已成功发布！', 'success')
                 return redirect(url_for('admin_broadcasts'))
                 
         broadcasts = Broadcast.query.order_by(Broadcast.created_at.desc()).all()
@@ -3267,8 +3280,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 return redirect(url_for('admin_webhooks'))
             # V7 修复：保存时不再进行真实凭证校验（原校验需连接企微服务器最长 8 秒且无反馈，
             # 导致「保存无响应」）；凭证有效性由列表中的「测试」按钮负责验证
-            if not chatid and hook.webhook_url:
-                chatid = extract_chatid_from_url(hook.webhook_url) or ''
+            # V10.10.14：移除「chatid 为空时从旧 webhook_url 回填」逻辑——
+            # 用户清空目标会话输入框保存即真正清空，等待企微群内 @机器人 由后台守护线程自动捕获绑定
             url = f"wecom://bot/{bot_id}?chatid={chatid}" if chatid else f"wecom://bot/{bot_id}"
             hook.bot_id = bot_id
             hook.bot_secret = bot_secret
