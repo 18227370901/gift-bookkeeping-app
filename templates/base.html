@@ -252,8 +252,11 @@
     <footer class="text-center text-muted">
         <div class="container"><span>© 2026 人情礼金记账系统 - Web预览版</span></div>
     </footer>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
         // 全局提示语（Flash Alerts）自动淡出并消失逻辑（3.5秒自动清理，保证操作体验流畅）
+        // V10.10.14：本段脚本从带 src 的 <script> 中拆出独立执行（浏览器规范：script 带 src 时内嵌代码被忽略，
+        // 原自动消失逻辑从未生效，导致消息框需手动点击才能关闭）
         document.addEventListener('DOMContentLoaded', function() {
             const flashAlerts = document.querySelectorAll('.auto-dismiss-alert, .alert-dismissible:not(.broadcast-banner)');
             flashAlerts.forEach(function(alertEl) {
@@ -268,6 +271,22 @@
                     alertEl.classList.remove('show');
                     setTimeout(() => { if (alertEl && alertEl.parentNode) alertEl.remove(); }, 300);
                 }, 3500);
+            });
+
+            // V10.10.14：活跃广播横幅 8 秒后自动淡出（保留手动 × 关闭与标为已读），不再需要手动点击取消
+            const broadcastBanners = document.querySelectorAll('.broadcast-banner');
+            broadcastBanners.forEach(function(bannerEl) {
+                setTimeout(function() {
+                    if (window.bootstrap && bootstrap.Alert) {
+                        try {
+                            const inst = bootstrap.Alert.getInstance(bannerEl) || new bootstrap.Alert(bannerEl);
+                            inst.close();
+                            return;
+                        } catch(e) {}
+                    }
+                    bannerEl.classList.remove('show');
+                    setTimeout(() => { if (bannerEl && bannerEl.parentNode) bannerEl.remove(); }, 300);
+                }, 8000);
             });
         });
 

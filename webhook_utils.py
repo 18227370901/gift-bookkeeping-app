@@ -215,7 +215,7 @@ def test_wecom_long_connection(bot_id, bot_secret, chatid=None):
     target_chat = chatid or _cached_chatids.get(bot_id)
     if not target_chat:
         try:
-            conn = sqlite3.connect("gift_bookkeeping.db", timeout=5)
+            conn = sqlite3.connect(_resolve_db_file(), timeout=5)
             c = conn.cursor()
             row = c.execute("SELECT webhook_url FROM webhook_configs WHERE bot_id = ? AND is_enabled = 1", (bot_id,)).fetchone()
             if row and row[0]:
@@ -255,7 +255,7 @@ def send_wecom_long_connection_message(bot_id, bot_secret, title, details=None, 
     target_chat = chatid or _cached_chatids.get(bot_id)
     if not target_chat:
         try:
-            conn = sqlite3.connect("gift_bookkeeping.db", timeout=5)
+            conn = sqlite3.connect(_resolve_db_file(), timeout=5)
             c = conn.cursor()
             row = c.execute("SELECT webhook_url FROM webhook_configs WHERE bot_id = ? AND is_enabled = 1", (bot_id,)).fetchone()
             if row and row[0]:
@@ -867,7 +867,7 @@ def _wecom_listener_worker():
                             cid = body.get("chatid") or (body.get("from", {}) if isinstance(body.get("from"), dict) else {}).get("userid") or headers.get("chatid")
                             if cid:
                                 _cached_chatids[b_id] = cid
-                                conn_u = sqlite3.connect("gift_bookkeeping.db", timeout=10)
+                                conn_u = sqlite3.connect(_resolve_db_file(), timeout=10)
                                 c_u = conn_u.cursor()
                                 target_rows = c_u.execute("SELECT id, webhook_url, connection_type FROM webhook_configs WHERE (bot_id = ? OR id = ? OR bot_platform = 'wecom' OR webhook_url LIKE '%qyapi.weixin.qq.com%') AND is_enabled = 1", (b_id, w_id)).fetchall()
                                 for tr_id, tr_url, tr_conn in target_rows:
