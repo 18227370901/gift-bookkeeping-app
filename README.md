@@ -12,6 +12,8 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🗄️ **V10.10.17 交互式数据库部署选择 + PostgreSQL 兼容**：`./run.sh start` 时交互式选择 SQLite / 共享 PG / 独立 PG，智能推荐 + Cron 安全；共享文件与 Docker 版 MD5 逐字一致。
+> - ⚡ **V10.10.16 性能优化同步**：5 组重型依赖延迟导入 + 守护线程 fcntl 单实例锁 + init_database() 幂等跳过（从 Docker 版同步至传统版，共享文件 MD5 一致）。
 > - 🔑 **V10.10.15 企微长连接 bot_secret 密文解密修复**：监听线程原通过 raw SQL 读取 AES-256-GCM 密文 bot_secret 直接用于 SDK 认证，导致 WebSocket 连接始终失败；修复后解密明文认证成功，@机器人 可正常自动捕获群聊 ID。
 > - 🛡️ **V10.10.14 敏感公告隔离与企微长连接修复**：含管理员账号/密码的公告自动限定仅管理员可见且不推送外部；广播横幅与提示消息自动消失；企微长连接 chatid 清空生效、@机器人 自动捕获与测试读取均已修正至运行库。
 > - 🌗 **V10.10.13 黑夜/白天主题切换与输入框提示语美化**：新增全局双主题切换（基于 Bootstrap 5.3 `data-bs-theme`，localStorage 持久化，默认白天零回归），全站约 122 处输入框提示语统一美化（浅灰蓝、常规字重、聚焦淡出）。
@@ -926,6 +928,28 @@ V10.10.14 修复了长连接监听线程写库硬编码路径问题后，用户�
 
 #### 涉及文件（两套仓库同步，MD5 逐字一致）
 - `webhook_utils.py`（导入 `decrypt_credential` + 监听线程解密 `bot_secret`）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（本变更记录同步）
+
+### V10.10.16 + V10.10.17：性能优化同步 + 交互式数据库部署选择（2026-09-28，传统版 + Docker 版同步）
+
+#### V10.10.16 同步内容（从 Docker 版同步至传统版，共享文件 MD5 一致）
+- 5 组重型依赖延迟导入（openai/duckduckgo_search/cryptography/aibot SDK/pyzipper）
+- 守护线程 fcntl 跨进程单实例锁（`_daemon_lock.py` 新建共享文件）
+- `init_database()` 幂等快速跳过（PRAGMA user_version 检测）
+
+#### V10.10.17 交互式数据库部署选择 + PostgreSQL 兼容
+首次 `./run.sh start` 时交互式选择：SQLite / 共享 PG / 独立 PG，智能推荐 + Cron 安全。
+- `app.py`：init_database PG 守卫 + schema_version 表
+- `webhook_utils.py`：_get_db_conn() 统一连接 + 占位符适配
+- `routes_ext.py`：备份/恢复 PG 分支（JSON 导出导入）
+- `run.sh`：交互式数据库选择 + 独立 PG 容器管理
+
+#### Cron 安全
+`DB_MODE=sqlite ./run.sh start`（环境变量直通）| `.temp/.db.env`（首次选择后自动保存，restart 静默读取）| 非交互默认 SQLite
+
+#### 涉及文件（共享文件两版 MD5 逐字一致）
+- `app.py` / `models.py` / `routes_ext.py` / `webhook_utils.py` / `webdav_utils.py` / `ai_service.py` / `web_search.py` / `_daemon_lock.py`
+- `run.sh`（仅传统版）
 - `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（本变更记录同步）
 
 ```text

@@ -7,7 +7,18 @@ from datetime import datetime
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import UserMixin
 from werkzeug.security import generate_password_hash, check_password_hash
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+# V10.10.16 性能优化：cryptography AESGCM 含 Rust 扩展 ~12-18MB，
+# 延迟至首次加密/解密时才导入
+_AESGCM = None
+
+def _get_aesgcm():
+    """首次调用时延迟导入 AESGCM，后续从 sys.modules 缓存获取"""
+    global _AESGCM
+    if _AESGCM is not None:
+        return _AESGCM
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM as _cls
+    _AESGCM = _cls
+    return _AESGCM
 
 DEFAULT_SECRET_KEY = 'gift-bookkeeping-secret-key-2026-prod-secure'
 
@@ -33,6 +44,7 @@ def encrypt_credential(plain_text, secret_key=None):
         return ''
     try:
         key = get_aes_key(secret_key)
+        AESGCM = _get_aesgcm()
         aesgcm = AESGCM(key)
         nonce = os.urandom(12)  # 96-bit nonce
         cipher_bytes = aesgcm.encrypt(nonce, plain_str.encode('utf-8'), None)
@@ -47,6 +59,7 @@ def decrypt_credential(cipher_text, secret_key=None, fallback_plain=False):
     if not cipher_text:
         return None
     try:
+        AESGCM = _get_aesgcm()
         key = get_aes_key(secret_key)
         aesgcm = AESGCM(key)
         encrypted_raw = base64.b64decode(cipher_text.encode('utf-8'))
@@ -59,6 +72,7 @@ def decrypt_credential(cipher_text, secret_key=None, fallback_plain=False):
     except Exception:
         return cipher_text if fallback_plain else None
     try:
+        AESGCM = _get_aesgcm()
         key = get_aes_key(secret_key)
         aesgcm = AESGCM(key)
         encrypted_raw = base64.b64decode(cipher_text.encode('utf-8'))
@@ -67,7 +81,6 @@ def decrypt_credential(cipher_text, secret_key=None, fallback_plain=False):
         nonce = encrypted_raw[:12]
         cipher_bytes = encrypted_raw[12:]
         decrypted_bytes = aesgcm.decrypt(nonce, cipher_bytes, None)
-        return decrypted_bytes.decode('utf-8')
     except Exception as e:
         print(f"[AES Decrypt Error] {e}")
         return None

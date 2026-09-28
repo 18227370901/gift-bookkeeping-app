@@ -30,11 +30,109 @@ from gift_utils import (
     parse_gift_nlp, parse_gift_nlp_multi, split_gift_nlp_text,
     get_gift_suggestion, calculate_reconciliation, cn2num
 )
+from _daemon_lock import try_acquire_daemon_lock
 
 
 
 import sqlite3 as _sqlite3
 import tempfile as _tempfile
+import json as _backup_json
+
+
+# ===================== V10.10.17 PostgreSQL 备份/恢复兼容层 =====================
+
+def _is_pg_mode():
+    """检查当前是否为 PostgreSQL 模式"""
+    return os.environ.get('DATABASE_URL', '').strip().startswith('postgresql://')
+
+# PG 业务表清单（与 SQLite 完全一致，22 张表）
+_PG_ALL_TABLES = [
+    'users', 'gift_records', 'operation_logs', 'system_settings',
+    'registration_tokens', 'login_risks', 'security_risks',
+    'broadcasts', 'broadcast_reads', 'webhook_configs', 'webhook_logs',
+    'shared_ledger_links', 'backup_configs', 'banquets',
+    'anniversary_reminders', 'chat_sessions', 'chat_messages',
+    'ai_query_logs', 'scheduled_backup_tasks', 'backup_attachments',
+    'permission_tickets', 'scheduled_task_execution_logs'
+]
+_PG_USER_TABLES = ['gift_records', 'banquets', 'anniversary_reminders']
+_PG_GLOBAL_TABLES = [t for t in _PG_ALL_TABLES if t not in _PG_USER_TABLES]
+
+def _pg_export_database(output_path, user_filter=None):
+    """
+    PG 模式：使用 psycopg2 导出数据库到 JSON 文件
+    user_filter: 非 None 时仅导出该用户的 3 张业务表
+    返回 output_path
+    """
+    import psycopg2
+    from datetime import date as _date, decimal as _decimal
+    db_url = os.environ.get('DATABASE_URL', '').strip()
+    conn = psycopg2.connect(db_url)
+    cursor = conn.cursor()
+    result = {}
+    tables_to_export = _PG_USER_TABLES if user_filter else _PG_ALL_TABLES
+    for table in tables_to_export:
+        query = f'SELECT * FROM "{table}"'
+        if user_filter and table in _PG_USER_TABLES:
+            query += f' WHERE user_id = {int(user_filter)}'
+        try:
+            cursor.execute(query)
+            colnames = [desc[0] for desc in cursor.description]
+            rows = cursor.fetchall()
+            result[table] = {'columns': colnames, 'rows': [list(r) for r in rows]}
+        except Exception:
+            result[table] = {'columns': [], 'rows': []}
+    conn.close()
+    def _default(o):
+        if isinstance(o, (datetime, _date)):
+            return o.isoformat()
+        if isinstance(o, _decimal.Decimal):
+            return float(o)
+        if isinstance(o, bytes):
+            return o.decode('utf-8', errors='replace')
+        return str(o)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        _backup_json.dump(result, f, ensure_ascii=False, default=_default)
+    return output_path
+
+def _pg_import_database(input_path, user_filter=None):
+    """
+    PG 模式：从 JSON 文件恢复数据库
+    user_filter: 非 None 时仅恢复该用户的 3 张业务表（数据级合并）
+    返回 (success, message, stats)
+    """
+    import psycopg2
+    db_url = os.environ.get('DATABASE_URL', '').strip()
+    try:
+        with open(input_path, 'r', encoding='utf-8') as f:
+            data = _backup_json.load(f)
+        conn = psycopg2.connect(db_url)
+        cursor = conn.cursor()
+        stats = {}
+        tables_to_import = _PG_USER_TABLES if user_filter else list(data.keys())
+        for table_name, table_data in data.items():
+            if user_filter and table_name not in _PG_USER_TABLES:
+                continue
+            columns = table_data.get('columns', [])
+            rows = table_data.get('rows', [])
+            if not columns or not rows:
+                continue
+            # 合并模式：先删除该用户旧数据
+            if user_filter and table_name in _PG_USER_TABLES:
+                cursor.execute(f'DELETE FROM "{table_name}" WHERE user_id = %s', (int(user_filter),))
+            col_str = ', '.join(f'"{c}"' for c in columns)
+            ph_str = ', '.join(['%s'] * len(columns))
+            for row in rows:
+                try:
+                    cursor.execute(f'INSERT INTO "{table_name}" ({col_str}) VALUES ({ph_str})', row)
+                except Exception:
+                    pass  # 跳过类型不符或约束冲突的行
+            stats[table_name] = len(rows)
+        conn.commit()
+        conn.close()
+        return True, f'恢复完成: {stats}', stats
+    except Exception as e:
+        return False, f'恢复失败: {e}', {}
 
 
 
@@ -51,6 +149,20 @@ def build_user_scoped_backup_db(db_path, user):
     - 普通用户：复制主库到临时文件，删除非本人数据 + 删除系统全局表后返回临时文件路径
     返回 (temp_db_path, is_temp) —— is_temp=True 表示调用方用完需自行删除临时文件
     """
+    # V10.10.17: PG 模式用 JSON 导出替代 SQLite 文件复制
+    if _is_pg_mode():
+        if not user or not hasattr(user, 'is_admin'):
+            return db_path, False
+        if getattr(user, 'is_admin', False):
+            return db_path, False
+        if hasattr(user, 'can_view_others_for') and user.can_view_others_for('ledger'):
+            return db_path, False
+        # 普通用户：导出本人数据到临时 .sql 文件
+        tmp_dir = _tempfile.mkdtemp(prefix='gift_pg_scope_')
+        tmp_sql = os.path.join(tmp_dir, 'scoped_backup.sql')
+        _pg_export_database(tmp_sql, user_filter=user.id)
+        return tmp_sql, True
+
     if not user or not hasattr(user, 'is_admin'):
         return db_path, False
     if getattr(user, 'is_admin', False):
@@ -116,6 +228,12 @@ def merge_user_scoped_backup(db_path, backup_db_path, user):
     以数据级合并方式恢复到主库：仅覆盖该用户本人的三张业务表数据。
     返回 (success: bool, message: str, stats: dict)
     """
+    # V10.10.17: PG 模式用 JSON 导入替代 SQLite ATTACH 合并
+    if _is_pg_mode():
+        if not user or not hasattr(user, 'is_admin'):
+            return False, '无效用户', {}
+        return _pg_import_database(backup_db_path, user_filter=user.id)
+
     if not user or not hasattr(user, 'is_admin'):
         return False, '无效用户', {}
     user_id = user.id
@@ -382,6 +500,13 @@ def _anniversary_reminder_worker(flask_app):
     global _reminder_scheduler_running
     time.sleep(3)
     while _reminder_scheduler_running:
+        # V10.10.16: 跨进程单实例锁，多 Worker 环境下仅一个进程执行巡检
+        if not try_acquire_daemon_lock('anniversary_reminder'):
+            count = 0
+            while _reminder_scheduler_running and count < 6:
+                time.sleep(10)
+                count += 1
+            continue
         try:
             with flask_app.app_context():
                 check_and_trigger_due_reminders(flask_app)
@@ -501,6 +626,13 @@ def _backup_scheduler_worker(flask_app):
     global _backup_scheduler_running
     time.sleep(5)  # 等待应用完全启动
     while _backup_scheduler_running:
+        # V10.10.16: 跨进程单实例锁，多 Worker 环境下仅一个进程执行备份调度
+        if not try_acquire_daemon_lock('backup_scheduler'):
+            count = 0
+            while _backup_scheduler_running and count < 6:
+                time.sleep(10)
+                count += 1
+            continue
         try:
             with flask_app.app_context():
                 now = datetime.now()
@@ -626,7 +758,19 @@ def _backup_scheduler_worker(flask_app):
                             _task_creator = db.session.get(User, task.created_by) if task.created_by else None
                             _scoped_path = db_path
                             _is_temp = False
-                            if _task_creator and not getattr(_task_creator, 'is_admin', False):
+                            # V10.10.17: PG 模式用 JSON 导出替代文件复制
+                            if _is_pg_mode():
+                                _tmp_dir = _tempfile.mkdtemp(prefix='gift_pg_sched_')
+                                _scoped_path = os.path.join(_tmp_dir, 'pg_backup.sql')
+                                _is_temp = True
+                                if _task_creator and not getattr(_task_creator, 'is_admin', False):
+                                    if not (hasattr(_task_creator, 'can_view_others_for') and _task_creator.can_view_others_for('ledger')):
+                                        _pg_export_database(_scoped_path, user_filter=_task_creator.id)
+                                    else:
+                                        _pg_export_database(_scoped_path)
+                                else:
+                                    _pg_export_database(_scoped_path)
+                            elif _task_creator and not getattr(_task_creator, 'is_admin', False):
                                 if not (hasattr(_task_creator, 'can_view_others_for') and _task_creator.can_view_others_for('ledger')):
                                     try:
                                         _scoped_path, _is_temp = build_user_scoped_backup_db(db_path, _task_creator)
@@ -3866,15 +4010,25 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
 
-        # V7 修复：普通用户备份时生成仅含本人数据的临时库，防止越权获取他人数据
-        _scoped_db_path = db_path
-        _is_temp_db = False
-        if not current_user.is_admin:
-            try:
-                _scoped_db_path, _is_temp_db = build_user_scoped_backup_db(db_path, current_user)
-            except Exception as se:
-                flash(f'生成用户备份数据失败: {str(se)}', 'danger')
-                return redirect(url_for('admin_backups'))
+        # V10.10.17: PG 模式用 JSON 导出替代文件复制
+        if _is_pg_mode():
+            tmp_dir = _tempfile.mkdtemp(prefix='gift_pg_backup_')
+            _scoped_db_path = os.path.join(tmp_dir, 'pg_backup.sql')
+            _is_temp_db = True
+            if not current_user.is_admin:
+                _pg_export_database(_scoped_db_path, user_filter=current_user.id)
+            else:
+                _pg_export_database(_scoped_db_path)
+        else:
+            # V7 修复：普通用户备份时生成仅含本人数据的临时库，防止越权获取他人数据
+            _scoped_db_path = db_path
+            _is_temp_db = False
+            if not current_user.is_admin:
+                try:
+                    _scoped_db_path, _is_temp_db = build_user_scoped_backup_db(db_path, current_user)
+                except Exception as se:
+                    flash(f'生成用户备份数据失败: {str(se)}', 'danger')
+                    return redirect(url_for('admin_backups'))
 
         # 是否加密：手动操作时用户可选择是否加密及密码
         encrypt_password = None
@@ -3893,7 +4047,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         # V3: 备份文件名中嵌入用户标识
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         username_tag = current_user.username
-        remote_filename = f"{timestamp}_{username_tag}_db_backup.db"
+        _backup_ext = '.sql' if _is_pg_mode() else '.db'
+        remote_filename = f"{timestamp}_{username_tag}_db_backup{_backup_ext}"
         if encrypt_password:
             remote_filename = f"{timestamp}_{username_tag}_db_backup.zip"
 
@@ -3944,10 +4099,31 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @app.route('/admin/backup/download_local')
     @login_required
     def admin_download_local_backup():
-        """一键下载当前本地 SQLite 数据库文件（离线备份）"""
+        """一键下载当前本地数据库备份文件（离线备份）"""
         if not current_user.is_admin and not current_user.can_use_backup():
             flash('权限不足', 'danger')
             return redirect(url_for('index'))
+
+        # V10.10.17: PG 模式用 JSON 导出替代文件下载
+        if _is_pg_mode():
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"gift_bookkeeping_backup_{timestamp}.sql"
+            safe_log('下载本地备份', f"下载了当前数据库备份文件: {filename}")
+            tmp_dir = _tempfile.mkdtemp(prefix='gift_pg_dl_')
+            tmp_sql = os.path.join(tmp_dir, filename)
+            if not current_user.is_admin:
+                _pg_export_database(tmp_sql, user_filter=current_user.id)
+            else:
+                _pg_export_database(tmp_sql)
+            from flask import after_this_request
+            @after_this_request
+            def _cleanup_pg_download(response):
+                try:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+                except Exception:
+                    pass
+                return response
+            return send_from_directory(tmp_dir, filename, as_attachment=True)
 
         db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
         if not os.path.exists(db_path):
@@ -4010,11 +4186,36 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         file = request.files.get('backup_file')
         if not file or not file.filename:
-            flash('请选择需要上传恢复的 .db 备份文件！', 'warning')
+            flash('请选择需要上传恢复的备份文件！', 'warning')
             return redirect(url_for('admin_backups'))
 
-        if not file.filename.endswith('.db'):
-            flash('仅支持恢复 SQLite 数据库文件 (.db)！', 'danger')
+        # V10.10.17: PG 模式接受 .sql 文件
+        is_pg = _is_pg_mode()
+        _valid_ext = '.sql' if is_pg else '.db'
+        if not file.filename.endswith(_valid_ext):
+            flash(f'仅支持恢复 {_valid_ext} 格式的备份文件！', 'danger')
+            return redirect(url_for('admin_backups'))
+
+        # V10.10.17: PG 模式恢复分支——使用 _pg_import_database 替代文件级替换
+        if is_pg:
+            import tempfile
+            tmp_dir = tempfile.mkdtemp(prefix='gift_pg_restore_')
+            tmp_sql = os.path.join(tmp_dir, 'uploaded.sql')
+            file.save(tmp_sql)
+            try:
+                if current_user.is_admin:
+                    ok, msg, stats = _pg_import_database(tmp_sql)
+                else:
+                    ok, msg, stats = _pg_import_database(tmp_sql, user_filter=current_user.id)
+                if ok:
+                    safe_log('上传恢复备份', f'PG恢复成功: {msg}')
+                    flash(f'恢复成功: {msg}', 'success')
+                else:
+                    flash(f'恢复失败: {msg}', 'danger')
+            except Exception as e:
+                flash(f'恢复失败: {str(e)}', 'danger')
+            finally:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
             return redirect(url_for('admin_backups'))
 
         db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
@@ -4282,16 +4483,40 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             # 下载到临时文件，验证完整性后再替换
             import tempfile
             tmp_dir = tempfile.mkdtemp(prefix='gift_restore_')
-            tmp_db_path = os.path.join(tmp_dir, 'restored.db')
-            
+
+            # V10.10.17: PG 模式恢复分支
+            _is_pg = _is_pg_mode()
+            if _is_pg:
+                tmp_db_path = os.path.join(tmp_dir, 'restored.sql')
+            else:
+                tmp_db_path = os.path.join(tmp_dir, 'restored.db')
+
             if is_encrypted_zip:
                 # 加密 zip：下载并解密到临时文件
                 success, msg = download_and_decrypt_backup(config, remote_filename=target_filename, save_path=tmp_db_path, decrypt_password=decrypt_password)
             else:
-                # 普通 .db：直接下载到临时文件
+                # 普通 .db/.sql：直接下载到临时文件
                 success, msg = download_webdav_backup(config, remote_filename=target_filename, save_path=tmp_db_path)
-            
+
             if success:
+                # V10.10.17: PG 模式恢复
+                if _is_pg:
+                    try:
+                        if current_user.is_admin:
+                            ok, msg, stats = _pg_import_database(tmp_db_path)
+                        else:
+                            ok, msg, stats = _pg_import_database(tmp_db_path, user_filter=current_user.id)
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                        if ok:
+                            safe_log('恢复WebDAV备份', f"PG恢复成功（文件: {target_filename}）: {msg}")
+                            flash(f'恢复成功: {msg}', 'success')
+                        else:
+                            flash(f'恢复失败: {msg}', 'danger')
+                    except Exception as e:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
+                        flash(f'恢复失败: {str(e)}', 'danger')
+                    return redirect(url_for('admin_backups'))
+
                 # 验证下载数据库的完整性
                 import sqlite3 as _sqlite3
                 try:

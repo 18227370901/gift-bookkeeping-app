@@ -21,12 +21,21 @@ import urllib3
 # 禁用 self-signed SSL 证书警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 尝试导入 pyzipper 用于 AES-256 加密 zip
-try:
-    import pyzipper
-    HAS_PYZIPPER = True
-except ImportError:
-    HAS_PYZIPPER = False
+# 延迟导入 pyzipper 用于 AES-256 加密 zip
+# V10.10.16 性能优化：pyzipper ~3MB，移至首次加密备份时才加载
+HAS_PYZIPPER = None  # None=未检测, True/False=已检测
+
+def _ensure_pyzipper():
+    """首次调用时延迟导入 pyzipper，后续从 sys.modules 缓存获取"""
+    global HAS_PYZIPPER
+    if HAS_PYZIPPER is not None:
+        return HAS_PYZIPPER
+    try:
+        import pyzipper  # noqa: F401
+        HAS_PYZIPPER = True
+    except ImportError:
+        HAS_PYZIPPER = False
+    return HAS_PYZIPPER
 
 
 def _normalize_url(url):
@@ -364,17 +373,12 @@ def create_encrypted_zip(local_file_path, zip_password, output_path=None):
     将本地文件创建为 AES-256 加密的 zip 包。
     返回 (success, zip_path_or_error_msg)
     """
+    _ensure_pyzipper()
     if not HAS_PYZIPPER:
         return False, "缺少 pyzipper 库，请运行 pip install pyzipper"
-    if not local_file_path or not os.path.exists(local_file_path):
-        return False, "本地文件不存在"
-    if not zip_password:
-        return False, "加密密码不能为空"
-
-    if output_path is None:
-        output_path = local_file_path + '.zip'
 
     try:
+        import pyzipper
         with pyzipper.AESZipFile(output_path, 'w', compression=pyzipper.ZIP_LZMA, encryption=pyzipper.WZ_AES) as zf:
             zf.setpassword(zip_password.encode('utf-8'))
             zf.write(local_file_path, os.path.basename(local_file_path))
@@ -391,7 +395,7 @@ def upload_encrypted_backup(webdav_url_or_config, username=None, password=None, 
     if not local_file_path or not os.path.exists(local_file_path):
         return False, "本地数据库文件不存在！"
 
-    if encrypt_password and HAS_PYZIPPER:
+    if encrypt_password and _ensure_pyzipper():
         # 创建加密 zip 到临时目录
         tmp_dir = tempfile.mkdtemp(prefix='gift_backup_')
         tmp_zip = os.path.join(tmp_dir, os.path.basename(local_file_path) + '.zip')
@@ -505,6 +509,7 @@ def decrypt_encrypted_zip(zip_file_path, zip_password, output_path=None):
             output_path = zip_file_path + '.db'
 
     try:
+        import pyzipper
         with pyzipper.AESZipFile(zip_file_path, 'r', compression=pyzipper.ZIP_LZMA, encryption=pyzipper.WZ_AES) as zf:
             zf.setpassword(zip_password.encode('utf-8'))
             # 获取 zip 内的第一个文件（应该是 .db 文件）
