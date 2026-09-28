@@ -919,6 +919,11 @@ V10.10.14 修复了长连接监听线程写库硬编码路径问题后，用户�
 - `webhook_utils.py` 导入 `decrypt_credential`，监听线程读取 `bot_secret` 后调用 `decrypt_credential(bot_secret, fallback_plain=True)` 解密为明文再传给 SDK
 - 前台验证确认：解密后 WebSocket 认证成功（`Authentication successful`），心跳正常收发
 
+#### 验证结论
+- 前台 SDK 验证：WebSocket `Authentication successful`，心跳收发正常
+- **真实企微群 @机器人 实测通过**：群内 @机器人后数秒内自动捕获群聊 chatid，`webhook_url` 自动更新为 `wecom://bot/{bot_id}?chatid={捕获的群聊ID}`，`receive_chatid` 推送日志记录成功（含"成功自动捕获群聊会话并绑定到通道"），Webhook 页面通道列表同步显示捕获的会话 ID
+- 全链路闭环确认：监听线程（解密认证）→ WebSocket 消息接收 → chatid 提取 → 写入运行库 → 页面回显，全部正常
+
 #### 涉及文件（两套仓库同步，MD5 逐字一致）
 - `webhook_utils.py`（导入 `decrypt_credential` + 监听线程解密 `bot_secret`）
 - `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（本变更记录同步）
