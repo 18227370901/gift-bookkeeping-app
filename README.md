@@ -12,6 +12,7 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 📦 **V10.10.17b run.sh 模块化拆分**：将 run.sh 函数拆分到 `bin/` 目录下 7 个 `.sh` 文件，run.sh 仅保留配置区 + 启停操作（792→257 行）；修正 `select_db_mode` 遗留位置问题。
 > - 🗄️ **V10.10.17 交互式数据库部署选择 + PostgreSQL 兼容**：`./run.sh start` 时交互式选择 SQLite / 共享 PG / 独立 PG，智能推荐 + Cron 安全；共享文件与 Docker 版 MD5 逐字一致。
 > - ⚡ **V10.10.16 性能优化同步**：5 组重型依赖延迟导入 + 守护线程 fcntl 单实例锁 + init_database() 幂等跳过（从 Docker 版同步至传统版，共享文件 MD5 一致）。
 > - 🔑 **V10.10.15 企微长连接 bot_secret 密文解密修复**：监听线程原通过 raw SQL 读取 AES-256-GCM 密文 bot_secret 直接用于 SDK 认证，导致 WebSocket 连接始终失败；修复后解密明文认证成功，@机器人 可正常自动捕获群聊 ID。
@@ -950,6 +951,17 @@ V10.10.14 修复了长连接监听线程写库硬编码路径问题后，用户�
 #### 涉及文件（共享文件两版 MD5 逐字一致）
 - `app.py` / `models.py` / `routes_ext.py` / `webhook_utils.py` / `webdav_utils.py` / `ai_service.py` / `web_search.py` / `_daemon_lock.py`
 - `run.sh`（仅传统版）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（本变更记录同步）
+
+### V10.10.17b：run.sh 模块化拆分（2026-09-28，传统版 + Docker 版同步）
+
+将 run.sh 函数拆分到 `bin/` 目录下 7 个 `.sh` 文件，run.sh 仅保留配置区 + 启停操作（792→257 行）。
+- `bin/common.sh` + `bin/db_select.sh`：两版共享，MD5 一致
+- `bin/cleanup.sh` / `bin/ssl_certs.sh` / `bin/nginx_config.sh` / `bin/port_conflict.sh` / `bin/db_setup.sh`：各版独立
+- 修正 `select_db_mode` 误置于 `clean` 分支的遗留问题（移至 `start_service` 内）
+
+#### 涉及文件
+- `run.sh`（重写）+ `bin/` 目录下 7 个 `.sh` 文件
 - `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（本变更记录同步）
 
 ```text

@@ -1,0 +1,78 @@
+#!/bin/sh
+# db_setup.sh (传统版) — 数据库模式配置函数（SQLite/共享PG/独立PG，通过环境变量传递 DATABASE_URL）
+
+# 配置 SQLite 模式
+setup_sqlite() {
+    DATABASE_URL=""
+    export DATABASE_URL
+    echo_e "${GREEN}数据库模式: SQLite 本地文件${NC}"
+}
+
+# 配置共享 PostgreSQL 模式（传统版：通过 127.0.0.1:暴露端口 连接）
+setup_shared_pg() {
+    if [ -z "$DB_PG_CONTAINER" ]; then
+        echo_e "${RED}共享 PG 模式需要指定 DB_PG_CONTAINER 环境变量${NC}"
+        exit 1
+    fi
+    PG_SUPERUSER=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$DB_PG_CONTAINER" 2>/dev/null | grep '^POSTGRES_USER=' | cut -d= -f2)
+    PG_SUPERUSER="${PG_SUPERUSER:-postgres}"
+    PG_PASSWORD=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
+    docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "CREATE USER gift_user WITH PASSWORD '$PG_PASSWORD';" 2>/dev/null || true
+    docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "CREATE DATABASE gift_bookkeeping OWNER gift_user;" 2>/dev/null || true
+    docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "GRANT ALL ON DATABASE gift_bookkeeping TO gift_user;" 2>/dev/null || true
+    PG_HOST_PORT=$(docker inspect --format '{{range $p, $conf := .NetworkSettings.Ports}}{{range $conf}}{{.HostPort}} {{end}}{{end}}' "$DB_PG_CONTAINER" 2>/dev/null | awk '{print $1}')
+    PG_HOST_PORT="${PG_HOST_PORT:-5432}"
+    DATABASE_URL="postgresql://gift_user:${PG_PASSWORD}@127.0.0.1:${PG_HOST_PORT}/gift_bookkeeping"
+    export DATABASE_URL
+    echo_e "${GREEN}数据库模式: 共享 PostgreSQL (${DB_PG_CONTAINER}, 端口 ${PG_HOST_PORT})${NC}"
+}
+
+# 配置独立 PostgreSQL 模式（传统版：docker run -d 启动独立容器）
+setup_independent_pg() {
+    if [ -z "$PG_LOCAL_IMAGE" ]; then
+        echo_e "${YELLOW}本地未找到 PostgreSQL 镜像。${NC}"
+        if [ -t 0 ]; then
+            printf '是否允许下载 postgres:16-alpine (约40MB)? (y/n) [默认 n]: ' >&2
+            read -r _dl_answer
+            case "$_dl_answer" in
+                y|Y|yes|YES) PG_LOCAL_IMAGE="postgres:16-alpine" ;;
+                *) echo_e "${YELLOW}用户取消下载，降级为 SQLite 模式${NC}"; DB_MODE=sqlite; setup_sqlite; return ;;
+            esac
+        else
+            echo_e "${YELLOW}非交互环境无法下载，降级为 SQLite 模式${NC}"
+            DB_MODE=sqlite; setup_sqlite; return
+        fi
+    fi
+    PG_PASSWORD=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
+    PG_CONTAINER_NAME="${PROJECT_NAME}-pg"
+    PG_HOST_PORT=15432
+    while lsof -ti :$PG_HOST_PORT > /dev/null 2>&1; do
+        PG_HOST_PORT=$((PG_HOST_PORT + 1))
+    done
+    docker rm -f "$PG_CONTAINER_NAME" 2>/dev/null || true
+    echo_e "${GREEN}正在启动独立 PostgreSQL 容器 (${PG_LOCAL_IMAGE})...${NC}"
+    docker run -d \
+        --name "$PG_CONTAINER_NAME" \
+        -e POSTGRES_DB=gift_bookkeeping \
+        -e POSTGRES_USER=gift_user \
+        -e POSTGRES_PASSWORD="$PG_PASSWORD" \
+        -p "127.0.0.1:${PG_HOST_PORT}:5432" \
+        -v "${PROJECT_NAME}_pg_data:/var/lib/postgresql/data" \
+        "$PG_LOCAL_IMAGE" > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo_e "${RED}独立 PG 容器启动失败，降级为 SQLite 模式${NC}"
+        DB_MODE=sqlite; setup_sqlite; return
+    fi
+    echo_e "${YELLOW}等待 PostgreSQL 就绪...${NC}"
+    _pg_wait=0
+    while [ $_pg_wait -lt 30 ]; do
+        if docker exec "$PG_CONTAINER_NAME" pg_isready -U gift_user > /dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+        _pg_wait=$((_pg_wait + 1))
+    done
+    DATABASE_URL="postgresql://gift_user:${PG_PASSWORD}@127.0.0.1:${PG_HOST_PORT}/gift_bookkeeping"
+    export DATABASE_URL
+    echo_e "${GREEN}数据库模式: 独立 PostgreSQL (${PG_CONTAINER_NAME}, 端口 ${PG_HOST_PORT})${NC}"
+}
