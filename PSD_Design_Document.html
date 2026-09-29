@@ -114,7 +114,7 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.10.18</span>
+    <span><strong>版本</strong>：V10.10.19</span>
     <span><strong>生成日期</strong>：2026-09-29</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.18（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固）</span>
     <br>
@@ -961,7 +961,7 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 <tr><td>start</td><td>preflight_check()【V10.10.18】→ ensure_ssl_certs() → check_port_conflict() → setup_nginx_config() → cleanup_cache() → select_db_mode()【V10.10.17】→ ensure_sqlite_runtime_db()【V10.10.18，仅 SQLite 模式，首次部署自动复制样例库为 data/ 运行库】→ venv → pip install（清华→阿里云→官方三源兑底【V10.10.18】）→ python3 app.py</td></tr>
 <tr><td>stop</td><td>PID 文件 + 端口双重清理 → 进程组 kill</td></tr>
 <tr><td>restart</td><td>stop + sleep 2 + start</td></tr>
-<tr><td>status</td><td>PID 文件 + 端口检测</td></tr>
+<tr><td>status</td><td>PID 文件 + 端口检测 + print_access_info() 访问地址/本地直连/日志 + print_db_mode_info() 数据库模式【V10.10.19】</td></tr>
 </table>
 
 <h2>8.5 Docker 部署</h2>
@@ -1099,9 +1099,9 @@ graph LR
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.10.18</td></tr>
-<tr><td>生成日期</td><td>2026-09-29（V1.2 修订）</td></tr>
-<tr><td>审计基线</td><td>main 分支 V10.10.18（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固）</td></tr>
+<tr><td>文档版本</td><td>V10.10.19</td></tr>
+<tr><td>生成日期</td><td>2026-09-29（V1.3 修订）</td></tr>
+<tr><td>审计基线</td><td>main 分支 V10.10.19（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示）</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
 <tr><td>漂移项总数</td><td>10（2 高影响 → D-03 已于 V10.10.18 清偿，余 D-02 待治理 / 1 中影响 / 4 低影响 / 3 一致）</td></tr>
