@@ -114,9 +114,9 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.10.17</span>
-    <span><strong>生成日期</strong>：2026-09-28</span>
-    <span><strong>审计基线</strong>：main 分支 V10.10.17（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择）</span>
+    <span><strong>版本</strong>：V10.10.18</span>
+    <span><strong>生成日期</strong>：2026-09-29</span>
+    <span><strong>审计基线</strong>：main 分支 V10.10.18（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固）</span>
     <br>
     <span class="badge">代码是实现真相</span>
     <span class="badge">文档是意图真相</span>
@@ -219,10 +219,10 @@
 <tr><td>对称加密</td><td>cryptography (AES-256-GCM)</td><td>42.0.8</td><td><code>requirements.txt:7</code>、<code>models.py:10,27-43</code></td></tr>
 <tr><td>数据库</td><td>SQLite (WAL) / PostgreSQL (可选)</td><td>—</td><td><code>app.py:68-78</code>，<code>DATABASE_URL</code> 切换</td></tr>
 <tr><td>PostgreSQL 驱动</td><td>psycopg2-binary</td><td>2.9.9</td><td><code>requirements.txt:8</code>（切换 PostgreSQL 的必要依赖）</td></tr>
-<tr><td>WSGI 容器</td><td>Gunicorn <span class="tag tag-drift">已声明未使用</span></td><td>22.0.0</td><td><code>requirements.txt:6</code>；<code>run.sh:362-368</code> 实际用 <code>python3 app.py</code></td></tr>
+<tr><td>WSGI 容器</td><td>Gunicorn <span class="tag tag-drift">已声明未使用</span></td><td>22.0.0</td><td><code>requirements.txt:6</code>；<code>run.sh:167-174</code> 实际用 <code>python3 app.py</code></td></tr>
 <tr><td>反向代理</td><td>Nginx (SNI 多项目 443)</td><td>—</td><td><code>nginx_ssl.conf</code>、<code>run.sh:224-291</code></td></tr>
-<tr><td>前端</td><td>Jinja2 + Bootstrap 5 + 原生 JS</td><td>—</td><td><code>templates/base.html:13-14</code>（CDN 加载）</td></tr>
-<tr><td>图表</td><td>Chart.js</td><td>—</td><td>模板内 CDN 引入</td></tr>
+<tr><td>前端</td><td>Jinja2 + Bootstrap 5 + 原生 JS</td><td>—</td><td><code>templates/base.html:23-25、256</code>（<span class="tag tag-ok">V10.10.18 已本地化 static/vendor/ 加载</span>）</td></tr>
+<tr><td>图表</td><td>Chart.js</td><td>—</td><td>模板内已无引用（历史记载的 CDN 引入实际不存在）</td></tr>
 <tr><td>PWA</td><td>Service Worker</td><td>—</td><td><code>static/sw.js</code>（1053 bytes）</td></tr>
 <tr><td>AI 接入</td><td>OpenAI Python SDK</td><td>&gt;=1.0.0</td><td><code>requirements.txt:14</code>、<code>ai_service.py</code></td></tr>
 <tr><td>联网搜索</td><td>DuckDuckGo Search</td><td>&gt;=4.0.0</td><td><code>requirements.txt:15</code>、<code>web_search.py</code></td></tr>
@@ -307,7 +307,7 @@ graph TB
 <tr><th>#</th><th>模块/功能</th><th>历史文档记载</th><th>代码真实实现</th><th>状态</th><th>影响</th></tr>
 <tr><td>D-01</td><td><strong>akshare 金融数据集成</strong></td><td>Project_Survey.md §3 详述 akshare 集成方案、熔断/降级规范</td><td>requirements.txt 无 akshare 依赖；全项目无 import akshare；web_search.py 仅用 DuckDuckGo</td><td><span class="tag tag-low">未落地</span></td><td><span class="tag tag-low">低</span> 业务从未使用</td></tr>
 <tr><td>D-02</td><td><strong>Gunicorn 多 Worker</strong></td><td>ADR-01 决策"全面采用 Gunicorn -w 4 -k gthread --threads 4"；requirements.txt:6 声明 gunicorn==22.0.0</td><td>run.sh:362-368 实际用 python3 app.py（Werkzeug 开发服务器）</td><td><span class="tag tag-high">已废弃</span></td><td><span class="tag tag-high">高</span> 开发服务器并发瓶颈</td></tr>
-<tr><td>D-03</td><td><strong>CDN 依赖彻底移除</strong></td><td>ADR-03 决策"彻底移除国外 CDN，静态资源本地化"</td><td>base.html:13-14 仍从 cdn.jsdelivr.net 加载 Bootstrap 5、cdnjs.cloudflare.com 加载 Font Awesome</td><td><span class="tag tag-high">未落地</span></td><td><span class="tag tag-high">高</span> 内网/弱网白屏</td></tr>
+<tr><td>D-03</td><td><strong>CDN 依赖彻底移除</strong></td><td>ADR-03 决策"彻底移除国外 CDN，静态资源本地化"</td><td>V10.10.18 已落地：static/vendor/ 本地化 14 个资源文件（Bootstrap 5.3.0/Font Awesome 6.4.0/Bootstrap Icons 1.11.3，版本与原 CDN 一致），base.html 4 处 + shared_ledger.html 2 处改为 url_for 本地引用</td><td><span class="tag tag-ok">已落地</span></td><td><span class="tag tag-ok">已清偿</span> 内网/弱网白屏问题随之解决</td></tr>
 <tr><td>D-04</td><td><strong>Celery/Redis 任务队列</strong></td><td>ADR-04 决策"引入 Redis + Celery 任务队列"</td><td>使用 threading.Thread daemon 线程，无 Celery/Redis 依赖</td><td><span class="tag tag-low">方案降级</span></td><td><span class="tag tag-low">低</span> 单机部署合理</td></tr>
 <tr><td>D-05</td><td><strong>权限级别 1 语义</strong></td><td>ADR-25 "级别 1 为全局绝对全只读模式，严禁修改或删除任何数据"</td><td>V10.4 已修正为"自身全权 + 仅查看他人数据"（app.py can_user_edit_entity）</td><td><span class="tag tag-mid">已重构</span></td><td><span class="tag tag-mid">中</span> ADR-25 与代码矛盾</td></tr>
 <tr><td>D-06</td><td><strong>AI_ASSISTANT_DESIGN.md 版本覆盖</strong></td><td>覆盖到 V10.7（2026-09-17）</td><td>V10.8~V10.10.10 约 20+ 条修复仅在 README.md 变更日志中</td><td><span class="tag tag-low">版本断层</span></td><td><span class="tag tag-low">低</span></td></tr>
@@ -320,7 +320,7 @@ graph TB
 <h2>2.2 漂移影响汇总</h2>
 <table>
 <tr><th>严重度</th><th>数量</th><th>漂移项</th></tr>
-<tr><td><span class="tag tag-high">高影响</span></td><td>2</td><td>D-02（Gunicorn 未落地）、D-03（CDN 未移除）</td></tr>
+<tr><td><span class="tag tag-high">高影响</span></td><td>1</td><td>D-02（Gunicorn 未落地）；D-03（CDN 未移除）✅ 已于 V10.10.18 清偿</td></tr>
 <tr><td><span class="tag tag-mid">中影响</span></td><td>1</td><td>D-05（权限级别 1 语义矛盾）</td></tr>
 <tr><td><span class="tag tag-low">低影响</span></td><td>4</td><td>D-01（akshare 未落地）、D-04（Celery 降级）、D-06（文档断层）、D-07（SW 未落地）</td></tr>
 <tr><td><span class="tag tag-ok">一致</span></td><td>3</td><td>D-08、D-09、D-10</td></tr>
@@ -464,7 +464,7 @@ for sql in migration_sqls:
 <tr><td>框架重量</td><td>Flask 3.0 轻量级，无过度抽象</td><td><span class="tag tag-ok">否</span> Flask 本身足够轻量</td></tr>
 <tr><td>并发性能</td><td>Werkzeug 开发服务器单线程</td><td><span class="tag tag-high">是</span> 生产部署仍用 python3 app.py（D-02 漂移）</td></tr>
 <tr><td>代码可维护性</td><td>5231 行单文件，无 Service 层</td><td><span class="tag tag-high">是</span> 胖 Controller 修改回归风险高</td></tr>
-<tr><td>前端体验</td><td>Jinja2 SSR + CDN 依赖 + 内联 JS</td><td><span class="tag tag-mid">部分</span> CDN 在内网不可用（D-03）</td></tr>
+<tr><td>前端体验</td><td>Jinja2 SSR + 本地静态资源 + 内联 JS</td><td><span class="tag tag-ok">否</span> V10.10.18 前端资源已本地化（D-03 已清偿），SSR 满足业务需求</td></tr>
 <tr><td>数据库扩展</td><td>SQLite WAL 足够单机场景</td><td><span class="tag tag-ok">否</span> 已支持 PostgreSQL 无缝切换</td></tr>
 <tr><td>部署复杂度</td><td>单文件部署 + run.sh 自动化</td><td><span class="tag tag-ok">否</span> 部署体验优秀</td></tr>
 </table>
@@ -500,7 +500,7 @@ for sql in migration_sqls:
 <table>
 <tr><th>优先级</th><th>治理项</th><th>漂移编号</th><th>工作量</th><th>具体操作</th></tr>
 <tr><td><span class="tag tag-high">P0</span></td><td>启用 Gunicorn 多 Worker</td><td>D-02</td><td>0.5 人日</td><td>run.sh 启动命令改为 gunicorn -w 4 -k gthread --threads 4 -b 127.0.0.1:$PORT app:app --timeout 60</td></tr>
-<tr><td><span class="tag tag-high">P0</span></td><td>CDN 资源本地化</td><td>D-03</td><td>1 人日</td><td>下载 Bootstrap 5/FontAwesome/Chart.js 到 static/vendor/</td></tr>
+<tr><td><span class="tag tag-high">P0</span></td><td>CDN 资源本地化 <span class="tag tag-ok">✅ V10.10.18 已完成</span></td><td>D-03</td><td>—</td><td>Bootstrap 5.3.0/Font Awesome 6.4.0/Bootstrap Icons 1.11.3 共 14 个文件已落地 static/vendor/，base.html 4 处 + shared_ledger.html 2 处改本地引用</td></tr>
 <tr><td><span class="tag tag-mid">P1</span></td><td>更新 ADR-25 权限语义</td><td>D-05</td><td>0.5 人日</td><td>追加 ADR-39 记录 V10.4 权限修正</td></tr>
 <tr><td><span class="tag tag-mid">P1</span></td><td>标注 akshare 为"规划搁置"</td><td>D-01</td><td>0.5 人日</td><td>在 Project_Survey.md §3 添加状态标注</td></tr>
 <tr><td><span class="tag tag-low">P2</span></td><td>routes_ext.py 拆分</td><td>—</td><td>3 人日</td><td>按业务域拆分为 routes_banquets.py/routes_backups.py/routes_webhooks.py 等</td></tr>
@@ -518,9 +518,9 @@ for sql in migration_sqls:
 <table>
 <tr><th>维度</th><th>实现</th><th>代码依据</th></tr>
 <tr><td>渲染模式</td><td>服务端渲染（SSR），Jinja2 模板继承</td><td>templates/base.html 为布局模板</td></tr>
-<tr><td>CSS 框架</td><td>Bootstrap 5.3.0（CDN: cdn.jsdelivr.net）</td><td>base.html:13</td></tr>
-<tr><td>图标库</td><td>Font Awesome 6.4.0 + Bootstrap Icons 1.11.3</td><td>base.html:14-15</td></tr>
-<tr><td>图表库</td><td>Chart.js（模板内 CDN 引入）</td><td>index.html</td></tr>
+<tr><td>CSS 框架</td><td>Bootstrap 5.3.0（本地 static/vendor/bootstrap/5.3.0/，V10.10.18 起替代 CDN）</td><td>base.html:23、256</td></tr>
+<tr><td>图标库</td><td>Font Awesome 6.4.0 + Bootstrap Icons 1.11.3（本地 static/vendor/，V10.10.18 起替代 CDN）</td><td>base.html:24-25</td></tr>
+<tr><td>图表库</td><td>无（历史文档记载 Chart.js，实际模板内已无引用）</td><td>—</td></tr>
 <tr><td>JavaScript</td><td>原生 JS（无框架、无构建工具），fetch() API</td><td>全部模板内联 &lt;script&gt;</td></tr>
 <tr><td>PWA</td><td>manifest.json + sw.js（仅 manifest 壳）</td><td>base.html:9-10</td></tr>
 <tr><td>CSRF</td><td>全局 meta 标签注入 + fetch 请求头携带</td><td>base.html:6, 233-259</td></tr>
@@ -958,7 +958,7 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 <h3>run.sh 生命周期</h3>
 <table>
 <tr><th>命令</th><th>执行流程</th></tr>
-<tr><td>start</td><td>ensure_ssl_certs() → check_port_conflict() → setup_nginx_config() → cleanup_cache() → venv → pip install → python3 app.py</td></tr>
+<tr><td>start</td><td>preflight_check()【V10.10.18】→ ensure_ssl_certs() → check_port_conflict() → setup_nginx_config() → cleanup_cache() → select_db_mode()【V10.10.17】→ ensure_sqlite_runtime_db()【V10.10.18，仅 SQLite 模式，首次部署自动复制样例库为 data/ 运行库】→ venv → pip install（清华→阿里云→官方三源兑底【V10.10.18】）→ python3 app.py</td></tr>
 <tr><td>stop</td><td>PID 文件 + 端口双重清理 → 进程组 kill</td></tr>
 <tr><td>restart</td><td>stop + sleep 2 + start</td></tr>
 <tr><td>status</td><td>PID 文件 + 端口检测</td></tr>
@@ -995,8 +995,8 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 <h3>维度二：高并发性能</h3>
 <table>
 <tr><th>#</th><th>技术债</th><th>严重度</th><th>代码依据</th><th>影响</th></tr>
-<tr><td>PF-01</td><td>生产环境使用 Werkzeug 开发服务器</td><td><span class="tag tag-high">高</span></td><td>run.sh:362-368</td><td>单线程，多 Tab 请求排队阻塞</td></tr>
-<tr><td>PF-02</td><td>CDN 资源未本地化</td><td><span class="tag tag-high">高</span></td><td>base.html:13-14</td><td>内网/弱网白屏</td></tr>
+<tr><td>PF-01</td><td>生产环境使用 Werkzeug 开发服务器</td><td><span class="tag tag-high">高</span></td><td>run.sh:167-174</td><td>单线程，多 Tab 请求排队阻塞</td></tr>
+<tr><td>PF-02</td><td>CDN 资源未本地化 <span class="tag tag-ok">✅ V10.10.18 已修复</span></td><td><span class="tag tag-ok">已清偿</span></td><td>base.html:23-25、256（本地 static/vendor/ 引用）</td><td>内网/弱网白屏已随本地化解决，浏览器实测无 CDN 请求</td></tr>
 <tr><td>PF-03</td><td>query.all() 全量加载再 Python 端统计</td><td><span class="tag tag-mid">中</span></td><td>app.py:1005-1006</td><td>数据量增长后内存+效率问题</td></tr>
 <tr><td>PF-04</td><td>SQLite 单文件并发写锁</td><td><span class="tag tag-low">低</span></td><td>app.py:83-84</td><td>已开启 WAL + 30s busy_timeout</td></tr>
 </table>
@@ -1033,7 +1033,7 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 <table>
 <tr><th>#</th><th>治理项</th><th>关联技术债</th><th>具体操作</th><th>验证方式</th></tr>
 <tr><td>P0-1</td><td>启用 Gunicorn 多 Worker</td><td>PF-01, OP-01</td><td>run.sh 启动命令改为 gunicorn -w 4 -k gthread --threads 4 -b 127.0.0.1:$PORT app:app --timeout 60</td><td>并发请求无阻塞</td></tr>
-<tr><td>P0-2</td><td>CDN 资源本地化</td><td>PF-02</td><td>下载 Bootstrap 5.3/FontAwesome 6.4/Chart.js 到 static/vendor/，修改 base.html</td><td>断网测试页面正常</td></tr>
+<tr><td>P0-2</td><td>CDN 资源本地化 <span class="tag tag-ok">✅ V10.10.18 已完成</span></td><td>PF-02</td><td>Bootstrap 5.3.0/FontAwesome 6.4.0/Bootstrap Icons 1.11.3 已落地 static/vendor/（14 文件），base.html 4 处 + shared_ledger.html 2 处改本地引用</td><td>浏览器实测无 CDN 请求、断网环境页面正常渲染</td></tr>
 </table>
 
 <h3>P1（短期执行，1-2 周，低风险）</h3>
@@ -1099,14 +1099,14 @@ graph LR
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.10.17</td></tr>
-<tr><td>生成日期</td><td>2026-09-28</td></tr>
-<tr><td>审计基线</td><td>main 分支 V10.10.17（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择）</td></tr>
+<tr><td>文档版本</td><td>V10.10.18</td></tr>
+<tr><td>生成日期</td><td>2026-09-29（V1.2 修订）</td></tr>
+<tr><td>审计基线</td><td>main 分支 V10.10.18（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固）</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
-<tr><td>漂移项总数</td><td>10（2 高影响 / 1 中影响 / 4 低影响 / 3 一致）</td></tr>
+<tr><td>漂移项总数</td><td>10（2 高影响 → D-03 已于 V10.10.18 清偿，余 D-02 待治理 / 1 中影响 / 4 低影响 / 3 一致）</td></tr>
 <tr><td>技术债总数</td><td>21（6 代码质量 / 4 性能 / 3 扩展性 / 4 安全 / 4 运维）</td></tr>
-<tr><td>治理路线</td><td>P0（2 项 1-2 人日）/ P1（4 项 1-2 周）/ P2（5 项 1-2 月）</td></tr>
+<tr><td>治理路线</td><td>P0（2 项 → CDN 本地化已于 V10.10.18 完成，余 Gunicorn 待治理）/ P1（4 项 1-2 周）/ P2（5 项 1-2 月）</td></tr>
 <tr><td>最终结论</td><td>不建议替换框架，仅局部治理</td></tr>
 </table>
 </div>
