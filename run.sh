@@ -103,6 +103,45 @@ pip_install_fb() {
     return 1
 }
 
+# V10.10.19: 统一访问信息展示（start 成功提示与 status 巡检共用，输出格式保持一致）
+print_access_info() {
+    local domain_count
+    domain_count=$(echo "$SNI_DOMAIN" | wc -w)
+    if [ "$domain_count" -gt 1 ]; then
+        echo_e "   访问地址 (共 ${domain_count} 个域名):"
+        for domain in $SNI_DOMAIN; do
+            if [ "$NGINX_PORT" = "443" ]; then
+                echo_e "     - https://$domain/"
+            else
+                echo_e "     - https://$domain:$NGINX_PORT/"
+            fi
+        done
+    else
+        local primary_domain="${SNI_DOMAIN%% *}"
+        local access_url="https://$primary_domain/"
+        if [ "$NGINX_PORT" != "443" ]; then
+            access_url="https://$primary_domain:$NGINX_PORT/"
+        fi
+        echo_e "   访问地址: $access_url"
+    fi
+    echo_e "   后端本地直连: http://127.0.0.1:$PORT"
+    echo_e "   日志文件: $LOG_FILE"
+}
+
+# V10.10.19: 展示当前持久化的数据库部署模式（status 巡检用；不展示 DATABASE_URL 以免泄露数据库密码）
+print_db_mode_info() {
+    if [ -f "$DB_ENV_FILE" ]; then
+        load_db_env
+        if [ -n "${DB_MODE:-}" ]; then
+            echo_e "   数据库模式: ${DB_MODE} (配置于 .temp/.db.env，DB_RESET=1 ./$0 start 可重新选择)"
+        else
+            echo_e "   数据库模式: 配置文件为空或已损坏 (.temp/.db.env)，建议 DB_RESET=1 ./$0 start 重新选择"
+        fi
+    else
+        echo_e "   数据库模式: 未持久化配置（可能由 DB_MODE 环境变量指定或非交互默认 SQLite）"
+    fi
+}
+
 start_service() {
     if check_status; then
         PID=$(cat "$PID_FILE")
@@ -179,29 +218,10 @@ start_service() {
 
     sleep 2
     if check_status; then
-        local domain_count
-        domain_count=$(echo "$SNI_DOMAIN" | wc -w)
         echo_e "${GREEN}✅ 服务启动成功!${NC}"
         echo_e "   PID: $(cat $PID_FILE)"
-        if [ "$domain_count" -gt 1 ]; then
-            echo_e "   访问地址 (共 ${domain_count} 个域名):"
-            for domain in $SNI_DOMAIN; do
-                if [ "$NGINX_PORT" = "443" ]; then
-                    echo_e "     - https://$domain/"
-                else
-                    echo_e "     - https://$domain:$NGINX_PORT/"
-                fi
-            done
-        else
-            local primary_domain="${SNI_DOMAIN%% *}"
-            local access_url="https://$primary_domain/"
-            if [ "$NGINX_PORT" != "443" ]; then
-                access_url="https://$primary_domain:$NGINX_PORT/"
-            fi
-            echo_e "   访问地址: $access_url"
-        fi
-        echo_e "   后端本地直连: http://127.0.0.1:$PORT"
-        echo_e "   日志文件: $LOG_FILE"
+        # V10.10.19: 访问信息展示统一由 print_access_info 输出（与 status 命令一致）
+        print_access_info
     else
         echo_e "${RED}❌ 服务启动失败，请查看日志: $LOG_FILE${NC}"
         rm -f "$PID_FILE"
@@ -287,7 +307,9 @@ status_service() {
         echo_e "${GREEN}✅ 服务正在运行 (基于 PID 文件)${NC}"
         echo_e "   PID: $PID"
         echo_e "   端口: $PORT"
-        echo_e "   日志文件: $LOG_FILE"
+        # V10.10.19: 与启动成功提示一致，附带访问地址/本地直连/日志/数据库模式，便于日常巡检
+        print_access_info
+        print_db_mode_info
         ps -p "$PID" -o pid,ppid,cmd,etime
         return 0
     fi
@@ -333,7 +355,7 @@ case "$1" in
         echo ""
         echo "  start   - 启动服务 (自动生成证书、配置 Nginx 与清理缓存)"
         echo "  stop    - 停止服务"
-        echo "  status  - 查看服务状态"
+        echo "  status  - 查看服务状态 (含访问地址、本地直连、日志与数据库模式)"
         echo "  restart - 重启服务 (自动清理垃圾数据并生效新代码)"
         echo "  clean   - 仅手动清理垃圾缓存与压缩 .git"
         echo ""
@@ -346,6 +368,13 @@ case "$1" in
         echo "  SNI_DEFAULT_SERVER  是否作为兜底 default_server，1=是 0=否 (默认: 1)"
         echo "  SSL_FORCE_UPDATE=1          SSL 证书已存在时强制覆盖更新，不询问 (默认: 询问/非交互时保留)"
         echo "  NGINX_CONF_FORCE_UPDATE=1   Nginx 配置已存在时强制覆盖渲染，不询问 (默认: 询问/非交互时保留)"
+        echo ""
+        echo "数据库部署选择 (首次 start 交互式三选一，选择结果持久化于 .temp/.db.env，后续 start/restart 自动读取):"
+        echo "  DB_MODE             直接指定数据库模式跳过交互: sqlite | shared | independent (shared 需搭配 DB_PG_CONTAINER)"
+        echo "  DB_PG_CONTAINER     共享 PG 模式复用的已运行容器名 (与 DB_MODE=shared 搭配)"
+        echo "  DB_RESET=1          清除已保存的数据库配置并重新进入交互选择 (无需手动删除 .temp/.db.env)"
+        echo "  示例: DB_RESET=1 ./$0 start   # 重新选择数据库模式"
+        echo "  示例: DB_MODE=sqlite ./$0 start   # 直通指定，交互终端下会保存为新配置"
         echo "  示例: PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com ./$0 start"
         echo "  多域名示例: SNI_DOMAIN=\"gift.example.com gift2.example.com\" ./$0 start"
         echo "  示例: SSL_FORCE_UPDATE=1 NGINX_CONF_FORCE_UPDATE=1 ./$0 restart  # cron/自动化场景强制更新"
