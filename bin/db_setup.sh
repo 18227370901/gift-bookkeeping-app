@@ -8,6 +8,33 @@ setup_sqlite() {
     echo_e "${GREEN}数据库模式: SQLite 本地文件${NC}"
 }
 
+# V10.10.18: 首次部署自动初始化运行库（仅 SQLite 模式调用，由 run.sh 的 start_service 触发）
+# 背景：全新 clone 后 data/ 目录不存在时，app.py 会把运行库落在仓库根目录的样例库上，
+#       运行数据污染 git 工作区（git pull 覆盖丢数据，与 V10.10.12 事故同源）。
+# 此函数确保 data/ 目录存在并复制样例库为运行库，实现运行数据与样例库彻底分离；
+# 已有运行库时不做任何改动（幂等，不影响存量部署）。
+ensure_sqlite_runtime_db() {
+    _rt_dir="$APP_DIR/data"
+    _rt_db="$_rt_dir/gift_bookkeeping.db"
+    _sample_db="$APP_DIR/gift_bookkeeping.db"
+    if [ ! -f "$_rt_db" ]; then
+        mkdir -p "$_rt_dir" || {
+            echo_e "${RED}❌ 创建数据目录 $_rt_dir 失败，请检查目录权限${NC}"
+            return 1
+        }
+        if [ -f "$_sample_db" ]; then
+            cp "$_sample_db" "$_rt_db" || {
+                echo_e "${RED}❌ 复制样例库到 $_rt_db 失败，请检查磁盘空间与权限${NC}"
+                return 1
+            }
+            echo_e "${GREEN}✅ 首次部署：已复制样例库为运行库 data/gift_bookkeeping.db（运行数据与样例库彻底分离）${NC}"
+        else
+            echo_e "${YELLOW}⚠️ 未找到样例库 $_sample_db，应用启动后将自动创建全新空库 data/gift_bookkeeping.db${NC}"
+        fi
+    fi
+    return 0
+}
+
 # 配置共享 PostgreSQL 模式（传统版：通过 127.0.0.1:暴露端口 连接）
 setup_shared_pg() {
     if [ -z "$DB_PG_CONTAINER" ]; then
