@@ -65,12 +65,12 @@ if getattr(sys, 'frozen', False):
     if not os.path.exists(db_path) and os.path.exists(bundled_db):
         shutil.copy2(bundled_db, db_path)
 else:
-    # 优先使用持久化挂载目录 data 下的 SQLite 数据库
+    # 始终使用持久化目录 data 下的 SQLite 数据库（目录不存在时自动创建）。
+    # 保证初次部署即为纯净空库 + 单一管理员（与 Docker 版行为一致），
+    # 仓库根目录样例库不再作为运行库使用，避免演示数据污染运行库
     data_dir = os.path.join(BUNDLE_DIR, 'data')
-    if os.path.isdir(data_dir):
-        db_path = os.path.join(data_dir, 'gift_bookkeeping.db')
-    else:
-        db_path = os.path.join(BUNDLE_DIR, 'gift_bookkeeping.db')
+    os.makedirs(data_dir, exist_ok=True)
+    db_path = os.path.join(data_dir, 'gift_bookkeeping.db')
 
 # 过滤 DATABASE_URL，当未设置/已注释/为空时无缝降级默认使用 SQLite 数据库
 db_url = os.environ.get('DATABASE_URL', '').strip()
