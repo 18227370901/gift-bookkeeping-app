@@ -11,8 +11,8 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.10.17  
-> **生成日期**：2026-09-28  
+> **版本**：V10.10.18  
+> **生成日期**：2026-09-29  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
 > **文档定位**：以代码为实现真相（Ground Truth），历史文档为设计意图真相，显式揭露漂移，证据链闭环。
@@ -130,10 +130,10 @@ AIGC:
 | **对称加密** | cryptography (AES-256-GCM) | 42.0.8 | `requirements.txt:7`、`models.py:10,27-43` |
 | **数据库** | SQLite (WAL) / PostgreSQL (可选) | — | `app.py:68-78`，`DATABASE_URL` 环境变量切换 |
 | **PostgreSQL 驱动** | psycopg2-binary | 2.9.9 | `requirements.txt:8`（切换 PostgreSQL 的必要依赖） |
-| **WSGI 容器** | Gunicorn (已声明但**未实际使用**) | 22.0.0 | `requirements.txt:6`；`run.sh:362-368` 实际用 `python3 app.py` |
+| **WSGI 容器** | Gunicorn (已声明但**未实际使用**) | 22.0.0 | `requirements.txt:6`；`run.sh:167-174` 实际用 `python3 app.py` |
 | **反向代理** | Nginx (SNI 多项目 443) | — | `nginx_ssl.conf`、`run.sh:224-291` |
-| **前端** | Jinja2 + Bootstrap 5 + 原生 JS | — | `templates/base.html:13-14`（**CDN 加载**） |
-| **图表** | Chart.js | — | 模板内 CDN 引入 |
+| **前端** | Jinja2 + Bootstrap 5 + 原生 JS | — | `templates/base.html:23-25、256`（**V10.10.18 已本地化 `static/vendor/` 加载**） |
+| **图表** | Chart.js | — | 模板内已无引用（历史记载的 CDN 引入实际不存在） |
 | **PWA** | Service Worker | — | `static/sw.js`（1053 bytes） |
 | **AI 接入** | OpenAI Python SDK | >=1.0.0 | `requirements.txt:14`、`ai_service.py` |
 | **联网搜索** | DuckDuckGo Search | >=4.0.0 | `requirements.txt:15`、`web_search.py` |
@@ -227,7 +227,7 @@ graph TB
 |---|---------|------------|------------|------|---------|
 | D-01 | **akshare 金融数据集成** | `Project_Survey.md` §3 详述 akshare 集成方案、熔断/降级/超时守卫规范；§1.1 定位含"金融量化/市场数据中台能力" | `requirements.txt` 无 akshare 依赖；全项目无 `import akshare`；`web_search.py` 仅用 DuckDuckGo | **未落地** | **低** — 业务上从未使用，文档描述与系统实际定位脱节，建议从文档中标注为"规划中/搁置" |
 | D-02 | **Gunicorn 多 Worker 生产部署** | `Project_Survey.md` ADR-01 决策"全面采用 Gunicorn -w 4 -k gthread --threads 4"；`requirements.txt:6` 声明 gunicorn==22.0.0 | `run.sh:362-368` 实际启动命令为 `python3 $APP_SCRIPT`（Werkzeug 开发服务器），无 Gunicorn 调用 | **已废弃** | **高** — 开发服务器在生产环境存在并发瓶颈（Project_Survey.md §2 BUG-02 已诊断此问题），ADR-01 的解决方案未落地 |
-| D-03 | **CDN 依赖彻底移除** | `Project_Survey.md` ADR-03 决策"彻底移除国外外部公共 CDN 链接，静态资源本地化" | `templates/base.html:13-14` 仍从 `cdn.jsdelivr.net` 加载 Bootstrap 5、从 `cdnjs.cloudflare.com` 加载 Font Awesome | **未落地** | **高** — ADR-03 专门为解决内网/弱网白屏问题（BUG-04）而决策，但实际代码未执行该决策 |
+| D-03 | **CDN 依赖彻底移除** | `Project_Survey.md` ADR-03 决策"彻底移除国外外部公共 CDN 链接，静态资源本地化" | ~~仍从 `cdn.jsdelivr.net`/`cdnjs.cloudflare.com` 加载~~ **✅ V10.10.18 已落地**：`static/vendor/` 本地化 14 个资源文件（Bootstrap 5.3.0/Font Awesome 6.4.0/Bootstrap Icons 1.11.3，版本与原 CDN 一致），`base.html` 4 处 + `shared_ledger.html` 2 处改为 `url_for` 本地引用 | **已落地** | **高→已清偿** — 内网/弱网白屏问题（BUG-04）随之解决 |
 | D-04 | **Celery/Redis 任务队列** | `Project_Survey.md` ADR-04 决策"企业级方案引入 Redis + Celery 任务队列" | 代码使用 Python `threading.Thread` daemon 线程（`_anniversary_reminder_worker`、`_backup_scheduler_worker`、`_wecom_listener_worker`），无 Celery/Redis 依赖 | **方案降级** | **低** — 对当前单机部署规模合理，但文档应标注实际选型为轻量线程池方案 |
 | D-05 | **权限级别 1 语义** | `Project_Survey.md` ADR-25 决策"级别 1 为全局绝对全只读模式，严禁修改或删除任何数据（包括自身创建的实体）" | V10.4 已修正为"自身全权 + 仅查看他人数据"（`app.py` `can_user_edit_entity` 自身实体可编辑，他人实体需 perm>=2）；`README.md` V10.4 记录了此变更但 ADR-25 未更新 | **已重构** | **中** — ADR-25 文档与代码语义矛盾，需更新 ADR 或新增 ADR 记录此次修正 |
 | D-06 | **AI_ASSISTANT_DESIGN.md 版本覆盖** | 文档覆盖到 V10.7（2026-09-17），含 ER 图/API 规范/前端设计/逐版本修复 | V10.8~V10.10.10（约 20+ 条修复）仅在 `README.md` 变更日志中，未同步至本文档 | **版本断层** | **低** — 文档参考价值降低但不影响运行；新 PSD 应以 README.md 为最新事实源 |
@@ -240,7 +240,7 @@ graph TB
 
 | 严重度 | 数量 | 漂移项 |
 |--------|------|--------|
-| **高影响** | 2 | D-02（Gunicorn 未落地）、D-03（CDN 未移除） |
+| **高影响** | 1 | D-02（Gunicorn 未落地）；D-03（CDN 未移除）✅ 已于 V10.10.18 清偿 |
 | **中影响** | 1 | D-05（权限级别 1 语义矛盾） |
 | **低影响** | 4 | D-01（akshare 未落地）、D-04（Celery 降级）、D-06（文档断层）、D-07（SW 未落地） |
 | **一致** | 3 | D-08、D-09、D-10 |
@@ -401,7 +401,7 @@ for sql in migration_sqls:
 | **框架重量** | Flask 3.0 轻量级，无过度抽象 | **否** — Flask 本身足够轻量，非瓶颈 |
 | **并发性能** | Werkzeug 开发服务器单线程 | **是** — 生产部署仍用 `python3 app.py`，无多 Worker（D-02 漂移） |
 | **代码可维护性** | 5231 行单文件，无 Service 层 | **是** — 胖 Controller 已导致修改回归风险高 |
-| **前端体验** | Jinja2 SSR + CDN 依赖 + 内联 JS | **部分** — CDN 在内网不可用（D-03 漂移），但 SSR 本身满足业务需求 |
+| **前端体验** | Jinja2 SSR + 本地静态资源 + 内联 JS | **否** — V10.10.18 前端资源已本地化（D-03 已清偿），SSR 满足业务需求 |
 | **数据库扩展** | SQLite WAL 足够单机场景 | **否** — 已支持 PostgreSQL 无缝切换 |
 | **部署复杂度** | 单文件部署 + run.sh 自动化 | **否** — 部署体验优秀 |
 
@@ -435,14 +435,14 @@ for sql in migration_sqls:
 
 2. **替换 ROI 极低**。Level 3+4 代码占总量 80%+（~20,400 行），任何框架替换都意味着近乎全量重写，而当前系统功能完整、业务运行正常，重写收益无法覆盖代价。
 
-3. **真正需要的是工程纪律**。当前技术债来自"有决策未执行"（Gunicorn/CDN 本地化）和"无规范的开发模式"（无 Service 层、无迁移版本管理），而非框架能力不足。
+3. **真正需要的是工程纪律**。当前技术债来自"有决策未执行"（Gunicorn；CDN 本地化已于 V10.10.18 执行）和"无规范的开发模式"（无 Service 层、无迁移版本管理），而非框架能力不足。
 
 **推荐治理清单（P0 立即执行）**：
 
 | 优先级 | 治理项 | 漂移编号 | 预估工作量 | 具体操作 |
 |--------|--------|---------|-----------|---------|
 | **P0** | 启用 Gunicorn 多 Worker | D-02 | 0.5 人日 | `run.sh` 启动命令从 `python3 app.py` 改为 `gunicorn -w 4 -k gthread --threads 4 -b 127.0.0.1:$PORT app:app --timeout 60` |
-| **P0** | CDN 资源本地化 | D-03 | 1 人日 | 下载 Bootstrap 5/FontAwesome/Chart.js 到 `static/vendor/`，修改 `base.html` 引用路径 |
+| **P0** | ~~CDN 资源本地化~~ **✅ V10.10.18 已完成** | D-03 | — | Bootstrap 5.3.0/Font Awesome 6.4.0/Bootstrap Icons 1.11.3 共 14 个文件已落地 `static/vendor/`，`base.html` 4 处 + `shared_ledger.html` 2 处改本地引用 |
 | **P1** | 更新 ADR-25 权限语义 | D-05 | 0.5 人日 | 在 `Project_Survey.md` 中追加 ADR-39 记录 V10.4 权限级别 1 语义修正 |
 | **P1** | 标注 akshare 为"规划搁置" | D-01 | 0.5 人日 | 在 `Project_Survey.md` §3 添加状态标注 |
 | **P2** | routes_ext.py 拆分 | — | 3 人日 | 按业务域拆分为 `routes_banquets.py`/`routes_backups.py`/`routes_webhooks.py` 等 |
@@ -460,12 +460,12 @@ for sql in migration_sqls:
 | 维度 | 实现 | 代码依据 |
 |------|------|---------|
 | 渲染模式 | 服务端渲染（SSR），Jinja2 模板继承 | `templates/base.html` 为布局模板，各页面 `{% extends 'base.html' %}` |
-| CSS 框架 | Bootstrap 5.3.0（CDN: `cdn.jsdelivr.net`） | `base.html:13` |
-| 图标库 | Font Awesome 6.4.0（CDN: `cdnjs.cloudflare.com`）+ Bootstrap Icons 1.11.3 | `base.html:14-15` |
-| 图表库 | Chart.js（模板内 CDN 引入） | `index.html` 内引用 |
+| CSS 框架 | Bootstrap 5.3.0（本地 `static/vendor/bootstrap/5.3.0/`，V10.10.18 起替代 CDN） | `base.html:23、256` |
+| 图标库 | Font Awesome 6.4.0 + Bootstrap Icons 1.11.3（本地 `static/vendor/`，V10.10.18 起替代 CDN） | `base.html:24-25` |
+| 图表库 | 无（历史文档记载 Chart.js，实际模板内已无引用） | — |
 | JavaScript | 原生 JS（无框架、无构建工具），`fetch()` API 做 AJAX 通信 | 全部模板内联 `<script>` |
 | PWA | `static/manifest.json` + `static/sw.js`（仅 manifest 壳，无 fetch 拦截） | `base.html:9-10` |
-| CSRF | 全局 `<meta name="csrf-token">` 注入，fetch 请求头携带 `X-CSRF-Token` | `base.html:6`、`base.html:233-259` |
+| CSRF | 全局 `<meta name="csrf-token">` 注入，fetch 请求头携带 `X-CSRF-Token` | `base.html:6、396-400、418` |
 | 主题系统 | Bootstrap 5.3 原生 `data-bs-theme` 双主题（白天/黑夜），CSS 变量（`--app-bg`/`--app-card-bg` 等 6 个）驱动；导航栏主题切换按钮 + `localStorage('gift_theme')` 持久化，默认白天零回归；暗色下统一覆盖 `bg-white/bg-light/text-dark/text-muted/table-light` 等浅色工具类 | `base.html` 全局 `<style>`、`V10.10.13` 新增 |
 | 输入框提示语 | 全局 `::placeholder` 统一美化（浅灰蓝 `--ph-color`、常规字重 400、0.875em、半透明、聚焦淡出），覆盖全部 20 个含输入框页面约 122 处 | `base.html` 全局 `<style>`、`V10.10.13` 新增 |
 
@@ -952,7 +952,7 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 
 | 命令 | 执行流程 |
 |------|---------|
-| `start` | `ensure_ssl_certs()` → `check_port_conflict()` → `setup_nginx_config()` → `cleanup_cache()` → 创建 venv → pip install → `python3 app.py` |
+| `start` | `preflight_check()`【V10.10.18】→ `ensure_ssl_certs()` → `check_port_conflict()` → `setup_nginx_config()` → `cleanup_cache()` → `select_db_mode()`【V10.10.17】→ `ensure_sqlite_runtime_db()`【V10.10.18，仅 SQLite 模式，首次部署自动复制样例库为 data/ 运行库】→ 创建 venv → pip install（清华→阿里云→官方三源兜底【V10.10.18】）→ `python3 app.py` |
 | `stop` | PID 文件 + 端口双重清理 → 进程组 kill |
 | `restart` | stop + sleep 2 + start |
 | `status` | PID 文件 + 端口检测 |
@@ -990,8 +990,8 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 
 | # | 技术债 | 严重度 | 代码依据 | 影响 |
 |---|--------|--------|---------|------|
-| PF-01 | 生产环境使用 Werkzeug 开发服务器（`python3 app.py`） | 高 | `run.sh:362-368` | 单线程，多 Tab 请求排队阻塞（ADR-01 已诊断但未落地） |
-| PF-02 | CDN 资源未本地化 | 高 | `base.html:13-14` | 内网/弱网环境下 Bootstrap/FontAwesome 加载失败导致白屏（ADR-03 未落地） |
+| PF-01 | 生产环境使用 Werkzeug 开发服务器（`python3 app.py`） | 高 | `run.sh:167-174` | 单线程，多 Tab 请求排队阻塞（ADR-01 已诊断但未落地） |
+| PF-02 | ~~CDN 资源未本地化~~ **✅ V10.10.18 已修复** | ~~高~~ 已清偿 | `base.html:23-25、256`（本地 `static/vendor/` 引用） | 内网/弱网白屏问题已随本地化解决，浏览器实测无 CDN 请求 |
 | PF-03 | `query.all()` 全量加载再 Python 端统计 | 中 | `app.py:1005-1006` `all_filtered_records = query.all()` | 数据量增长后内存+查询效率问题 |
 | PF-04 | SQLite 单文件并发写锁 | 低 | `app.py:83-84` | 已开启 WAL + 30s busy_timeout，单机场景足够 |
 
@@ -1028,7 +1028,7 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 | # | 治理项 | 关联技术债 | 具体操作 | 验证方式 |
 |---|--------|---------|---------|---------|
 | P0-1 | 启用 Gunicorn 多 Worker | PF-01, OP-01 | `run.sh` 启动命令改为 `gunicorn -w 4 -k gthread --threads 4 -b 127.0.0.1:$PORT app:app --timeout 60` | 并发请求测试无阻塞 |
-| P0-2 | CDN 资源本地化 | PF-02 | 下载 Bootstrap 5.3/FontAwesome 6.4/Bootstrap Icons/Chart.js 到 `static/vendor/`，修改 `base.html` 引用路径 | 内网环境断网测试页面正常渲染 |
+| P0-2 | ~~CDN 资源本地化~~ **✅ V10.10.18 已完成** | PF-02 | Bootstrap 5.3.0/FontAwesome 6.4.0/Bootstrap Icons 1.11.3 已落地 `static/vendor/`（14 文件），`base.html` 4 处 + `shared_ledger.html` 2 处改本地引用 | 浏览器实测无 CDN 请求、断网环境页面正常渲染 |
 
 #### P1（短期执行，1-2 周，低风险）
 
@@ -1095,14 +1095,14 @@ graph LR
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V10.10.17 |
-| 生成日期 | 2026-09-28（V1.1 修订） |
-| 审计基线 | 代码 commit main 分支 V10.10.17（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择） |
+| 文档版本 | V10.10.18 |
+| 生成日期 | 2026-09-29（V1.2 修订） |
+| 审计基线 | 代码 commit main 分支 V10.10.18（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固） |
 | 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |
-| 漂移项总数 | 10（2 高影响 / 1 中影响 / 4 低影响 / 3 一致） |
+| 漂移项总数 | 10（2 高影响 → D-03 已于 V10.10.18 清偿，余 D-02 待治理 / 1 中影响 / 4 低影响 / 3 一致） |
 | 技术债总数 | 21（6 代码质量 / 4 性能 / 3 扩展性 / 4 安全 / 4 运维） |
-| 治理路线 | P0（2 项 1-2 人日）/ P1（4 项 1-2 周）/ P2（5 项 1-2 月） |
+| 治理路线 | P0（2 项 → CDN 本地化已于 V10.10.18 完成，余 Gunicorn 待治理）/ P1（4 项 1-2 周）/ P2（5 项 1-2 月） |
 | 最终结论 | 不建议替换框架，仅局部治理 |
 
 > 本文档由星辰超级智能体（TeleAgent）基于代码全量审计与历史文档交叉核验生成，所有架构事实均标注具体代码依据（`相对路径:行号` 或 `函数名`），遵循"代码是实现真相、文档是意图真相、显式揭露漂移、证据链闭环"四大核心准则。
