@@ -12,7 +12,7 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
-> - 🖥️ **V10.10.19 run.sh status 访问信息展示**：status 命令与启动成功提示一致输出访问地址（多域名列表）、后端本地直连、日志文件与当前数据库模式（含 DB_RESET=1 重选提示）；Docker 版 status 补带 PG override 文件；两版帮助文本新增 DB_MODE/DB_PG_CONTAINER/DB_RESET 数据库配置说明。
+> - 🖥️ **V10.10.19 run.sh status 访问信息展示**：status 命令与启动成功提示一致输出访问地址（多域名列表）、后端本地直连、日志文件与当前数据库模式（含 DB_RESET=1 重选提示）；Docker 版 status 补带 PG override 文件；两版帮助文本新增 DB_MODE/DB_PG_CONTAINER/DB_RESET 数据库配置说明（V10.10.19b：帮助与提示中的示例命令统一规范显示为 ./run.sh）。
 > - 🌐 **V10.10.18 前端资源本地化 + 部署链路加固**：新增 `static/vendor/`（Bootstrap 5.3.0 / Font Awesome 6.4.0 / Bootstrap Icons 1.11.3，14 个文件与原 CDN 版本完全一致），base.html 4 处 + shared_ledger.html 2 处国外 CDN 引用改为本地 `url_for` 加载，国内服务器不再依赖 jsdelivr/cdnjs；`./run.sh start` 首次部署自动复制样例库为 `data/gift_bookkeeping.db`（运行数据与样例库彻底分离）+ python3 环境预检 + pip 镜像源兑底（清华→阿里云→官方）。
 > - 📦 **V10.10.17b run.sh 模块化拆分**：将 run.sh 函数拆分到 `bin/` 目录下 7 个 `.sh` 文件，run.sh 仅保留配置区 + 启停操作（792→257 行）；修正 `select_db_mode` 遗留位置问题。
 > - 🗄️ **V10.10.17 交互式数据库部署选择 + PostgreSQL 兼容**：`./run.sh start` 时交互式选择 SQLite / 共享 PG / 独立 PG，智能推荐 + Cron 安全；共享文件与 Docker 版 MD5 逐字一致。
@@ -1028,6 +1028,20 @@ V10.10.14 修复了长连接监听线程写库硬编码路径问题后，用户�
 
 #### 涉及文件
 - `run.sh`（两版各自独立改造，均抽取共用展示函数）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
+
+### V10.10.19b：帮助示例与提示信息命令名规范化（2026-09-29，传统版 + Docker 版同步）
+
+#### 变更内容
+- 两版 run.sh 帮助文本与 status 数据库模式提示中的示例命令，由 `./$0` 统一规范为 `./$(basename "$0")`：无论以 `./run.sh`、`sh run.sh` 还是绝对路径调用，示例均稳定显示为 `./run.sh start`（此前以 `./run.sh` 方式调用会渲染成 `././run.sh`）
+- 修正传统版 status 端口占用分支提示的历史笔误：`./service.sh stop` → `./run.sh stop`（提示命令与实际脚本名一致）
+- `用法: $0 {...}` 首行保留原样，如实反映实际调用方式
+
+#### 验证结论
+- `bash -n` 两版语法检查通过；两版帮助文本与 status 提示实测渲染为规范化的 `./run.sh` 显示（传统版以绝对路径调用亦稳定显示）
+
+#### 涉及文件
+- `run.sh`（两版同步改造）
 - `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
 
 ```text
