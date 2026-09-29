@@ -133,9 +133,9 @@ print_db_mode_info() {
     if [ -f "$DB_ENV_FILE" ]; then
         load_db_env
         if [ -n "${DB_MODE:-}" ]; then
-            echo_e "   数据库模式: ${DB_MODE} (配置于 .temp/.db.env，DB_RESET=1 ./$0 start 可重新选择)"
+            echo_e "   数据库模式: ${DB_MODE} (配置于 .temp/.db.env，DB_RESET=1 ./$(basename "$0") start 可重新选择)"
         else
-            echo_e "   数据库模式: 配置文件为空或已损坏 (.temp/.db.env)，建议 DB_RESET=1 ./$0 start 重新选择"
+            echo_e "   数据库模式: 配置文件为空或已损坏 (.temp/.db.env)，建议 DB_RESET=1 ./$(basename "$0") start 重新选择"
         fi
     else
         echo_e "   数据库模式: 未持久化配置（可能由 DB_MODE 环境变量指定或非交互默认 SQLite）"
@@ -317,7 +317,7 @@ status_service() {
     local port_pid=$(lsof -ti :$PORT 2>/dev/null)
     if [ -n "$port_pid" ]; then
         echo_e "${YELLOW}⚠️ 端口 $PORT 被进程 $port_pid 占用，但 PID 文件无效${NC}"
-        echo_e "   请执行 './service.sh stop' 清理残留进程"
+        echo_e "   请执行 './$(basename "$0") stop' 清理残留进程"
         return 1
     else
         echo_e "${RED}❌ 服务未运行${NC}"
@@ -373,11 +373,11 @@ case "$1" in
         echo "  DB_MODE             直接指定数据库模式跳过交互: sqlite | shared | independent (shared 需搭配 DB_PG_CONTAINER)"
         echo "  DB_PG_CONTAINER     共享 PG 模式复用的已运行容器名 (与 DB_MODE=shared 搭配)"
         echo "  DB_RESET=1          清除已保存的数据库配置并重新进入交互选择 (无需手动删除 .temp/.db.env)"
-        echo "  示例: DB_RESET=1 ./$0 start   # 重新选择数据库模式"
-        echo "  示例: DB_MODE=sqlite ./$0 start   # 直通指定，交互终端下会保存为新配置"
-        echo "  示例: PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com ./$0 start"
-        echo "  多域名示例: SNI_DOMAIN=\"gift.example.com gift2.example.com\" ./$0 start"
-        echo "  示例: SSL_FORCE_UPDATE=1 NGINX_CONF_FORCE_UPDATE=1 ./$0 restart  # cron/自动化场景强制更新"
+        echo "  示例: DB_RESET=1 ./$(basename "$0") start   # 重新选择数据库模式"
+        echo "  示例: DB_MODE=sqlite ./$(basename "$0") start   # 直通指定，交互终端下会保存为新配置"
+        echo "  示例: PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com ./$(basename "$0") start"
+        echo "  多域名示例: SNI_DOMAIN=\"gift.example.com gift2.example.com\" ./$(basename "$0") start"
+        echo "  示例: SSL_FORCE_UPDATE=1 NGINX_CONF_FORCE_UPDATE=1 ./$(basename "$0") restart  # cron/自动化场景强制更新"
         exit 1
         ;;
 esac
