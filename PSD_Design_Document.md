@@ -11,7 +11,7 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.10.19b  
+> **版本**：V10.10.20  
 > **生成日期**：2026-09-29  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
@@ -952,7 +952,7 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 
 | 命令 | 执行流程 |
 |------|---------|
-| `start` | `preflight_check()`【V10.10.18】→ `ensure_ssl_certs()` → `check_port_conflict()` → `setup_nginx_config()` → `cleanup_cache()` → `select_db_mode()`【V10.10.17】→ `ensure_sqlite_runtime_db()`【V10.10.18，仅 SQLite 模式，首次部署自动复制样例库为 data/ 运行库】→ 创建 venv → pip install（清华→阿里云→官方三源兜底【V10.10.18】）→ `python3 app.py` |
+| `start` | `preflight_check()`【V10.10.18】→ `ensure_ssl_certs()` → `check_port_conflict()` → `setup_nginx_config()` → `cleanup_cache()` → `select_db_mode()`【V10.10.17】→ `ensure_sqlite_runtime_db()`【V10.10.18，仅 SQLite 模式；V10.10.20 起仅就绪 data/ 目录、不再复制样例库，初次部署为纯净空库 + 单一管理员】→ 创建 venv → pip install（清华→阿里云→官方三源兜底【V10.10.18】）→ `python3 app.py` |
 | `stop` | PID 文件 + 端口双重清理 → 进程组 kill |
 | `restart` | stop + sleep 2 + start |
 | `status` | PID 文件 + 端口检测 + `print_access_info()` 访问地址/本地直连/日志 + `print_db_mode_info()` 数据库模式【V10.10.19】 |
@@ -1095,9 +1095,9 @@ graph LR
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V10.10.19b |
-| 生成日期 | 2026-09-29（V1.4 修订） |
-| 审计基线 | 代码 commit main 分支 V10.10.19b（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化） |
+| 文档版本 | V10.10.20 |
+| 生成日期 | 2026-09-29（V1.5 修订） |
+| 审计基线 | 代码 commit main 分支 V10.10.20（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化） |
 | 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |
 | 漂移项总数 | 10（2 高影响 → D-03 已于 V10.10.18 清偿，余 D-02 待治理 / 1 中影响 / 4 低影响 / 3 一致） |

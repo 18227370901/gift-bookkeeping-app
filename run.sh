@@ -163,7 +163,7 @@ start_service() {
     # V10.10.17: 数据库部署选择（修正：从 clean 分支移到 start_service 内）
     select_db_mode
 
-    # V10.10.18: SQLite 模式下确保运行库位于 data/ 目录（首次部署自动复制样例库，运行数据与样例库彻底分离）
+    # V10.10.20: SQLite 模式下确保运行库位于 data/ 目录（首次部署仅就绪目录，由应用创建纯净空库）
     if [ -z "${DATABASE_URL:-}" ]; then
         ensure_sqlite_runtime_db || return 1
     fi
