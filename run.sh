@@ -45,12 +45,73 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # ===== 启停操作函数 =====
 
+# V10.10.18: 部署环境预检（Python 版本 / venv 模块 / 常用工具提示）
+preflight_check() {
+    if ! command -v python3 > /dev/null 2>&1; then
+        echo_e "${RED}❌ 环境预检失败：未找到 python3，请先安装 Python 3.8+${NC}"
+        echo_e "${YELLOW}   Debian/Ubuntu: sudo apt install python3 python3-venv python3-pip${NC}"
+        return 1
+    fi
+    # 识别“命令存在但无法执行”的占位程序（如 Windows Microsoft Store 的 python3 存根）
+    if ! python3 -c 'print("ok")' > /dev/null 2>&1; then
+        echo_e "${RED}❌ 环境预检失败：python3 无法正常执行（可能为系统占位程序），请安装真正的 Python 3.8+${NC}"
+        return 1
+    fi
+    _py_ok=$(python3 -c 'import sys; print(1 if sys.version_info >= (3, 8) else 0)' 2>/dev/null)
+    if [ "$_py_ok" != "1" ]; then
+        _py_ver=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+        echo_e "${RED}❌ 环境预检失败：需要 Python 3.8+，当前版本为 ${_py_ver}，请升级 Python${NC}"
+        return 1
+    fi
+    _py_ver=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)
+    echo_e "${GREEN}✅ 环境预检通过：python3 $_py_ver${NC}"
+    if ! python3 -c 'import venv' > /dev/null 2>&1; then
+        echo_e "${YELLOW}⚠️ 预检提示：缺少 python3-venv 模块（Debian/Ubuntu: sudo apt install python3-venv），创建虚拟环境可能失败${NC}"
+    fi
+    if ! command -v lsof > /dev/null 2>&1; then
+        echo_e "${YELLOW}⚠️ 预检提示：缺少 lsof（Debian/Ubuntu: sudo apt install lsof），端口占用检测与停止清理功能受限${NC}"
+    fi
+    return 0
+}
+
+# V10.10.18: pip 安装镜像源自动兜底（清华源 → 阿里云 → 官方源，任一成功即返回）
+# 入参 $1: pip 子命令与参数（不含 -i 镜像参数）；$2 可选: requirements 文件路径（含空格路径安全）
+pip_install_fb() {
+    _pip_args="$1"
+    _pip_req="${2:-}"
+    _mirror_list="https://pypi.tuna.tsinghua.edu.cn/simple https://mirrors.aliyun.com/pypi/simple/ https://pypi.org/simple"
+    _mi_total=$(echo $_mirror_list | wc -w)
+    _mi_idx=0
+    for _mirror in $_mirror_list; do
+        _mi_idx=$((_mi_idx + 1))
+        echo_e "${YELLOW}   使用 pip 源: ${_mirror}${NC}"
+        if [ -n "$_pip_req" ]; then
+            if "$VENV_DIR/bin/pip" $_pip_args -r "$_pip_req" -i "$_mirror"; then
+                return 0
+            fi
+        else
+            if "$VENV_DIR/bin/pip" $_pip_args -i "$_mirror"; then
+                return 0
+            fi
+        fi
+        # 仅在还有下一个镜像源时提示切换，最后一个源失败后直接汇总
+        if [ "$_mi_idx" -lt "$_mi_total" ]; then
+            echo_e "${YELLOW}   该源安装失败，自动切换下一个镜像源...${NC}"
+        fi
+    done
+    echo_e "${RED}   三个镜像源均安装失败，请检查服务器网络连通性${NC}"
+    return 1
+}
+
 start_service() {
     if check_status; then
         PID=$(cat "$PID_FILE")
         echo_e "${YELLOW}服务已在运行中 (PID: $PID)${NC}"
         return 1
     fi
+
+    # V10.10.18: 部署环境预检（Python 版本 / venv / 常用工具）
+    preflight_check || return 1
 
     ensure_ssl_certs
     check_port_conflict "$PORT" || return 1
@@ -62,6 +123,11 @@ start_service() {
 
     # V10.10.17: 数据库部署选择（修正：从 clean 分支移到 start_service 内）
     select_db_mode
+
+    # V10.10.18: SQLite 模式下确保运行库位于 data/ 目录（首次部署自动复制样例库，运行数据与样例库彻底分离）
+    if [ -z "${DATABASE_URL:-}" ]; then
+        ensure_sqlite_runtime_db || return 1
+    fi
 
     echo_e "${GREEN}正在启动服务...${NC}"
 
@@ -79,18 +145,18 @@ start_service() {
         }
     fi
 
-    # 检查核心依赖库是否存在，若缺失则强制安装
+    # 检查核心依赖库是否存在，若缺失则强制安装（V10.10.18：镜像源自动兜底 清华源→阿里云→官方源）
     if ! "$VENV_DIR/bin/python3" -c "import flask, flask_sqlalchemy, flask_wtf, flask_login" >/dev/null 2>&1; then
         echo_e "${GREEN}正在检查/补全项目依赖库...${NC}"
-        "$VENV_DIR/bin/pip" install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple || true
+        pip_install_fb "install --upgrade pip" || true
         if [ -f "$APP_DIR/requirements.txt" ]; then
-            "$VENV_DIR/bin/pip" install -r "$APP_DIR/requirements.txt" -i https://pypi.tuna.tsinghua.edu.cn/simple || {
-                echo_e "${RED}错误: 依赖库安装失败，请检查网络或 requirements.txt${NC}"
+            pip_install_fb "install" "$APP_DIR/requirements.txt" || {
+                echo_e "${RED}错误: 依赖库安装失败（已依次尝试清华源/阿里云/官方源），请检查网络或 requirements.txt${NC}"
                 return 1
             }
         else
-            "$VENV_DIR/bin/pip" install flask flask-sqlalchemy flask-wtf flask-login -i https://pypi.tuna.tsinghua.edu.cn/simple || {
-                echo_e "${RED}错误: 依赖库安装失败${NC}"
+            pip_install_fb "install flask flask-sqlalchemy flask-wtf flask-login" || {
+                echo_e "${RED}错误: 依赖库安装失败（已依次尝试清华源/阿里云/官方源）${NC}"
                 return 1
             }
         fi
