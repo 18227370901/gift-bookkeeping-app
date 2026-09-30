@@ -171,6 +171,77 @@ detect_pg_data_dir() {
     esac
 }
 
+# V10.10.28: 检测 PG 镜像的主版本号（用于版本化数据卷命名，隔离不同 PG 版本的数据布局）
+# 三级探测：① docker image inspect 读 PG_MAJOR env → ② 镜像 tag 数字解析 → ③ 未知 → default
+# 背景：PG18+ 镜像（如 pgvector:pg18）数据目录布局与 PG16 不同（/var/lib/postgresql vs /var/lib/postgresql/data），
+#       同一固定卷名跨版本切换会导致 initdb 失败（"not empty" 或 "in 18+" 报错）；
+#       版本化卷名 ${PROJECT_NAME}_pg_data_${PG_MAJOR} 使各版本数据天然隔离
+# 入参 $1: PG 镜像名；echo 输出主版本号（如 16、18）或 default
+detect_pg_major() {
+    _img="$1"
+    # ① 查询镜像 Config.Env 中的 PG_MAJOR（官方 postgres 及衍生镜像如 pgvector 均内置该变量）
+    _major=$(docker image inspect "$_img" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null | grep '^PG_MAJOR=' | cut -d= -f2)
+    if [ -n "$_major" ]; then
+        echo "$_major"
+        return
+    fi
+    # ② 从镜像 tag 解析主版本号（如 postgres:16-alpine → 16, pgvector/pgvector:pg18 → 18, postgres:16.4 → 16）
+    _tag="${_img##*:}"
+    _major=$(echo "$_tag" | grep -oE '[0-9]+' | head -1)
+    if [ -n "$_major" ]; then
+        echo "$_major"
+        return
+    fi
+    # ③ 未知镜像（如 postgres:latest、自建 tag 无版本号）→ default
+    echo "default"
+}
+
+# V10.10.28: 存量卷自动迁移（旧固定卷名 → 新版本化卷名）
+# 背景：V10.10.28 前独立 PG 使用固定卷名，升级后改为版本化卷名 ${PROJECT_NAME}_pg_data_${PG_MAJOR}；
+#       此函数检测旧卷并迁移兼容数据，确保升级脚本后已有数据不丢失
+# 兼容判定：读取旧卷中 PG_VERSION 文件，与当前镜像 PG_MAJOR 一致则 cp -a 迁移；不一致则保留旧卷用新空卷
+# 入参: $1=旧卷名, $2=新卷名, $3=PG_MAJOR, $4=PG镜像名（用于读取卷内数据与 cp 操作）
+migrate_legacy_pg_volume() {
+    _ml_old="$1"; _ml_new="$2"; _ml_major="$3"; _ml_image="$4"
+    # 新卷已存在 → 无需迁移（已有版本化卷数据）
+    if docker volume inspect "$_ml_new" >/dev/null 2>&1; then
+        return 0
+    fi
+    # 旧卷不存在 → 全新部署，无需迁移
+    if ! docker volume inspect "$_ml_old" >/dev/null 2>&1; then
+        return 0
+    fi
+    # 读取旧卷中 PG_VERSION 判断数据兼容性
+    # PG16-: PG_VERSION 在卷根目录；PG18+: PG_VERSION 在 <major>/docker/ 子目录
+    _ml_old_ver=$(docker run --rm --entrypoint sh -v "$_ml_old:/data:ro" "$_ml_image" -c '
+        if [ -f /data/PG_VERSION ]; then
+            cat /data/PG_VERSION
+        else
+            for d in /data/*/docker/PG_VERSION; do
+                [ -f "$d" ] && cat "$d" && break
+            done
+        fi
+    ' 2>/dev/null | tr -d ' \t\r\n')
+    if [ -n "$_ml_old_ver" ] && [ "$_ml_old_ver" = "$_ml_major" ]; then
+        # 同版本兼容 → cp -a 迁移数据（保留权限与符号链接）
+        echo_e "${YELLOW}  检测到旧数据卷 ${_ml_old}（PG${_ml_old_ver}），正在迁移至版本化卷 ${_ml_new} ...${NC}"
+        docker run --rm --entrypoint sh -v "$_ml_old:/src" -v "$_ml_new:/dst" "$_ml_image" -c "cp -a /src/. /dst/"
+        if [ $? -eq 0 ]; then
+            echo_e "${GREEN}✅ 旧数据已迁移至 ${_ml_new}（旧卷 ${_ml_old} 保留备份）${NC}"
+        else
+            echo_e "${YELLOW}⚠️ 数据迁移失败，将使用新空卷初始化（旧卷 ${_ml_old} 保留）${NC}"
+        fi
+    else
+        # 版本不兼容或旧卷为空 → 保留旧卷，使用新空卷初始化
+        if [ -n "$_ml_old_ver" ]; then
+            echo_e "${YELLOW}  旧数据卷 ${_ml_old}（PG${_ml_old_ver}）与当前镜像（PG${_ml_major}）不兼容，保留旧卷不迁移${NC}"
+            echo_e "${YELLOW}  使用新空卷 ${_ml_new} 初始化；如需使用旧数据，请用匹配的 PG 版本启动或手动 pg_upgrade${NC}"
+        else
+            echo_e "${YELLOW}  旧数据卷 ${_ml_old} 无法读取 PG 版本信息（可能为空卷），使用新空卷 ${_ml_new} 初始化${NC}"
+        fi
+    fi
+}
+
 setup_independent_pg() {
     # V10.10.20: 镜像优先级链 —— PG_IMAGE（用户自定义）> 本地已存在镜像（detect_pg_environment）> 默认镜像自动下载（postgres:16-alpine）
     if [ -n "$PG_IMAGE" ]; then
@@ -191,6 +262,11 @@ setup_independent_pg() {
     PG_CONTAINER_NAME="${PROJECT_NAME}-pg"
     # V10.10.20: 按镜像智能匹配数据目录挂载路径（防止 PG18+ 镜像挂错路径导致数据不落卷）
     PG_DATA_DIR=$(detect_pg_data_dir "$PG_LOCAL_IMAGE")
+    # V10.10.28: 检测 PG 主版本号 + 版本化数据卷名（隔离不同 PG 版本的存储布局，防止跨版本 initdb 冲突）
+    PG_MAJOR=$(detect_pg_major "$PG_LOCAL_IMAGE")
+    PG_VOLUME_NAME="${PROJECT_NAME}_pg_data_${PG_MAJOR}"
+    # V10.10.28: 存量卷迁移——旧固定卷名 ${PROJECT_NAME}_pg_data → 新版本化卷名
+    migrate_legacy_pg_volume "${PROJECT_NAME}_pg_data" "$PG_VOLUME_NAME" "$PG_MAJOR" "$PG_LOCAL_IMAGE"
     # V10.10.20: PG_PORT 可自定义宿主机映射端口（未指定时从 15432 起自动扫描可用端口）
     if [ -n "${PG_PORT:-}" ]; then
         PG_HOST_PORT="$PG_PORT"
@@ -211,7 +287,7 @@ setup_independent_pg() {
         -e POSTGRES_USER="$PG_USER" \
         -e POSTGRES_PASSWORD="$PG_PASSWORD" \
         -p "127.0.0.1:${PG_HOST_PORT}:5432" \
-        -v "${PROJECT_NAME}_pg_data:${PG_DATA_DIR}" \
+        -v "${PG_VOLUME_NAME}:${PG_DATA_DIR}" \
         "$PG_LOCAL_IMAGE" > /dev/null 2>&1
     if [ $? -ne 0 ]; then
         echo_e "${RED}独立 PG 容器启动失败，降级为 SQLite 模式${NC}"
@@ -224,8 +300,8 @@ setup_independent_pg() {
     if [ "$_ct_state" != "running" ]; then
         echo_e "${RED}❌ 独立 PG 容器启动后立即退出（状态: ${_ct_state:-不存在}），最后 15 行日志如下：${NC}"
         docker logs --tail 15 "$PG_CONTAINER_NAME" 2>&1 | sed 's/^/    /'
-        echo_e "${YELLOW}  常见原因：Docker 卷 ${PROJECT_NAME}_pg_data 中已存在旧版本格式的数据，与镜像 ${PG_LOCAL_IMAGE} 的存储布局不匹配${NC}"
-        echo_e "${YELLOW}  解决方案：① 用 PG_IMAGE 指定与旧数据匹配的 PG 版本；② 或删除旧卷重新初始化（docker volume rm ${PROJECT_NAME}_pg_data，将丢失旧数据）${NC}"
+        echo_e "${YELLOW}  常见原因：Docker 卷 ${PG_VOLUME_NAME} 中已存在不兼容的数据，与镜像 ${PG_LOCAL_IMAGE} 的存储布局不匹配${NC}"
+        echo_e "${YELLOW}  解决方案：① 用 PG_IMAGE 指定与旧数据匹配的 PG 版本；② 或删除该卷重新初始化（docker volume rm ${PG_VOLUME_NAME}，将丢失旧数据）${NC}"
         echo_e "${RED}独立 PG 模式启动失败，降级为 SQLite 模式${NC}"
         DB_MODE=sqlite; setup_sqlite; return
     fi

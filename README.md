@@ -12,6 +12,7 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🐘 **V10.10.28 独立 PG 版本化数据卷 + 存量卷自动迁移（两版同步）**：① **PG 版本化数据卷命名**——此前独立 PG 使用固定卷名（传统版 `${PROJECT_NAME}_pg_data` / Docker 版 `gift_pg_data`），跨 PG 版本镜像切换时同一卷内数据布局冲突导致 initdb 失败（PG16→18 报 "in 18+" / PG18→16 报 "not empty"）；现改为版本化卷名 `${...}_pg_data_${PG_MAJOR}`（如 `gift_app_pg_data_16`），各 PG 版本数据天然隔离；② **`detect_pg_major` 三级探测**——`docker image inspect` 读镜像 PG_MAJOR env → 镜像 tag 数字解析 → 未知 default；③ **存量卷自动迁移**——新版本化卷不存在而旧固定卷存在时，读取旧卷 PG_VERSION 判断兼容性：同版本 `cp -a` 迁移（保留旧卷备份）、跨版本保留旧卷用新空卷初始化（附 pg_upgrade 指引）；④ **Docker 版 `detect_pg_data_dir` 升级**——从旧版名字通配符匹配升级为 `docker image inspect` 查镜像真实 PGDATA（与 V10.10.25 传统版同步）；⑤ **Docker 版 `PG_MAJOR` 持久化**——`service.sh` 将 PG_MAJOR 写入 `.temp/.db.env`，restart 不漂移；`docker-compose.db.yml` 卷名改插值 `gift_pg_data_${PG_MAJOR:-default}`。
 > - 🎯 **V10.10.27 两版首次部署默认数据库差异化（两版同步）**：传统版首次部署交互菜单**默认 SQLite**、Docker 版**默认共享 PG**——`bin/config.sh` 新增 `DB_MENU_DEFAULT`（传统版=1、Docker 版=2，可被环境变量/config.local.sh 覆盖），`db_select.sh`（共享文件）默认选项改读该变量，替代此前按内存阈值的智能推荐（旧逻辑两版行为相同）；**环境兜底**：Docker 版默认共享 PG 但未检测到运行中的 PG 容器时自动回退 SQLite（避免默认选项必然失败），非法值/未设置同样回退 SQLite；菜单项 1（SQLite）补上与其他项一致的 ⭐ 推荐标记；五场景模拟验证通过（传统→1 / Docker 有 PG→2 / Docker 无 PG→回退 1 / 非法值→回退 1 / 未设置→回退 1）。
 > - 🔒 **V10.10.26 独立 PG 重启策略补齐 + 跨版本共享 PG 检测排除（两版同步）**：① **传统版独立 PG 补 `--restart unless-stopped`**——此前 `docker run` 无重启策略（默认 no），服务器重启/Docker 守护进程重启后独立 PG 容器不会自动恢复，现与 Docker 版 compose 策略一致；② **共享 PG 自动检测排除对侧单租户容器**——`detect_pg_environment` 排除 `gift_app-pg`（传统版）与 `gift_bookkeeping_pg`（Docker 版），防止同服务器双版本部署时交互菜单误推荐对侧独立 PG 容器为共享 PG（对侧 reconfig 时 `docker rm -f` 会摧毁本版正在共享的实例）；显式 `DB_PG_CONTAINER=<容器名>` 跨版本共享仍完全支持；③ **双版本 9 组合数据隔离矩阵确认**——账号（gift_user vs gift_docker_user）/库名（gift_bookkeeping vs gift_docker_db）/容器名/卷/宿主机端口/Nginx 配置文件/SECRET_KEY 全维度隔离，任一模式组合零冲突（六场景模拟验证通过）。
 > - 🩺 **V10.10.25 共享 PG 容器状态误判 + 独立 PG 卷布局崩溃静默 + ALTER USER peer 认证 + 未知参数校验（两版同步）**：① **共享 PG 真实运行状态检查**——`docker ps` 会把崩溃循环（Restarting）的容器也列出被误判为"在运行"，改用 `docker inspect State.Status` 严格判定，非 running 直接展示容器日志与修复指引；② **`detect_pg_data_dir` 改查镜像真实 PGDATA**——此前按镜像名通配符猜路径，非标准命名镜像（如 `postgres:latest`）猜错导致 PG18+ 容器启动即崩溃（"in 18+ ... data in /var/lib/postgresql/data" 报错）；现用 `docker image inspect` 查询镜像 Config.Env 的 PGDATA（100% 可靠），未知镜像默认旧版路径；③ **独立 PG 容器启动后健康校验**——`docker run` 成功不代表容器存活，3 秒后校验 State.Status，崩溃则直接展示最后 15 行日志 + 卷/镜像不匹配解决方案（不再静默超时 30 秒后报误导性错误）；④ **`pg_sync_password` peer 认证优先**——`psql -U 用户` 在 Docker PG 内默认走 scram-sha-256 密码认证（非 trust），现 `docker exec -u postgres`（OS 级 peer 免密）优先 → socket 超级用户 → 容器 env 检测真实 POSTGRES_USER，三路兜底；⑤ **`detect_pg_superuser`**——从容器 env 检测真实超级用户名（此前固定 postgres，POSTGRES_USER 为其他名称时 CREATE USER 失败）；⑥ **未知参数校验**——`./run.sh restart --reconfiga` 拼错参数此前静默忽略照常重启，现报错「未知参数」+ exit 1。
@@ -1216,6 +1217,40 @@ V10.10.14 修复了长连接监听线程写库硬编码路径问题后，用户�
 
 #### 涉及文件
 - `bin/config.sh`（两版各自，DB_MENU_DEFAULT 差异化）；`bin/db_select.sh`（两版共享，默认选项读取与兜底逻辑）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
+
+### V10.10.28：独立 PG 版本化数据卷 + 存量卷自动迁移（2026-09-30，传统版 + Docker 版同步）
+
+#### 背景问题
+独立 PG 模式此前使用固定卷名（传统版 `${PROJECT_NAME}_pg_data`、Docker 版 compose 卷 `gift_pg_data`）。当用户切换 PG 镜像版本（如 postgres:16-alpine ↔ pgvector/pgvector:pg18）时，同一卷内残留旧版本数据与新镜像存储布局不匹配：
+- PG16→PG18：旧卷数据在 `/var/lib/postgresql/data`（卷根），PG18+ 镜像 PGDATA 为 `/var/lib/postgresql`（数据在 `18/docker/` 子目录），挂载后报 "in 18+ ... data in /var/lib/postgresql/data"
+- PG18→PG16：旧卷数据在 `18/docker/` 子目录，PG16 镜像 PGDATA 为 `/var/lib/postgresql/data`，挂载后卷根非空，initdb 报 "directory exists but is not empty"
+
+#### 变更内容
+- **PG 版本化数据卷命名**：卷名改为 `${PROJECT_NAME}_pg_data_${PG_MAJOR}`（传统版）/ `gift_pg_data_${PG_MAJOR}`（Docker 版 compose 插值），各 PG 版本数据天然隔离，跨版本切换不再冲突
+- **`detect_pg_major()` 三级探测**：① `docker image inspect` 读镜像 Config.Env 的 `PG_MAJOR`（官方 postgres 及衍生镜像如 pgvector 均内置）→ ② 镜像 tag 数字解析（如 `postgres:16-alpine` → 16、`pgvector:pg18` → 18）→ ③ 未知 → `default`
+- **存量卷自动迁移**（传统版 `migrate_legacy_pg_volume` / Docker 版 `migrate_compose_pg_volume`）：
+  - 新版本化卷已存在 → 无需迁移（二次部署）
+  - 旧固定卷不存在 → 全新部署，无需迁移
+  - 旧卷存在且 PG_VERSION 与当前 PG_MAJOR 一致 → `cp -a` 迁移数据（保留旧卷备份）
+  - 旧卷存在但版本不兼容或为空 → 保留旧卷不删除，使用新空卷初始化（附 pg_upgrade 指引）
+  - Docker 版通过 `docker volume ls` 查找 compose 项目前缀的实际卷名，从旧卷名提取前缀创建新版本化卷
+- **Docker 版 `detect_pg_data_dir` 升级**：从旧版名字通配符匹配（`*18*` / `*16*` 等）升级为 `docker image inspect` 查镜像真实 PGDATA（与 V10.10.25 传统版同步，100% 可靠）
+- **Docker 版 `PG_MAJOR` 持久化**：`bin/service.sh` 将 PG_MAJOR 写入 `.temp/.db.env`，restart 时 load_db_env 自动加载，compose 卷名插值不漂移
+- **`docker-compose.db.yml` 卷名改插值**：`gift_pg_data` → `gift_pg_data_${PG_MAJOR:-default}`（服务级 volume mount 与顶层 volumes 声明同步）
+
+#### 验证结论
+- 23 脚本 bash -n 语法检查全部通过
+- 10 个共享文件 MD5 全部一致（common.sh / db_select.sh / app.py / models.py 等）
+- `detect_pg_major` tag 解析 13 种镜像名正确（postgres:16-alpine→16 / pgvector:pg18→18 / latest→default 等）
+- 版本化卷名生成 4 种 PG_MAJOR 正确（16 / 18 / 14 / default）
+- 存量迁移决策矩阵 8 场景覆盖（同版本兼容迁移 × 2 / 跨版本保留 × 2 / 全新部署 / 二次部署 / 空卷 / 脚本升级）
+- `docker-compose.db.yml` YAML 有效性验证通过
+
+#### 涉及文件
+- `bin/db_setup.sh`（两版各自独立：新增 detect_pg_major / migrate 函数 / setup_independent_pg 版本化卷名 + Docker 版 detect_pg_data_dir 升级）
+- `docker-compose.db.yml`（Docker 版：卷名改插值 `gift_pg_data_${PG_MAJOR:-default}`）
+- `bin/service.sh`（Docker 版：PG_MAJOR 加入持久化参数列表）
 - `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
 
 ```text
