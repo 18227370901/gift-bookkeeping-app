@@ -46,24 +46,24 @@ setup_shared_pg() {
     docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -tAc "SELECT 1 FROM pg_database WHERE datname='$PG_DB'" 2>/dev/null | grep -q 1 || \
         docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "CREATE DATABASE $PG_DB OWNER $PG_USER;" >/dev/null 2>&1 || true
     docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "GRANT ALL ON DATABASE $PG_DB TO $PG_USER;" >/dev/null 2>&1 || true
-    # V10.10.20: PG_PORT 可自定义宿主机连接端口（优先于容器端口映射自动检测）
+    # V10.10.20: PG_PORT 可自定义宿主机连接端口（优先于容器端口映射自动检测；默认 PG_PORT_DEFAULT，定义于 bin/config.sh）
     if [ -n "${PG_PORT:-}" ]; then
         PG_HOST_PORT="$PG_PORT"
     else
         PG_HOST_PORT=$(docker inspect --format '{{range $p, $conf := .NetworkSettings.Ports}}{{range $conf}}{{.HostPort}} {{end}}{{end}}' "$DB_PG_CONTAINER" 2>/dev/null | awk '{print $1}')
-        PG_HOST_PORT="${PG_HOST_PORT:-5432}"
+        PG_HOST_PORT="${PG_HOST_PORT:-$PG_PORT_DEFAULT}"
     fi
     DATABASE_URL="postgresql://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${PG_HOST_PORT}/${PG_DB}"
     export DATABASE_URL
     echo_e "${GREEN}数据库模式: 共享 PostgreSQL (${DB_PG_CONTAINER}, 端口 ${PG_HOST_PORT}, 库 ${PG_DB}/账号 ${PG_USER})${NC}"
 }
 
-# V10.10.20: PG 连接参数解析（用户自定义 > 默认值）
-# PG_USER/PG_PASSWORD/PG_DB 环境变量可自定义；未指定时使用默认值（gift_user / 随机 16 位 / gift_bookkeeping）
+# V10.10.20: PG 连接参数解析（用户自定义 > 默认值；默认值集中定义于 bin/config.sh，V10.10.21 起）
+# PG_USER/PG_PASSWORD/PG_DB 环境变量可自定义；未指定时使用默认值（PG_USER_DEFAULT / 随机 16 位 / PG_DB_DEFAULT）
 # 密码校验：单引号/空格直接拒绝（无法安全拼入 SQL 与 URL）；URL 特殊字符警告
 resolve_pg_conn_params() {
-    PG_USER="${PG_USER:-gift_user}"
-    PG_DB="${PG_DB:-gift_bookkeeping}"
+    PG_USER="${PG_USER:-$PG_USER_DEFAULT}"
+    PG_DB="${PG_DB:-$PG_DB_DEFAULT}"
     if [ -z "$PG_PASSWORD" ]; then
         PG_PASSWORD=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
     else
@@ -97,8 +97,8 @@ setup_independent_pg() {
         echo_e "${GREEN} 使用用户自定义 PG 镜像: ${PG_LOCAL_IMAGE}${NC}"
     fi
     if [ -z "$PG_LOCAL_IMAGE" ]; then
-        echo_e "${YELLOW}  本地未检测到 PostgreSQL 镜像，自动下载内置默认镜像 postgres:16-alpine ...${NC}"
-        PG_LOCAL_IMAGE="postgres:16-alpine"
+        echo_e "${YELLOW}  本地未检测到 PostgreSQL 镜像，自动下载内置默认镜像 ${PG_IMAGE_DEFAULT:-postgres:16-alpine} ...${NC}"
+        PG_LOCAL_IMAGE="${PG_IMAGE_DEFAULT:-postgres:16-alpine}"
         if ! docker pull "$PG_LOCAL_IMAGE"; then
             echo_e "${RED}❌ 默认 PG 镜像下载失败，请检查网络，或改用 PG_IMAGE 指定自定义镜像后重试；降级为 SQLite 模式${NC}"
             DB_MODE=sqlite; setup_sqlite; return
