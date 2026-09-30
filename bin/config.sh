@@ -52,3 +52,8 @@ PG_PASSWORD_DEFAULT="${PG_PASSWORD_DEFAULT:-gift_pass}"    # 默认数据库密�
 PG_DB_DEFAULT="${PG_DB_DEFAULT:-gift_bookkeeping}"         # 默认数据库名
 PG_PORT_DEFAULT="${PG_PORT_DEFAULT:-5432}"                 # 共享 PG 默认宿主机连接端口（独立模式默认从 15432 起扫描）
 PG_IMAGE_DEFAULT="${PG_IMAGE_DEFAULT:-postgres:16-alpine}" # 独立 PG 默认镜像（本地无任何 PG 镜像时自动下载）
+
+# ===== 首次部署交互菜单默认选项（V10.10.27） =====
+# 1=SQLite / 2=共享 PG / 3=独立 PG；传统版默认 SQLite（零依赖最稳），
+# 与 Docker 版（默认 2 共享 PG）实现两版首次部署体验差异化；可被环境变量/config.local.sh 覆盖
+DB_MENU_DEFAULT="${DB_MENU_DEFAULT:-1}"

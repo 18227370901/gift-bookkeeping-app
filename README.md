@@ -12,6 +12,7 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🎯 **V10.10.27 两版首次部署默认数据库差异化（两版同步）**：传统版首次部署交互菜单**默认 SQLite**、Docker 版**默认共享 PG**——`bin/config.sh` 新增 `DB_MENU_DEFAULT`（传统版=1、Docker 版=2，可被环境变量/config.local.sh 覆盖），`db_select.sh`（共享文件）默认选项改读该变量，替代此前按内存阈值的智能推荐（旧逻辑两版行为相同）；**环境兜底**：Docker 版默认共享 PG 但未检测到运行中的 PG 容器时自动回退 SQLite（避免默认选项必然失败），非法值/未设置同样回退 SQLite；菜单项 1（SQLite）补上与其他项一致的 ⭐ 推荐标记；五场景模拟验证通过（传统→1 / Docker 有 PG→2 / Docker 无 PG→回退 1 / 非法值→回退 1 / 未设置→回退 1）。
 > - 🔒 **V10.10.26 独立 PG 重启策略补齐 + 跨版本共享 PG 检测排除（两版同步）**：① **传统版独立 PG 补 `--restart unless-stopped`**——此前 `docker run` 无重启策略（默认 no），服务器重启/Docker 守护进程重启后独立 PG 容器不会自动恢复，现与 Docker 版 compose 策略一致；② **共享 PG 自动检测排除对侧单租户容器**——`detect_pg_environment` 排除 `gift_app-pg`（传统版）与 `gift_bookkeeping_pg`（Docker 版），防止同服务器双版本部署时交互菜单误推荐对侧独立 PG 容器为共享 PG（对侧 reconfig 时 `docker rm -f` 会摧毁本版正在共享的实例）；显式 `DB_PG_CONTAINER=<容器名>` 跨版本共享仍完全支持；③ **双版本 9 组合数据隔离矩阵确认**——账号（gift_user vs gift_docker_user）/库名（gift_bookkeeping vs gift_docker_db）/容器名/卷/宿主机端口/Nginx 配置文件/SECRET_KEY 全维度隔离，任一模式组合零冲突（六场景模拟验证通过）。
 > - 🩺 **V10.10.25 共享 PG 容器状态误判 + 独立 PG 卷布局崩溃静默 + ALTER USER peer 认证 + 未知参数校验（两版同步）**：① **共享 PG 真实运行状态检查**——`docker ps` 会把崩溃循环（Restarting）的容器也列出被误判为"在运行"，改用 `docker inspect State.Status` 严格判定，非 running 直接展示容器日志与修复指引；② **`detect_pg_data_dir` 改查镜像真实 PGDATA**——此前按镜像名通配符猜路径，非标准命名镜像（如 `postgres:latest`）猜错导致 PG18+ 容器启动即崩溃（"in 18+ ... data in /var/lib/postgresql/data" 报错）；现用 `docker image inspect` 查询镜像 Config.Env 的 PGDATA（100% 可靠），未知镜像默认旧版路径；③ **独立 PG 容器启动后健康校验**——`docker run` 成功不代表容器存活，3 秒后校验 State.Status，崩溃则直接展示最后 15 行日志 + 卷/镜像不匹配解决方案（不再静默超时 30 秒后报误导性错误）；④ **`pg_sync_password` peer 认证优先**——`psql -U 用户` 在 Docker PG 内默认走 scram-sha-256 密码认证（非 trust），现 `docker exec -u postgres`（OS 级 peer 免密）优先 → socket 超级用户 → 容器 env 检测真实 POSTGRES_USER，三路兜底；⑤ **`detect_pg_superuser`**——从容器 env 检测真实超级用户名（此前固定 postgres，POSTGRES_USER 为其他名称时 CREATE USER 失败）；⑥ **未知参数校验**——`./run.sh restart --reconfiga` 拼错参数此前静默忽略照常重启，现报错「未知参数」+ exit 1。
 > - 🗄️ **V10.10.24 Docker 版与传统版数据隔离：PG 默认值差异化**：Docker 版 PG 默认值改为 `gift_docker_user` / `gift_docker_pass` / `gift_docker_db`（传统版保持 `gift_user` / `gift_pass` / `gift_bookkeeping`），同服务器双版本部署不再冲突；同时确认全部容器重启策略均为 `unless-stopped`（无 always）。
@@ -1196,6 +1197,25 @@ V10.10.14 修复了长连接监听线程写库硬编码路径问题后，用户�
 
 #### 涉及文件
 - `bin/db_setup.sh`（传统版，docker run 加 --restart）；`bin/db_select.sh`（两版共享，detect_pg_environment 排除逻辑）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
+
+### V10.10.27：两版首次部署默认数据库差异化（2026-09-30，传统版 + Docker 版同步）
+
+#### 变更内容
+- **传统版首次部署交互菜单默认 SQLite（选项 1）**、**Docker 版默认共享 PG（选项 2）**：
+  - `bin/config.sh` 新增 `DB_MENU_DEFAULT` 变量：传统版 `"${DB_MENU_DEFAULT:-1}"`、Docker 版 `"${DB_MENU_DEFAULT:-2}"`；可被命令行环境变量或 `config.local.sh` 覆盖
+  - `bin/db_select.sh`（两版共享，MD5 一致）默认选项改读 `DB_MENU_DEFAULT`，替代此前按内存阈值的智能推荐逻辑（旧逻辑两版行为相同：≥400MB 推共享 PG、≥700MB 推独立 PG）
+- **环境兜底**：默认共享 PG 但未检测到运行中的 PG 容器时自动回退 SQLite（避免默认选项必然失败）；`DB_MENU_DEFAULT` 为非法值或未设置时同样回退 SQLite
+- **菜单项 1（SQLite）** 补上与其他选项一致的 ⭐ 推荐标记（此前仅选项 2/3 有标记）
+- 非交互环境（cron/管道）默认行为不变，仍为 SQLite（`DB_MODE` 环境变量可直通）
+
+#### 验证结论
+- 五场景模拟：传统版→默认 1；Docker 版有运行 PG→默认 2；Docker 版无运行 PG→回退 1；非法值（=5）→回退 1；未设置→回退 1
+- 两版 `config.sh` 独立进程实测：传统 `DB_MENU_DEFAULT=1`、Docker `DB_MENU_DEFAULT=2`
+- `db_select.sh` 两版 MD5 一致；bash -n 全部通过
+
+#### 涉及文件
+- `bin/config.sh`（两版各自，DB_MENU_DEFAULT 差异化）；`bin/db_select.sh`（两版共享，默认选项读取与兜底逻辑）
 - `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
 
 ```text
