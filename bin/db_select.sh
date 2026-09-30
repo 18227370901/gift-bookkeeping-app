@@ -6,6 +6,12 @@
 DB_ENV_FILE="$APP_DIR/.temp/.db.env"
 DB_OVERRIDE="$APP_DIR/.temp/docker-compose.db-override.yml"
 
+# V10.10.20: 捕获模块加载时用户显式指定的 DB_MODE。
+# 背景：restart 场景下 stop_service 会 load_db_env 把旧配置中的 DB_MODE 注入当前 shell，
+# 若直接判断 $DB_MODE 会被误判为“环境变量直通”，导致 DB_RESET=1 重选时跳过交互菜单。
+# 因此第 ① 分支只认此处捕获的用户显式指定值。
+_DB_MODE_AT_LOAD="${DB_MODE:-}"
+
 # 检测服务器 PG 环境与可用内存
 detect_pg_environment() {
     PG_RUNNING_NAME=""
@@ -55,7 +61,10 @@ select_db_mode() {
     fi
 
     # ① DB_MODE 环境变量直通（cron/CI 首选方式）
-    if [ -n "$DB_MODE" ]; then
+    # 仅认模块加载时用户显式指定的值（_DB_MODE_AT_LOAD），不认 stop_service 等处
+    # load_db_env 注入的旧值，确保 DB_RESET=1 restart 时交互菜单正常弹出
+    if [ -n "$_DB_MODE_AT_LOAD" ]; then
+        DB_MODE="$_DB_MODE_AT_LOAD"
         case "$DB_MODE" in
             sqlite) setup_sqlite ;;
             shared) setup_shared_pg ;;
@@ -83,6 +92,7 @@ select_db_mode() {
         echo_e "${GREEN}🔍 检测服务器环境...${NC}"
         [ -n "$PG_RUNNING_NAME" ] && echo_e "   运行中的 PG 容器: ${PG_RUNNING_NAME} (${PG_RUNNING_IMAGE})" || echo_e "   运行中的 PG 容器: 无"
         [ -n "$PG_LOCAL_IMAGE" ] && echo_e "   本地 PG 镜像: ${PG_LOCAL_IMAGE}" || echo_e "   本地 PG 镜像: 无"
+        [ -n "$PG_IMAGE" ] && echo_e "   自定义 PG 镜像 (PG_IMAGE): ${PG_IMAGE}（仅独立 PG 模式生效，优先级最高）"
         echo_e "   可用内存: ${AVAIL_MEM}MB"
         echo_e ""
 
@@ -105,12 +115,16 @@ select_db_mode() {
         else
             echo_e "  │  2) 共享 PostgreSQL 实例 (未检测到运行中的 PG 容器)"
         fi
-        if [ -n "$PG_LOCAL_IMAGE" ]; then
+        if [ -n "$PG_IMAGE" ]; then
+            echo_e "  │  3) 独立 PostgreSQL 容器$([ $_recommend -eq 3 ] && echo ' ⭐ 推荐')"
+            echo_e "  │     新起 pg 服务，应用独占"
+            echo_e "  │     使用自定义镜像 ${PG_IMAGE}"
+        elif [ -n "$PG_LOCAL_IMAGE" ]; then
             echo_e "  │  3) 独立 PostgreSQL 容器$([ $_recommend -eq 3 ] && echo ' ⭐ 推荐')"
             echo_e "  │     新起 pg 服务，应用独占"
             echo_e "  │     使用本地镜像 ${PG_LOCAL_IMAGE}"
         else
-            echo_e "  │  3) 独立 PostgreSQL 容器 (本地无 PG 镜像，需下载)"
+            echo_e "  │  3) 独立 PostgreSQL 容器 (本地无 PG 镜像，将自动下载默认 postgres:16-alpine)"
         fi
         echo_e "  └─────────────────────────────────────────────────┘"
 
