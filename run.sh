@@ -373,6 +373,7 @@ case "$1" in
         echo "  DB_MODE             直接指定数据库模式跳过交互: sqlite | shared | independent (shared 需搭配 DB_PG_CONTAINER)"
         echo "  DB_PG_CONTAINER     共享 PG 模式复用的已运行容器名 (与 DB_MODE=shared 搭配)"
         echo "  DB_RESET=1          清除已保存的数据库配置并重新进入交互选择 (无需手动删除 .temp/.db.env)"
+        echo "  PG_IMAGE            独立 PG 模式自定义镜像版本 (默认: 优先复用本地已有 PG 镜像，无则自动下载 postgres:16-alpine)"
         echo "  示例: DB_RESET=1 ./$(basename "$0") start   # 重新选择数据库模式"
         echo "  示例: DB_MODE=sqlite ./$(basename "$0") start   # 直通指定，交互终端下会保存为新配置"
         echo "  示例: PROJECT_NAME=mengyao SNI_DOMAIN=mengyao.example.com ./$(basename "$0") start"

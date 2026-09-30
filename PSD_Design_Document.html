@@ -116,7 +116,7 @@
   <div class="meta">
     <span><strong>版本</strong>：V10.10.20</span>
     <span><strong>生成日期</strong>：2026-09-29</span>
-    <span><strong>审计基线</strong>：main 分支 V10.10.20（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化）</span>
+    <span><strong>审计基线</strong>：main 分支 V10.10.20（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复）</span>
     <br>
     <span class="badge">代码是实现真相</span>
     <span class="badge">文档是意图真相</span>
@@ -1101,7 +1101,7 @@ graph LR
 <tr><th>属性</th><th>值</th></tr>
 <tr><td>文档版本</td><td>V10.10.20</td></tr>
 <tr><td>生成日期</td><td>2026-09-29（V1.5 修订）</td></tr>
-<tr><td>审计基线</td><td>main 分支 V10.10.20（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化）</td></tr>
+<tr><td>审计基线</td><td>main 分支 V10.10.20（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复）</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
 <tr><td>漂移项总数</td><td>10（2 高影响 → D-03 已于 V10.10.18 清偿，余 D-02 待治理 / 1 中影响 / 4 低影响 / 3 一致）</td></tr>

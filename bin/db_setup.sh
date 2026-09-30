@@ -47,36 +47,47 @@ setup_shared_pg() {
 }
 
 # 配置独立 PostgreSQL 模式（传统版：docker run -d 启动独立容器）
+# V10.10.20: 智能匹配 PG 镜像数据目录挂载路径（PostgreSQL 18+/pgvector:pg18 → /var/lib/postgresql；15/16/14 及 alpine → /var/lib/postgresql/data）
+detect_pg_data_dir() {
+    case "$1" in
+        *18*|*pg18*) echo "/var/lib/postgresql" ;;
+        *15*|*16*|*14*|*alpine*) echo "/var/lib/postgresql/data" ;;
+        *) echo "/var/lib/postgresql" ;;
+    esac
+}
+
 setup_independent_pg() {
+    # V10.10.20: 镜像优先级链 —— PG_IMAGE（用户自定义）> 本地已存在镜像（detect_pg_environment）> 默认镜像自动下载（postgres:16-alpine）
+    if [ -n "$PG_IMAGE" ]; then
+        PG_LOCAL_IMAGE="$PG_IMAGE"
+        echo_e "${GREEN} 使用用户自定义 PG 镜像: ${PG_LOCAL_IMAGE}${NC}"
+    fi
     if [ -z "$PG_LOCAL_IMAGE" ]; then
-        echo_e "${YELLOW}本地未找到 PostgreSQL 镜像。${NC}"
-        if [ -t 0 ]; then
-            printf '是否允许下载 postgres:16-alpine (约40MB)? (y/n) [默认 n]: ' >&2
-            read -r _dl_answer
-            case "$_dl_answer" in
-                y|Y|yes|YES) PG_LOCAL_IMAGE="postgres:16-alpine" ;;
-                *) echo_e "${YELLOW}用户取消下载，降级为 SQLite 模式${NC}"; DB_MODE=sqlite; setup_sqlite; return ;;
-            esac
-        else
-            echo_e "${YELLOW}非交互环境无法下载，降级为 SQLite 模式${NC}"
+        echo_e "${YELLOW}  本地未检测到 PostgreSQL 镜像，自动下载内置默认镜像 postgres:16-alpine ...${NC}"
+        PG_LOCAL_IMAGE="postgres:16-alpine"
+        if ! docker pull "$PG_LOCAL_IMAGE"; then
+            echo_e "${RED}❌ 默认 PG 镜像下载失败，请检查网络，或改用 PG_IMAGE 指定自定义镜像后重试；降级为 SQLite 模式${NC}"
             DB_MODE=sqlite; setup_sqlite; return
         fi
+        echo_e "${GREEN}✅ 默认镜像已下载: ${PG_LOCAL_IMAGE}${NC}"
     fi
     PG_PASSWORD=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
     PG_CONTAINER_NAME="${PROJECT_NAME}-pg"
+    # V10.10.20: 按镜像智能匹配数据目录挂载路径（防止 PG18+ 镜像挂错路径导致数据不落卷）
+    PG_DATA_DIR=$(detect_pg_data_dir "$PG_LOCAL_IMAGE")
     PG_HOST_PORT=15432
     while lsof -ti :$PG_HOST_PORT > /dev/null 2>&1; do
         PG_HOST_PORT=$((PG_HOST_PORT + 1))
     done
     docker rm -f "$PG_CONTAINER_NAME" 2>/dev/null || true
-    echo_e "${GREEN}正在启动独立 PostgreSQL 容器 (${PG_LOCAL_IMAGE})...${NC}"
+    echo_e "${GREEN}正在启动独立 PostgreSQL 容器 (${PG_LOCAL_IMAGE}，挂载 ${PG_DATA_DIR})...${NC}"
     docker run -d \
         --name "$PG_CONTAINER_NAME" \
         -e POSTGRES_DB=gift_bookkeeping \
         -e POSTGRES_USER=gift_user \
         -e POSTGRES_PASSWORD="$PG_PASSWORD" \
         -p "127.0.0.1:${PG_HOST_PORT}:5432" \
-        -v "${PROJECT_NAME}_pg_data:/var/lib/postgresql/data" \
+        -v "${PROJECT_NAME}_pg_data:${PG_DATA_DIR}" \
         "$PG_LOCAL_IMAGE" > /dev/null 2>&1
     if [ $? -ne 0 ]; then
         echo_e "${RED}独立 PG 容器启动失败，降级为 SQLite 模式${NC}"
