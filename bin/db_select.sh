@@ -24,7 +24,10 @@ detect_pg_environment() {
     PG_LOCAL_IMAGE=""
     AVAIL_MEM=0
     if command -v docker > /dev/null 2>&1; then
-        _pg_info=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null | grep -iE 'postgres|pgvector' | head -1)
+        # V10.10.26: 排除两版各自的独立 PG 单租户容器（传统版 gift_app-pg / Docker 版 gift_bookkeeping_pg）——
+        # 同服务器双版本部署时，对侧独立 PG 容器会随其 reconfig 被 docker rm -f / stop，
+        # 误选为共享 PG 会导致本版服务被动中断；如确需跨版本共享，DB_PG_CONTAINER 显式指定仍完全支持
+        _pg_info=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null | grep -iE 'postgres|pgvector' | grep -vE '^gift_app-pg |^gift_bookkeeping_pg ' | head -1)
         if [ -n "$_pg_info" ]; then
             PG_RUNNING_NAME=$(echo "$_pg_info" | awk '{print $1}')
             PG_RUNNING_IMAGE=$(echo "$_pg_info" | awk '{print $2}')

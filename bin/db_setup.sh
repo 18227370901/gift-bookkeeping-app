@@ -202,7 +202,10 @@ setup_independent_pg() {
     fi
     docker rm -f "$PG_CONTAINER_NAME" 2>/dev/null || true
     echo_e "${GREEN}正在启动独立 PostgreSQL 容器 (${PG_LOCAL_IMAGE}，挂载 ${PG_DATA_DIR}，库 ${PG_DB}/账号 ${PG_USER})...${NC}"
+    # V10.10.26: 加 --restart unless-stopped（与 Docker 版 compose 策略一致）——
+    # 此前无重启策略（默认 no），服务器重启/Docker 守护进程重启后独立 PG 容器不会自动恢复
     docker run -d \
+        --restart unless-stopped \
         --name "$PG_CONTAINER_NAME" \
         -e POSTGRES_DB="$PG_DB" \
         -e POSTGRES_USER="$PG_USER" \
