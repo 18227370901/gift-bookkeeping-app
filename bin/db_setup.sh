@@ -35,15 +35,49 @@ setup_shared_pg() {
     fi
     PG_SUPERUSER=$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$DB_PG_CONTAINER" 2>/dev/null | grep '^POSTGRES_USER=' | cut -d= -f2)
     PG_SUPERUSER="${PG_SUPERUSER:-postgres}"
-    PG_PASSWORD=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
-    docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "CREATE USER gift_user WITH PASSWORD '$PG_PASSWORD';" 2>/dev/null || true
-    docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "CREATE DATABASE gift_bookkeeping OWNER gift_user;" 2>/dev/null || true
-    docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "GRANT ALL ON DATABASE gift_bookkeeping TO gift_user;" 2>/dev/null || true
-    PG_HOST_PORT=$(docker inspect --format '{{range $p, $conf := .NetworkSettings.Ports}}{{range $conf}}{{.HostPort}} {{end}}{{end}}' "$DB_PG_CONTAINER" 2>/dev/null | awk '{print $1}')
-    PG_HOST_PORT="${PG_HOST_PORT:-5432}"
-    DATABASE_URL="postgresql://gift_user:${PG_PASSWORD}@127.0.0.1:${PG_HOST_PORT}/gift_bookkeeping"
+    # V10.10.20: 连接参数解析（PG_USER/PG_PASSWORD/PG_DB 可自定义，未指定用默认值）
+    resolve_pg_conn_params
+    # 幂等创建/更新账号与库（已有部署时 ALTER 同步密码、保留数据）
+    if docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -tAc "SELECT 1 FROM pg_roles WHERE rolname='$PG_USER'" 2>/dev/null | grep -q 1; then
+        docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "ALTER USER $PG_USER WITH PASSWORD '$PG_PASSWORD';" >/dev/null 2>&1 || true
+    else
+        docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "CREATE USER $PG_USER WITH PASSWORD '$PG_PASSWORD';" >/dev/null 2>&1 || true
+    fi
+    docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -tAc "SELECT 1 FROM pg_database WHERE datname='$PG_DB'" 2>/dev/null | grep -q 1 || \
+        docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "CREATE DATABASE $PG_DB OWNER $PG_USER;" >/dev/null 2>&1 || true
+    docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "GRANT ALL ON DATABASE $PG_DB TO $PG_USER;" >/dev/null 2>&1 || true
+    # V10.10.20: PG_PORT 可自定义宿主机连接端口（优先于容器端口映射自动检测）
+    if [ -n "${PG_PORT:-}" ]; then
+        PG_HOST_PORT="$PG_PORT"
+    else
+        PG_HOST_PORT=$(docker inspect --format '{{range $p, $conf := .NetworkSettings.Ports}}{{range $conf}}{{.HostPort}} {{end}}{{end}}' "$DB_PG_CONTAINER" 2>/dev/null | awk '{print $1}')
+        PG_HOST_PORT="${PG_HOST_PORT:-5432}"
+    fi
+    DATABASE_URL="postgresql://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${PG_HOST_PORT}/${PG_DB}"
     export DATABASE_URL
-    echo_e "${GREEN}数据库模式: 共享 PostgreSQL (${DB_PG_CONTAINER}, 端口 ${PG_HOST_PORT})${NC}"
+    echo_e "${GREEN}数据库模式: 共享 PostgreSQL (${DB_PG_CONTAINER}, 端口 ${PG_HOST_PORT}, 库 ${PG_DB}/账号 ${PG_USER})${NC}"
+}
+
+# V10.10.20: PG 连接参数解析（用户自定义 > 默认值）
+# PG_USER/PG_PASSWORD/PG_DB 环境变量可自定义；未指定时使用默认值（gift_user / 随机 16 位 / gift_bookkeeping）
+# 密码校验：单引号/空格直接拒绝（无法安全拼入 SQL 与 URL）；URL 特殊字符警告
+resolve_pg_conn_params() {
+    PG_USER="${PG_USER:-gift_user}"
+    PG_DB="${PG_DB:-gift_bookkeeping}"
+    if [ -z "$PG_PASSWORD" ]; then
+        PG_PASSWORD=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
+    else
+        case "$PG_PASSWORD" in
+            *\'*|*' '*)
+                echo_e "${RED}❌ 自定义 PG_PASSWORD 含单引号或空格，无法安全用于数据库与连接 URL，请更换${NC}"
+                exit 1
+                ;;
+            *@*|*:*|*/*|*#*|*\?*)
+                echo_e "${YELLOW}⚠️ 自定义 PG_PASSWORD 含 URL 特殊字符（@ : / # ?），如遇连接失败请改用字母数字组合${NC}"
+                ;;
+        esac
+    fi
+    export PG_USER PG_PASSWORD PG_DB
 }
 
 # 配置独立 PostgreSQL 模式（传统版：docker run -d 启动独立容器）
@@ -71,20 +105,26 @@ setup_independent_pg() {
         fi
         echo_e "${GREEN}✅ 默认镜像已下载: ${PG_LOCAL_IMAGE}${NC}"
     fi
-    PG_PASSWORD=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 16)
+    # V10.10.20: 连接参数解析（PG_USER/PG_PASSWORD/PG_DB 可自定义，未指定用默认值）
+    resolve_pg_conn_params
     PG_CONTAINER_NAME="${PROJECT_NAME}-pg"
     # V10.10.20: 按镜像智能匹配数据目录挂载路径（防止 PG18+ 镜像挂错路径导致数据不落卷）
     PG_DATA_DIR=$(detect_pg_data_dir "$PG_LOCAL_IMAGE")
-    PG_HOST_PORT=15432
-    while lsof -ti :$PG_HOST_PORT > /dev/null 2>&1; do
-        PG_HOST_PORT=$((PG_HOST_PORT + 1))
-    done
+    # V10.10.20: PG_PORT 可自定义宿主机映射端口（未指定时从 15432 起自动扫描可用端口）
+    if [ -n "${PG_PORT:-}" ]; then
+        PG_HOST_PORT="$PG_PORT"
+    else
+        PG_HOST_PORT=15432
+        while lsof -ti :$PG_HOST_PORT > /dev/null 2>&1; do
+            PG_HOST_PORT=$((PG_HOST_PORT + 1))
+        done
+    fi
     docker rm -f "$PG_CONTAINER_NAME" 2>/dev/null || true
-    echo_e "${GREEN}正在启动独立 PostgreSQL 容器 (${PG_LOCAL_IMAGE}，挂载 ${PG_DATA_DIR})...${NC}"
+    echo_e "${GREEN}正在启动独立 PostgreSQL 容器 (${PG_LOCAL_IMAGE}，挂载 ${PG_DATA_DIR}，库 ${PG_DB}/账号 ${PG_USER})...${NC}"
     docker run -d \
         --name "$PG_CONTAINER_NAME" \
-        -e POSTGRES_DB=gift_bookkeeping \
-        -e POSTGRES_USER=gift_user \
+        -e POSTGRES_DB="$PG_DB" \
+        -e POSTGRES_USER="$PG_USER" \
         -e POSTGRES_PASSWORD="$PG_PASSWORD" \
         -p "127.0.0.1:${PG_HOST_PORT}:5432" \
         -v "${PROJECT_NAME}_pg_data:${PG_DATA_DIR}" \
@@ -96,13 +136,13 @@ setup_independent_pg() {
     echo_e "${YELLOW}等待 PostgreSQL 就绪...${NC}"
     _pg_wait=0
     while [ $_pg_wait -lt 30 ]; do
-        if docker exec "$PG_CONTAINER_NAME" pg_isready -U gift_user > /dev/null 2>&1; then
+        if docker exec "$PG_CONTAINER_NAME" pg_isready -U "$PG_USER" > /dev/null 2>&1; then
             break
         fi
         sleep 1
         _pg_wait=$((_pg_wait + 1))
     done
-    DATABASE_URL="postgresql://gift_user:${PG_PASSWORD}@127.0.0.1:${PG_HOST_PORT}/gift_bookkeeping"
+    DATABASE_URL="postgresql://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${PG_HOST_PORT}/${PG_DB}"
     export DATABASE_URL
-    echo_e "${GREEN}数据库模式: 独立 PostgreSQL (${PG_CONTAINER_NAME}, 端口 ${PG_HOST_PORT})${NC}"
+    echo_e "${GREEN}数据库模式: 独立 PostgreSQL (${PG_CONTAINER_NAME}, 端口 ${PG_HOST_PORT}, 库 ${PG_DB}/账号 ${PG_USER})${NC}"
 }
