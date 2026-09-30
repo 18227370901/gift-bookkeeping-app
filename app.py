@@ -83,6 +83,20 @@ if db_url.startswith('sqlite:'):
     app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
         'connect_args': {'timeout': 30}
     }
+elif db_url.startswith('postgresql:'):
+    # V10.10.20: PG 模式连接与语句级超时保护
+    # 背景：PG 引擎此前无任何超时配置，web↔PG 之间出现连接黑洞（网络策略/TCP 半开/
+    # 容器网络异常）时，db.create_all() 等启动流程会无限期挂起——表现为容器零日志、
+    # 页面 504（gunicorn worker 永远无法完成 app 加载）。
+    # 现配置 connect_timeout=10s（建连黑洞 10 秒断开）+ statement_timeout=120s
+    #（单条语句最多 2 分钟，建表/迁移足够），超时异常由启动层 try/except 捕获并打印，
+    # 保证任何启动故障都有日志可查、且不会无限卡死。
+    app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+        'connect_args': {
+            'connect_timeout': 10,
+            'options': '-c statement_timeout=120000'
+        }
+    }
 
 db.init_app(app)
 
@@ -773,7 +787,11 @@ def init_database():
             except Exception as _fix_err:
                 print(f"[V5-Fix] orphan index 修复跳过: {_fix_err}")
 
+        # V10.10.20: 启动阶段标记——建表与迁移是 PG 模式下的主要耗时/卡点，
+        # 输出阶段标记保证任何卡点在容器日志中可见（此前卡在 create_all 时容器零日志）
+        print(f"[Init] 数据库模式: {'PostgreSQL' if db_url.startswith('postgresql:') else 'SQLite'}，正在创建/校验表结构...")
         db.create_all()
+        print("[Init] 表结构创建/校验完成，正在执行历史迁移 SQL...")
         # 自动迁移检查缺失字段
         migration_sqls = [
             "ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user'",
@@ -972,6 +990,7 @@ def init_database():
                     conn.commit()
                 except Exception:
                     pass
+        print("[Init] 历史 SQL 迁移执行完成，进入 V10.9 数据迁移...")
 
         # 开启 SQLite WAL 模式并设置繁忙等待超时，彻底消除并发读写排他锁与请求卡死
         if db_url.startswith('sqlite:'):
