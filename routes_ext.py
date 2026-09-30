@@ -24,7 +24,10 @@ from webdav_utils import (
     upload_encrypted_backup,
     upload_file_to_webdav,
     delete_webdav_backup,
-    HAS_PYZIPPER
+    # V10.10.23: 改用检测函数而非模块级变量快照——
+    # webdav_utils.HAS_PYZIPPER 初值为 None（延迟检测），import 时捕获快照后永远不更新，
+    # 页面 has_pyzipper 收到 None（falsy）会导致 pyzipper 实际已安装也误报"未安装"
+    _ensure_pyzipper
 )
 from gift_utils import (
     parse_gift_nlp, parse_gift_nlp_multi, split_gift_nlp_text,
@@ -3802,7 +3805,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             authorized_users=authorized_users,
             task_authorized_users=task_authorized_users,
             all_users=all_users,
-            has_pyzipper=HAS_PYZIPPER,
+            # V10.10.23: 渲染时实时检测（首次访问触发一次导入，此后返回缓存值）
+            has_pyzipper=_ensure_pyzipper(),
             has_encrypt_password=has_encrypt_password,
             config_encrypt_pwd_plain=config_encrypt_pwd_plain,
             allow_view_others=allow_view_others,

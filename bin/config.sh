@@ -48,6 +48,7 @@ export ADMIN_PASS="${ADMIN_PASS:-admin123}"
 
 # ===== PostgreSQL 默认值（bin/db_setup.sh 与交互菜单引用；运行时仍可被 PG_USER/PG_PASSWORD/PG_DB/PG_PORT/PG_IMAGE 环境变量覆盖） =====
 PG_USER_DEFAULT="${PG_USER_DEFAULT:-gift_user}"            # 默认数据库账号
+PG_PASSWORD_DEFAULT="${PG_PASSWORD_DEFAULT:-gift_pass}"    # 默认数据库密码（V10.10.22：固定默认值，不再每次随机生成；建议在 config.local.sh 中覆盖）
 PG_DB_DEFAULT="${PG_DB_DEFAULT:-gift_bookkeeping}"         # 默认数据库名
 PG_PORT_DEFAULT="${PG_PORT_DEFAULT:-5432}"                 # 共享 PG 默认宿主机连接端口（独立模式默认从 15432 起扫描）
 PG_IMAGE_DEFAULT="${PG_IMAGE_DEFAULT:-postgres:16-alpine}" # 独立 PG 默认镜像（本地无任何 PG 镜像时自动下载）
