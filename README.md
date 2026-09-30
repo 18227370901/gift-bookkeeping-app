@@ -13,6 +13,7 @@ AIGC:
 
 > 💡 **版本与架构升级公告（最新）**：
 > - 🗄️ **V10.10.20 初次部署纯净化（对齐 Docker 版）**：传统版首次 `./run.sh start` 不再复制样例库，仅就绪 `data/` 目录，应用启动自动创建**纯净空库 + 单一管理员**（`admin`/`admin123`，与 Docker 版行为一致）；根目录样例库仅作开发/演示参考，不再参与运行；已有运行库的存量部署零影响（幂等）。
+> - 🐘 **V10.10.20 独立 PG 镜像策略 + PG 驱动修复（两版同步）**：`PG_IMAGE` 环境变量自定义镜像 → 优先复用服务器本地已有 PG 镜像 → 无则**自动下载默认 `postgres:16-alpine`**（失败降级 SQLite）；独立 PG 数据卷挂载路径按镜像智能匹配（PG18+ → `/var/lib/postgresql`，15/16/alpine → `/var/lib/postgresql/data`，防数据不落盘）；requirements 新增 `psycopg[binary]` 修复 PostgreSQL 模式 SQLAlchemy 缺 psycopg3 驱动崩溃（psycopg2-binary 保留给 webhook_utils）。
 > - 🖥️ **V10.10.19 run.sh status 访问信息展示**：status 命令与启动成功提示一致输出访问地址（多域名列表）、后端本地直连、日志文件与当前数据库模式（含 DB_RESET=1 重选提示）；Docker 版 status 补带 PG override 文件；两版帮助文本新增 DB_MODE/DB_PG_CONTAINER/DB_RESET 数据库配置说明（V10.10.19b：帮助与提示中的示例命令统一规范显示为 ./run.sh）。
 > - 🌐 **V10.10.18 前端资源本地化 + 部署链路加固**：新增 `static/vendor/`（Bootstrap 5.3.0 / Font Awesome 6.4.0 / Bootstrap Icons 1.11.3，14 个文件与原 CDN 版本完全一致），base.html 4 处 + shared_ledger.html 2 处国外 CDN 引用改为本地 `url_for` 加载，国内服务器不再依赖 jsdelivr/cdnjs；`./run.sh start` 首次部署自动就绪 `data/` 运行库目录（V10.10.20 起不再复制样例库，初次部署为纯净空库 + 单一管理员）+ python3 环境预检 + pip 镜像源兑底（清华→阿里云→官方）。
 > - 📦 **V10.10.17b run.sh 模块化拆分**：将 run.sh 函数拆分到 `bin/` 目录下 7 个 `.sh` 文件，run.sh 仅保留配置区 + 启停操作（792→257 行）；修正 `select_db_mode` 遗留位置问题。
