@@ -12,6 +12,10 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🔒 **V10.10.26 独立 PG 重启策略补齐 + 跨版本共享 PG 检测排除（两版同步）**：① **传统版独立 PG 补 `--restart unless-stopped`**——此前 `docker run` 无重启策略（默认 no），服务器重启/Docker 守护进程重启后独立 PG 容器不会自动恢复，现与 Docker 版 compose 策略一致；② **共享 PG 自动检测排除对侧单租户容器**——`detect_pg_environment` 排除 `gift_app-pg`（传统版）与 `gift_bookkeeping_pg`（Docker 版），防止同服务器双版本部署时交互菜单误推荐对侧独立 PG 容器为共享 PG（对侧 reconfig 时 `docker rm -f` 会摧毁本版正在共享的实例）；显式 `DB_PG_CONTAINER=<容器名>` 跨版本共享仍完全支持；③ **双版本 9 组合数据隔离矩阵确认**——账号（gift_user vs gift_docker_user）/库名（gift_bookkeeping vs gift_docker_db）/容器名/卷/宿主机端口/Nginx 配置文件/SECRET_KEY 全维度隔离，任一模式组合零冲突（六场景模拟验证通过）。
+> - 🩺 **V10.10.25 共享 PG 容器状态误判 + 独立 PG 卷布局崩溃静默 + ALTER USER peer 认证 + 未知参数校验（两版同步）**：① **共享 PG 真实运行状态检查**——`docker ps` 会把崩溃循环（Restarting）的容器也列出被误判为"在运行"，改用 `docker inspect State.Status` 严格判定，非 running 直接展示容器日志与修复指引；② **`detect_pg_data_dir` 改查镜像真实 PGDATA**——此前按镜像名通配符猜路径，非标准命名镜像（如 `postgres:latest`）猜错导致 PG18+ 容器启动即崩溃（"in 18+ ... data in /var/lib/postgresql/data" 报错）；现用 `docker image inspect` 查询镜像 Config.Env 的 PGDATA（100% 可靠），未知镜像默认旧版路径；③ **独立 PG 容器启动后健康校验**——`docker run` 成功不代表容器存活，3 秒后校验 State.Status，崩溃则直接展示最后 15 行日志 + 卷/镜像不匹配解决方案（不再静默超时 30 秒后报误导性错误）；④ **`pg_sync_password` peer 认证优先**——`psql -U 用户` 在 Docker PG 内默认走 scram-sha-256 密码认证（非 trust），现 `docker exec -u postgres`（OS 级 peer 免密）优先 → socket 超级用户 → 容器 env 检测真实 POSTGRES_USER，三路兜底；⑤ **`detect_pg_superuser`**——从容器 env 检测真实超级用户名（此前固定 postgres，POSTGRES_USER 为其他名称时 CREATE USER 失败）；⑥ **未知参数校验**——`./run.sh restart --reconfiga` 拼错参数此前静默忽略照常重启，现报错「未知参数」+ exit 1。
+> - 🗄️ **V10.10.24 Docker 版与传统版数据隔离：PG 默认值差异化**：Docker 版 PG 默认值改为 `gift_docker_user` / `gift_docker_pass` / `gift_docker_db`（传统版保持 `gift_user` / `gift_pass` / `gift_bookkeeping`），同服务器双版本部署不再冲突；同时确认全部容器重启策略均为 `unless-stopped`（无 always）。
+> - 🔧 **V10.10.23 `--reconfig` 参数替代 `DB_RESET=1` 环境变量（两版同步）**：用法改为后缀参数 `./run.sh restart --reconfig`（或 `./run.sh start --reconfig-db` 完整别名）；`$1` 子命令 + `$2` 可选参数解析；`DB_RESET=1` 环境变量保留兼容 cron/CI 场景；帮助文本、status 提示、错误消息全部同步更新。
 > - 🔧 **V10.10.22 PG 密码认证修复 + pyzipper 缺失修复 + 密码固定默认值（两版同步）**：① **PG 密码不再每次随机生成**——此前 `resolve_pg_conn_params()` 在 PG_PASSWORD 未指定时每次 `cat /dev/urandom` 生成新随机密码，导致重启/重选时密码变化、已有 PG 实例密码不匹配认证失败；现改为固定默认值 `gift_pass`（`bin/config.sh` 新增 `PG_PASSWORD_DEFAULT`，与 `ADMIN_PASS` 同模式，可在 `config.local.sh` 中覆盖）；② **ALTER USER 不再静默吞错**——新增 `pg_sync_password()` 函数（超级用户 socket → OS 级 peer 认证两路兜底），ALTER USER 失败时报错终止而非静默继续；③ **独立 PG 容器就绪后强制 ALTER USER 同步密码**——Docker 卷已存在时 `POSTGRES_PASSWORD` 环境变量被 PG 忽略（仅首次初始化读取），需 ALTER USER 兜底；④ **密码自动同步**——`db_select.sh` 新增 `_PG_PASSWORD_AT_LOAD` 捕获用户显式指定的 PG_PASSWORD，已有 .db.env 配置的重启场景检测到新密码时自动重执行 setup 同步至数据库；⑤ **pyzipper 依赖检查**——`python_env.sh` 核心依赖检查新增 pyzipper（此前仅查 flask 四件套，老部署已装时 pip install 整体跳过，pyzipper 永远不安装）；⑥ **pyzipper 检测改为实时函数**——`routes_ext.py` 中 `HAS_PYZIPPER` 模块级变量（import 时快照为 None 永不更新）改为 `_ensure_pyzipper()` 实时检测函数，修复 pyzipper 实际已安装也误报"未安装"；⑦ **Docker 版独立 PG 密码同步容器名修正**——`bin/service.sh` 此前误用 `${PROJECT_NAME}-pg`（与 `docker-compose.db.yml` 硬编码的 `gift_bookkeeping_pg` 不一致），`docker exec` 找不到容器导致独立 PG 密码同步从未生效；现修正容器名 + `pg_isready` 就绪轮询（最长 30 秒）替代固定 sleep + 同步成功后 restart web（旧密码启动的 web 容器需重启方能以新密码连接）。
 > - 🧩 **V10.10.21 run.sh 深度模块化拆分 + 配置单点化（两版同步）**：run.sh 瘦身为「模块加载 + 命令分发」编排层（传统版 399→31 行，Docker 版 263→34 行）；新增 `bin/config.sh`（全部可自定义变量单点定义：账密/端口/SNI/PG 默认值）、`bin/service.sh`（启停操作与访问信息展示）、`bin/help.sh`（帮助文本）、`bin/python_env.sh`（Python 预检 + pip 镜像源兑底 + venv 依赖安装，自 start_service 抽取）；`db_setup.sh` 中 PG 默认值改为引用 config 变量；帮助文本与全部行为经「零 diff」验证逐字不变。**服务器专属持久配置新机制**：每台服务器的差异化配置（账密/SNI 域名/端口等）写入 `bin/config.local.sh`（已被 .gitignore 忽略，git pull 永不冲突），三层优先级：命令行环境变量 > `config.local.sh` > 内置默认值；曾直接改 run.sh 配置区的服务器，升级后请将定制值迁移至该文件（详见「Linux 服务器代码更新与冲突处理指南」）。
 > - 🗄️ **V10.10.20 初次部署纯净化（对齐 Docker 版）**：传统版首次 `./run.sh start` 不再复制样例库，仅就绪 `data/` 目录，应用启动自动创建**纯净空库 + 单一管理员**（`admin`/`admin123`，与 Docker 版行为一致）；根目录样例库仅作开发/演示参考，不再参与运行；已有运行库的存量部署零影响（幂等）。
@@ -1108,6 +1112,90 @@ V10.10.14 修复了长连接监听线程写库硬编码路径问题后，用户�
 
 #### 涉及文件
 - `bin/config.sh` / `bin/db_setup.sh` / `bin/db_select.sh` / `bin/help.sh`（两版）；`bin/service.sh`（仅 Docker 版）；`bin/python_env.sh`（仅传统版）；`routes_ext.py`（共享文件，两版 MD5 一致）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
+
+### V10.10.23：--reconfig 参数替代 DB_RESET=1 环境变量（2026-09-30，传统版 + Docker 版同步）
+
+#### 变更内容
+- `run.sh` 新增后缀参数解析：`$1` 子命令 + `$2` 可选 `--reconfig`/`--reconfig-db`，识别后内部设 `DB_RESET=1` 供 `select_db_mode()` 使用
+- 用法：`./run.sh restart --reconfig`（重选数据库模式后重启）、`./run.sh start --reconfig-db`（完整别名）
+- `DB_RESET=1` 环境变量保留兼容（cron/CI 场景），两层入口互不冲突
+- 帮助文本（help.sh）用法首行、status/错误提示消息（service.sh）全部同步更新
+
+#### 验证结论
+- 两版 23 个脚本 bash -n 通过；帮助文本渲染实测含全部 `--reconfig` 示例行
+
+#### 涉及文件
+- `run.sh`、`bin/help.sh`、`bin/service.sh`（两版）；`bin/db_select.sh`（两版共享，注释更新）
+
+### V10.10.24：Docker 版与传统版数据隔离——PG 默认值差异化（2026-09-30，仅 Docker 版）
+
+#### 变更内容
+- Docker 版 PG 默认值差异化（传统版保持不变）：
+
+| 配置项 | Docker 版 | 传统版 |
+|--------|-----------|--------|
+| PG_USER_DEFAULT | `gift_docker_user` | `gift_user` |
+| PG_PASSWORD_DEFAULT | `gift_docker_pass` | `gift_pass` |
+| PG_DB_DEFAULT | `gift_docker_db` | `gift_bookkeeping` |
+
+- Docker 版同步更新 6 个文件；同服务器双版本部署 PG 默认值不再冲突
+
+#### 验证结论
+- 确认全部容器重启策略均为 `unless-stopped`（web/pg/注释段 nginx 三处），无 `always`
+
+### V10.10.25：共享 PG 容器状态误判 + 独立 PG 卷布局崩溃静默 + ALTER USER peer 认证 + 未知参数校验（2026-09-30，传统版 + Docker 版同步）
+
+#### 问题背景
+1. 选择共享 PG 报 PG18+ 数据目录错误（"in 18+ ... PostgreSQL data in /var/lib/postgresql/data"）
+2. `sh run.sh restart --reconfiga` 拼错参数也能正常重启
+3. 共享/独立 PG 来回切换后报鉴权错误：ALTER USER 密码同步失败（无法连接容器 gift_app-pg）、CREATE USER 失败（mengya_local-pg）
+
+#### 根因
+1. `detect_pg_data_dir()` 按镜像名通配符猜路径，非标准命名镜像猜错 → PG18+ 容器挂载路径与卷数据布局不匹配 → 容器启动即崩溃；且容器崩溃后脚本静默等 pg_isready 超时 30 秒，报出一堆误导性 ALTER USER/连接错误
+2. 共享 PG 用 `docker ps` 校验，会把崩溃循环（Restarting）的容器误判为"在运行" → docker exec 必然失败
+3. `psql -U <用户>` 在 Docker PG 内默认走 scram-sha-256 密码认证（非 trust），传入任意超级用户名都可能因密码不匹配连不上；且固定用 `PG_SUPERUSER=postgres`，容器 POSTGRES_USER 为其他名称时 CREATE USER 失败
+4. `case "$2"` 只匹配已知参数，不匹配时静默忽略
+
+#### 修复
+- **`detect_pg_data_dir` 查镜像真实 PGDATA**：`docker image inspect` 读 Config.Env 的 PGDATA（官方 postgres 及衍生镜像均内置），18+ 风格（版本化子目录）挂载父目录、旧版（/data）挂载自身、非标准路径直接挂载 PGDATA；名字模式仅兜底，未知镜像默认旧版路径
+- **独立 PG 容器启动后健康校验**：docker run 后 3 秒检查 State.Status，非 running 直接展示 docker logs 最后 15 行 + 卷/镜像不匹配的两条解决方案（PG_IMAGE 匹配旧数据版本 / 删卷重建），降级 SQLite
+- **共享 PG 真实运行状态检查**：`docker inspect State.Status` 严格判定，非 running 展示容器日志与修复指引
+- **`pg_sync_password` peer 认证优先**：`docker exec -u postgres`（OS 级免密绕过 pg_hba.conf）→ socket + 超级用户 → 容器 env 检测 POSTGRES_USER，三路兜底
+- **`detect_pg_superuser`**：从容器 env 检测真实超级用户名；共享 PG 全部 psql 操作统一 `-u postgres` + 检测的超级用户名
+- **未知参数校验**：`$2` 不在 `--reconfig|--reconfig-db` 时报错 + exit 1
+
+#### 验证结论
+- 未知参数两版实测均报错退出（EXIT_CODE=1）
+
+#### 涉及文件
+- `run.sh`（两版）；`bin/db_setup.sh`（两版各自独立，pg_sync_password/detect_pg_superuser/detect_pg_data_dir/健康校验/状态检查）
+
+### V10.10.26：独立 PG 重启策略补齐 + 跨版本共享 PG 检测排除（2026-09-30，传统版 + Docker 版同步）
+
+#### 变更内容
+- **传统版独立 PG 补 `--restart unless-stopped`**：此前 `docker run` 无重启策略（默认 no），服务器重启/Docker 守护进程重启后容器不自动恢复；现与 Docker 版 compose 策略一致
+- **共享 PG 自动检测排除对侧单租户容器**：`detect_pg_environment`（共享文件）排除 `gift_app-pg`（传统版）与 `gift_bookkeeping_pg`（Docker 版），防止同服务器双版本部署时交互菜单误推荐对侧独立 PG 容器为共享 PG——对侧 reconfig 时 `docker rm -f` 会摧毁本版正在共享的实例；显式 `DB_PG_CONTAINER` 跨版本共享仍完全支持
+- **双版本 9 组合数据隔离矩阵确认**（3×3 全组合）：账号/库名/容器名/卷/宿主机端口/Nginx 配置文件/SECRET_KEY 全维度隔离
+
+| # | 传统版 | Docker 版 | 隔离机制 |
+|---|--------|-----------|---------|
+| 1 | SQLite | SQLite | 宿主机 data/ vs gift_data 命名卷 |
+| 2 | SQLite | 共享 PG | 不同实例空间 |
+| 3 | SQLite | 独立 PG | 不同实例空间 |
+| 4 | 共享 PG | SQLite | 同 #2 |
+| 5 | 共享 PG（容器X） | 共享 PG（同一X） | 同实例内不同账号（gift_user vs gift_docker_user）+ 不同库 |
+| 6 | 共享 PG | 独立 PG | 不同实例 |
+| 7 | 独立 PG | SQLite | 同 #3 |
+| 8 | 独立 PG | 共享 PG（共享对侧容器） | 账号/库不同无数据冲突；检测排除防误选 |
+| 9 | 独立 PG | 独立 PG | 容器名（gift_app-pg vs gift_bookkeeping_pg）/卷/端口全隔离 |
+
+#### 验证结论
+- 检测排除逻辑六场景模拟：仅传统独立 PG/仅 Docker 独立 PG/双版本并存 → 检测为空（不误推荐）；外部共享 PG + 两版独立 PG → 正确推荐外部容器；近似名（gift-app-pg2）不误伤
+- 共享文件 10/10 MD5 一致；重启策略全景确认（compose web/pg + 传统 docker run 均 unless-stopped）
+
+#### 涉及文件
+- `bin/db_setup.sh`（传统版，docker run 加 --restart）；`bin/db_select.sh`（两版共享，detect_pg_environment 排除逻辑）
 - `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
 
 ```text
