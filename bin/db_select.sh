@@ -8,7 +8,7 @@ DB_OVERRIDE="$APP_DIR/.temp/docker-compose.db-override.yml"
 
 # V10.10.20: 捕获模块加载时用户显式指定的 DB_MODE。
 # 背景：restart 场景下 stop_service 会 load_db_env 把旧配置中的 DB_MODE 注入当前 shell，
-# 若直接判断 $DB_MODE 会被误判为“环境变量直通”，导致 DB_RESET=1 重选时跳过交互菜单。
+# 若直接判断 $DB_MODE 会被误判为“环境变量直通”，导致 --reconfig 重选时跳过交互菜单。
 # 因此第 ① 分支只认此处捕获的用户显式指定值。
 _DB_MODE_AT_LOAD="${DB_MODE:-}"
 
@@ -59,7 +59,8 @@ load_db_env() {
 
 # 交互式数据库选择主逻辑（cron 安全）
 select_db_mode() {
-    if [ "$DB_RESET" = "1" ] && [ -f "$DB_ENV_FILE" ]; then
+    # V10.10.23: DB_RESET=1 由 run.sh --reconfig/--reconfig-db 参数解析设置，也兼容 DB_RESET=1 环境变量（cron/CI）
+    if [ "${DB_RESET:-}" = "1" ] && [ -f "$DB_ENV_FILE" ]; then
         rm -f "$DB_ENV_FILE"
         [ -n "$DB_OVERRIDE" ] && rm -f "$DB_OVERRIDE"
         echo_e "${YELLOW}已清除旧数据库配置，将重新选择${NC}"
@@ -67,7 +68,7 @@ select_db_mode() {
 
     # ① DB_MODE 环境变量直通（cron/CI 首选方式）
     # 仅认模块加载时用户显式指定的值（_DB_MODE_AT_LOAD），不认 stop_service 等处
-    # load_db_env 注入的旧值，确保 DB_RESET=1 restart 时交互菜单正常弹出
+    # load_db_env 注入的旧值，确保 --reconfig restart 时交互菜单正常弹出
     if [ -n "$_DB_MODE_AT_LOAD" ]; then
         DB_MODE="$_DB_MODE_AT_LOAD"
         case "$DB_MODE" in
