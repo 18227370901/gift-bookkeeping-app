@@ -28,11 +28,19 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # V10.10.23: --reconfig / --reconfig-db 后缀参数解析（替代 DB_RESET=1 环境变量，更直观）
 # 用法: ./run.sh restart --reconfig  或  ./run.sh start --reconfig-db
 # $1=子命令，$2 可选 --reconfig/--reconfig-db；DB_RESET=1 环境变量仍保留兼容（cron/CI 场景）
-case "$2" in
-    --reconfig|--reconfig-db)
-        DB_RESET=1
-        ;;
-esac
+if [ -n "$2" ]; then
+    case "$2" in
+        --reconfig|--reconfig-db)
+            DB_RESET=1
+            ;;
+        *)
+            echo "错误: 未知参数 '$2'"
+            echo "可用参数: --reconfig, --reconfig-db"
+            echo "用法: ./$(basename "$0") {start|restart} --reconfig"
+            exit 1
+            ;;
+    esac
+fi
 
 case "$1" in
     start) start_service ;;
