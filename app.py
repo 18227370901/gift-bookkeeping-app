@@ -921,8 +921,13 @@ def init_database():
             from webhook_utils import EVENT_COLUMNS as _migrate_events
             all_event_types = list(_migrate_events.keys())
             hooks_to_migrate = WebhookConfig.query.all()
+            # V10.10.20: changed 必须在循环外初始化——原实现存在两个缺陷：
+            # 1) WebhookConfig 表为空（全新部署/纯净空库）时循环不执行，循环外 if changed 直接抛
+            #    UnboundLocalError（日志表现为"[V10.9 Migration] 监控范围迁移跳过: cannot access
+            #    local variable 'changed'..."），且导致 db.session.commit() 被跳过；
+            # 2) changed 每轮循环重置，循环外判断只反映最后一轮，前几轮的修改会丢失提交。
+            changed = False
             for wh in hooks_to_migrate:
-                changed = False
                 # monitor_user_ids 空列表 → 填全部用户
                 raw_uids = getattr(wh, 'monitor_user_ids', None) or '[]'
                 try:
