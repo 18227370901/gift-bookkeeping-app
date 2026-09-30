@@ -6,6 +6,8 @@ bin/
 !bin/
 bin/*~
 bin/*.pyc
+# V10.10.21: 服务器专属持久配置（账密/SNI 等，加载于 bin/config.sh 开头，不入库避免泄露与 git pull 冲突）
+bin/config.local.sh
 .buildozer/
 venv/
 .venv/

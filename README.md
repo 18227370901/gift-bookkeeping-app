@@ -12,6 +12,7 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🧩 **V10.10.21 run.sh 深度模块化拆分 + 配置单点化（两版同步）**：run.sh 瘦身为「模块加载 + 命令分发」编排层（传统版 399→31 行，Docker 版 263→34 行）；新增 `bin/config.sh`（全部可自定义变量单点定义：账密/端口/SNI/PG 默认值）、`bin/service.sh`（启停操作与访问信息展示）、`bin/help.sh`（帮助文本）、`bin/python_env.sh`（Python 预检 + pip 镜像源兑底 + venv 依赖安装，自 start_service 抽取）；`db_setup.sh` 中 PG 默认值改为引用 config 变量；帮助文本与全部行为经「零 diff」验证逐字不变。**服务器专属持久配置新机制**：每台服务器的差异化配置（账密/SNI 域名/端口等）写入 `bin/config.local.sh`（已被 .gitignore 忽略，git pull 永不冲突），三层优先级：命令行环境变量 > `config.local.sh` > 内置默认值；曾直接改 run.sh 配置区的服务器，升级后请将定制值迁移至该文件（详见「Linux 服务器代码更新与冲突处理指南」）。
 > - 🗄️ **V10.10.20 初次部署纯净化（对齐 Docker 版）**：传统版首次 `./run.sh start` 不再复制样例库，仅就绪 `data/` 目录，应用启动自动创建**纯净空库 + 单一管理员**（`admin`/`admin123`，与 Docker 版行为一致）；根目录样例库仅作开发/演示参考，不再参与运行；已有运行库的存量部署零影响（幂等）。
 > - 🐘 **V10.10.20 独立 PG 镜像策略 + PG 驱动修复（两版同步）**：`PG_IMAGE` 环境变量自定义镜像 → 优先复用服务器本地已有 PG 镜像 → 无则**自动下载默认 `postgres:16-alpine`**（失败降级 SQLite）；独立 PG 数据卷挂载路径按镜像智能匹配（PG18+ → `/var/lib/postgresql`，15/16/alpine → `/var/lib/postgresql/data`，防数据不落盘）；requirements 新增 `psycopg[binary]` 修复 PostgreSQL 模式 SQLAlchemy 缺 psycopg3 驱动崩溃（psycopg2-binary 保留给 webhook_utils）。
 > - 🔧 **V10.10.20 DB_RESET 重选菜单修复 + PG_IMAGE 示例细化（两版同步）**：修复 `DB_RESET=1 ./run.sh restart` 时交互菜单被跳过的问题——restart 场景下 `stop_service` 的 `load_db_env` 会把旧配置中的 `DB_MODE` 注入当前 shell，被误判为"环境变量直通"而静默沿用旧模式；现改为以模块加载时捕获的用户显式指定值为准（`_DB_MODE_AT_LOAD`），DB_RESET=1 重选时交互菜单正常弹出，用户显式 `DB_MODE` 直通与日常 restart 读配置行为均不变；帮助文本与交互菜单细化 `PG_IMAGE` 使用示例（优先级链 + 4 组场景示例 + 适用范围说明）。
@@ -965,6 +966,7 @@ V10.10.14 修复了长连接监听线程写库硬编码路径问题后，用户�
 - `bin/common.sh` + `bin/db_select.sh`：两版共享，MD5 一致
 - `bin/cleanup.sh` / `bin/ssl_certs.sh` / `bin/nginx_config.sh` / `bin/port_conflict.sh` / `bin/db_setup.sh`：各版独立
 - 修正 `select_db_mode` 误置于 `clean` 分支的遗留问题（移至 `start_service` 内）
+- 📌 V10.10.21 深化拆分：配置区 → `bin/config.sh`、启停函数 → `bin/service.sh`、帮助文本 → `bin/help.sh`、Python 环境保障 → `bin/python_env.sh`，run.sh 仅剩「模块加载 + 命令分发」约 31~34 行，详见顶部 V10.10.21 公告
 
 #### 涉及文件
 - `run.sh`（重写）+ `bin/` 目录下 7 个 `.sh` 文件
@@ -1062,7 +1064,7 @@ gift_bookkeeping_app/
 ├── requirements.txt            # 项目 Python 依赖库列表
 ├── gift_bookkeeping.db         # SQLite 数据库文件 (支持 WAL 模式与并发读写)
 ├── run.sh                      # Linux 后台服务管理与虚拟环境自动创建/启动脚本 (SNI 多项目 443 端口分流)
-├── bin/                        # [V10.10.17b] run.sh 模块化拆分函数目录 (common.sh/db_select.sh 两版共享)
+├── bin/                        # [V10.10.17b+V10.10.21] run.sh 模块目录：config/service/help/python_env 等（common.sh/db_select.sh 两版共享；config.local.sh 服务器专属配置不入库）
 ├── nginx_ssl.conf              # Nginx HTTPS SNI 反向代理占位符模板 (由 run.sh 自动渲染为项目专属配置)
 ├── generate_ssl_certs.py       # 自签名 SSL 证书快速生成脚本 (支持 --domain 写入 SNI 域名)
 ├── AI_ASSISTANT_DESIGN.md      # [新增] AI 助手与综合增强功能技术设计文档
@@ -1132,6 +1134,7 @@ chmod +x run.sh
 
 > 💡 **端口与账号自定义**：
 > 环境变量可在执行命令时临时指定，也可写入 shell 配置后长期生效：`PORT`（后端端口，默认 11443）、`NGINX_PORT`（Nginx 对外监听端口，默认 443）、`ADMIN_USER` 与 `ADMIN_PASS`。执行 `start` 或 `restart` 时，系统会自动渲染 Nginx 配置并热重载生效。
+> V10.10.21 起全部默认值集中定义于 `bin/config.sh`；每台服务器的持久差异化配置（账密/SNI 域名/端口/PG 默认值等）推荐写入 `bin/config.local.sh`（已被 .gitignore 忽略，git pull 永不冲突），三层优先级：命令行环境变量 > `config.local.sh` > 内置默认值。
 >
 > 💡 **多项目共用 443 端口 SNI 分流**（V10.10）：
 > 同一台服务器多个项目可共用 443 端口，依靠域名区分流量，各项目启动时指定专属变量即可：
@@ -1182,6 +1185,22 @@ git pull origin main
 ```
 
 ### ⚠️ 当本地配置文件有改动时的推荐方案
+
+**V10.10.21 推荐做法（一劳永逸）**：把服务器专属配置（账密/SNI 域名/端口等）迁移到 `bin/config.local.sh`（已被 .gitignore 忽略，git pull 永不冲突），之后每次更新只需 `git pull && ./run.sh restart`：
+```bash
+# 一次性迁移（示例：自定义管理员账密与 SNI 域名；沿用 ${变量:-值} 写法可使命令行环境变量临时覆盖）
+cat > bin/config.local.sh <<'EOF'
+ADMIN_USER="${ADMIN_USER:-myadmin}"
+ADMIN_PASS="${ADMIN_PASS:-MyStrongPass2026}"
+SNI_DOMAIN="${SNI_DOMAIN:-gift.example.com}"
+EOF
+
+# 日常更新（不再需要 stash）
+git pull origin main
+./run.sh restart
+```
+
+**历史遗留方案（曾直接修改 run.sh 配置区的存量服务器首次升级时使用）**：原 run.sh 顶部配置区在 V10.10.21 已拆分至 `bin/config.sh`，请先把原定制值按上例迁移到 `bin/config.local.sh`，再执行标准更新流程；迁移前可临时使用 git stash：
 ```bash
 # 1. 暂存本地修改
 git stash push -m "暂存本地配置"
