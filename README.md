@@ -12,11 +12,12 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🔧 **V10.10.22 PG 密码认证修复 + pyzipper 缺失修复 + 密码固定默认值（两版同步）**：① **PG 密码不再每次随机生成**——此前 `resolve_pg_conn_params()` 在 PG_PASSWORD 未指定时每次 `cat /dev/urandom` 生成新随机密码，导致重启/重选时密码变化、已有 PG 实例密码不匹配认证失败；现改为固定默认值 `gift_pass`（`bin/config.sh` 新增 `PG_PASSWORD_DEFAULT`，与 `ADMIN_PASS` 同模式，可在 `config.local.sh` 中覆盖）；② **ALTER USER 不再静默吞错**——新增 `pg_sync_password()` 函数（超级用户 socket → OS 级 peer 认证两路兜底），ALTER USER 失败时报错终止而非静默继续；③ **独立 PG 容器就绪后强制 ALTER USER 同步密码**——Docker 卷已存在时 `POSTGRES_PASSWORD` 环境变量被 PG 忽略（仅首次初始化读取），需 ALTER USER 兜底；④ **密码自动同步**——`db_select.sh` 新增 `_PG_PASSWORD_AT_LOAD` 捕获用户显式指定的 PG_PASSWORD，已有 .db.env 配置的重启场景检测到新密码时自动重执行 setup 同步至数据库；⑤ **pyzipper 依赖检查**——`python_env.sh` 核心依赖检查新增 pyzipper（此前仅查 flask 四件套，老部署已装时 pip install 整体跳过，pyzipper 永远不安装）；⑥ **pyzipper 检测改为实时函数**——`routes_ext.py` 中 `HAS_PYZIPPER` 模块级变量（import 时快照为 None 永不更新）改为 `_ensure_pyzipper()` 实时检测函数，修复 pyzipper 实际已安装也误报"未安装"；⑦ **Docker 版独立 PG 密码同步容器名修正**——`bin/service.sh` 此前误用 `${PROJECT_NAME}-pg`（与 `docker-compose.db.yml` 硬编码的 `gift_bookkeeping_pg` 不一致），`docker exec` 找不到容器导致独立 PG 密码同步从未生效；现修正容器名 + `pg_isready` 就绪轮询（最长 30 秒）替代固定 sleep + 同步成功后 restart web（旧密码启动的 web 容器需重启方能以新密码连接）。
 > - 🧩 **V10.10.21 run.sh 深度模块化拆分 + 配置单点化（两版同步）**：run.sh 瘦身为「模块加载 + 命令分发」编排层（传统版 399→31 行，Docker 版 263→34 行）；新增 `bin/config.sh`（全部可自定义变量单点定义：账密/端口/SNI/PG 默认值）、`bin/service.sh`（启停操作与访问信息展示）、`bin/help.sh`（帮助文本）、`bin/python_env.sh`（Python 预检 + pip 镜像源兑底 + venv 依赖安装，自 start_service 抽取）；`db_setup.sh` 中 PG 默认值改为引用 config 变量；帮助文本与全部行为经「零 diff」验证逐字不变。**服务器专属持久配置新机制**：每台服务器的差异化配置（账密/SNI 域名/端口等）写入 `bin/config.local.sh`（已被 .gitignore 忽略，git pull 永不冲突），三层优先级：命令行环境变量 > `config.local.sh` > 内置默认值；曾直接改 run.sh 配置区的服务器，升级后请将定制值迁移至该文件（详见「Linux 服务器代码更新与冲突处理指南」）。
 > - 🗄️ **V10.10.20 初次部署纯净化（对齐 Docker 版）**：传统版首次 `./run.sh start` 不再复制样例库，仅就绪 `data/` 目录，应用启动自动创建**纯净空库 + 单一管理员**（`admin`/`admin123`，与 Docker 版行为一致）；根目录样例库仅作开发/演示参考，不再参与运行；已有运行库的存量部署零影响（幂等）。
 > - 🐘 **V10.10.20 独立 PG 镜像策略 + PG 驱动修复（两版同步）**：`PG_IMAGE` 环境变量自定义镜像 → 优先复用服务器本地已有 PG 镜像 → 无则**自动下载默认 `postgres:16-alpine`**（失败降级 SQLite）；独立 PG 数据卷挂载路径按镜像智能匹配（PG18+ → `/var/lib/postgresql`，15/16/alpine → `/var/lib/postgresql/data`，防数据不落盘）；requirements 新增 `psycopg[binary]` 修复 PostgreSQL 模式 SQLAlchemy 缺 psycopg3 驱动崩溃（psycopg2-binary 保留给 webhook_utils）。
 > - 🔧 **V10.10.20 DB_RESET 重选菜单修复 + PG_IMAGE 示例细化（两版同步）**：修复 `DB_RESET=1 ./run.sh restart` 时交互菜单被跳过的问题——restart 场景下 `stop_service` 的 `load_db_env` 会把旧配置中的 `DB_MODE` 注入当前 shell，被误判为"环境变量直通"而静默沿用旧模式；现改为以模块加载时捕获的用户显式指定值为准（`_DB_MODE_AT_LOAD`），DB_RESET=1 重选时交互菜单正常弹出，用户显式 `DB_MODE` 直通与日常 restart 读配置行为均不变；帮助文本与交互菜单细化 `PG_IMAGE` 使用示例（优先级链 + 4 组场景示例 + 适用范围说明）。
-> - 🗄️ **V10.10.20 PG 连接参数全面自定义（两版同步）**：`PG_USER` / `PG_PASSWORD` / `PG_DB` / `PG_PORT` 环境变量可自定义数据库账号、密码、库名与端口，未指定时使用默认值（`gift_user` / 随机生成 16 位 / `gift_bookkeeping` / 5432）；共享与独立 PG 模式的建号、建库、授权与 `DATABASE_URL` 拼接全部参数化（幂等建号：已存在时 `ALTER` 同步密码）；密码含单引号/空格直接拒绝、含 URL 特殊字符警告；`PG_PORT` 语义——共享模式为宿主机连接端口（优先于容器映射自动检测）、独立模式为宿主机映射端口（默认从 15432 起自动扫描）。
+> - 🗄️ **V10.10.20 PG 连接参数全面自定义（两版同步）**：`PG_USER` / `PG_PASSWORD` / `PG_DB` / `PG_PORT` 环境变量可自定义数据库账号、密码、库名与端口，未指定时使用默认值（`gift_user` / `gift_pass` 固定值（V10.10.22 起，此前为随机生成） / `gift_bookkeeping` / 5432）；共享与独立 PG 模式的建号、建库、授权与 `DATABASE_URL` 拼接全部参数化（幂等建号：已存在时 `ALTER` 同步密码）；密码含单引号/空格直接拒绝、含 URL 特殊字符警告；`PG_PORT` 语义——共享模式为宿主机连接端口（优先于容器映射自动检测）、独立模式为宿主机映射端口（默认从 15432 起自动扫描）。
 > - 🖥️ **V10.10.19 run.sh status 访问信息展示**：status 命令与启动成功提示一致输出访问地址（多域名列表）、后端本地直连、日志文件与当前数据库模式（含 DB_RESET=1 重选提示）；Docker 版 status 补带 PG override 文件；两版帮助文本新增 DB_MODE/DB_PG_CONTAINER/DB_RESET 数据库配置说明（V10.10.19b：帮助与提示中的示例命令统一规范显示为 ./run.sh）。
 > - 🌐 **V10.10.18 前端资源本地化 + 部署链路加固**：新增 `static/vendor/`（Bootstrap 5.3.0 / Font Awesome 6.4.0 / Bootstrap Icons 1.11.3，14 个文件与原 CDN 版本完全一致），base.html 4 处 + shared_ledger.html 2 处国外 CDN 引用改为本地 `url_for` 加载，国内服务器不再依赖 jsdelivr/cdnjs；`./run.sh start` 首次部署自动就绪 `data/` 运行库目录（V10.10.20 起不再复制样例库，初次部署为纯净空库 + 单一管理员）+ python3 环境预检 + pip 镜像源兑底（清华→阿里云→官方）。
 > - 📦 **V10.10.17b run.sh 模块化拆分**：将 run.sh 函数拆分到 `bin/` 目录下 7 个 `.sh` 文件，run.sh 仅保留配置区 + 启停操作（792→257 行）；修正 `select_db_mode` 遗留位置问题。
@@ -1048,6 +1049,65 @@ V10.10.14 修复了长连接监听线程写库硬编码路径问题后，用户�
 
 #### 涉及文件
 - `run.sh`（两版同步改造）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
+
+### V10.10.20：PostgreSQL 部署链路全面强化（2026-09-30，传统版 + Docker 版同步，多主题系列提交）
+
+#### 变更内容
+- **psycopg3 驱动修复**：requirements.txt 新增 `psycopg[binary]>=3.1`——SQLAlchemy 2.0 对 `postgresql://` 默认使用 psycopg3 驱动，修复 PG 模式下 gunicorn worker 启动报 `No module named 'psycopg'` 崩溃（psycopg2-binary 保留，webhook_utils 原生连接继续使用）
+- **独立 PG 镜像策略**：优先级链 `PG_IMAGE`（用户自定义）→ 服务器本地已有 PG 镜像 → 自动下载默认 `postgres:16-alpine`（不再询问，下载失败降级 SQLite）；挂载路径按镜像智能匹配（PostgreSQL 18+/pgvector:pg18 → `/var/lib/postgresql`，15/16/alpine → `/var/lib/postgresql/data`，防数据不落卷）；镜像与挂载路径持久化至 `.temp/.db.env`（restart 不漂移）
+- **PG 连接参数全面自定义**：`PG_USER`/`PG_PASSWORD`/`PG_DB`/`PG_PORT` 环境变量自定义账号/密码/库名/端口（默认 gift_user / gift_pass 固定值（V10.10.22 起，此前为随机生成）/ gift_bookkeeping / 5432）；共享与独立模式的建号、建库、授权与 `DATABASE_URL` 拼接全部参数化（幂等建号：已存在用户时 `ALTER` 同步密码保留数据）；密码含单引号/空格直接拒绝、URL 特殊字符警告；传统版 `PG_PORT` 共享模式为宿主机连接端口（优先于容器映射自动检测）、独立模式为宿主机映射端口（默认从 15432 起自动扫描）
+- **DB_RESET 重选菜单修复**：修复 `DB_RESET=1 ./run.sh restart` 时交互菜单被跳过——restart 场景下 stop_service 的 `load_db_env` 会把旧 `DB_MODE` 注入当前 shell 被误判为"环境变量直通"；现以模块加载时捕获的用户显式指定值为准（`_DB_MODE_AT_LOAD`）
+- **初次部署纯净化**：首次 `./run.sh start` 不再复制样例库，仅就绪 `data/` 目录，由应用自动创建纯净空库 + 单一管理员（admin/admin123，与 Docker 版行为一致）；存量部署幂等零影响
+- **共享 PG 幂等建号**：已有 gift_user 时 `ALTER USER` 同步密码（保留数据），避免 `CREATE USER` 已存在导致连接失败
+- **迁移与引擎健壮性**：修复 V10.9 迁移 touched/changed 变量未初始化导致纯净空库 `UnboundLocalError`；PG 引擎连接超时保护 + 启动阶段日志标记（数据库连接/迁移完成/gunicorn 启动可见）
+
+#### 涉及文件
+- `requirements.txt` / `app.py` / `bin/db_select.sh` / `bin/db_setup.sh`（V10.10.21 拆分前为 run.sh）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（本变更记录同步）
+
+### V10.10.21：run.sh 深度模块化拆分 + 配置单点化（2026-09-30，传统版 + Docker 版同步）
+
+#### 变更内容
+- run.sh 瘦身为「模块加载 + 命令分发」编排层：传统版 399→31 行，Docker 版 263→34 行
+- 新增 `bin/config.sh`（全部可自定义变量单点定义：账密/端口/SNI/PG 默认值）、`bin/service.sh`（启停操作与访问信息展示）、`bin/help.sh`（帮助文本）；传统版另增 `bin/python_env.sh`（Python 预检 + pip 镜像源兑底 + venv 依赖安装，自 start_service 抽取）
+- `bin/db_setup.sh` 中 PG 默认值改为引用 config 变量
+- **服务器专属持久配置机制**：每台服务器的差异化配置（账密/SNI 域名/端口等）写入 `bin/config.local.sh`（.gitignore 忽略，git pull 永不冲突）；三层优先级：命令行环境变量 > `config.local.sh` > 内置默认值；曾直接改 run.sh 配置区的服务器，升级后请将定制值迁移至该文件
+
+#### 验证结论
+- 两版 23 个脚本 bash -n 通过；两版 help 输出零 diff；共享文件（common.sh/db_select.sh）两版 MD5 一致；config.local.sh 覆盖机制验证（local 生效、命令行环境变量优先）
+
+#### 涉及文件
+- `run.sh`（两版重写）+ `bin/config.sh` / `bin/service.sh` / `bin/help.sh`；`bin/python_env.sh`（仅传统版）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（本变更记录同步）
+
+### V10.10.22：PG 密码认证与 pyzipper 综合修复（2026-09-30，传统版 + Docker 版同步，两轮提交）
+
+#### 问题背景
+1. WebDAV 备份页面提示「未安装 pyzipper 库，加密功能不可用」——SQLite / 共享 PG / 独立 PG 模式均出现
+2. 独立 PG / 共享 PG 模式页面报错 Internal Server Error，日志为 psycopg `password authentication failed for user "gift_user"`，webhook 监听线程同样异常
+3. 用户诉求：已存在数据库实例与用户时，重启应自动更新密码为用户设置的最新密码；且不希望每次随机生成密码
+
+#### 根因
+1. `routes_ext.py` import 时捕获 `HAS_PYZIPPER` 模块级变量快照（初值 `None` 永不更新）→ 页面 `has_pyzipper` 恒为 falsy，pyzipper 实际已安装也误报「未安装」
+2. `resolve_pg_conn_params()` 每次随机生成 16 位密码——重启/重选时密码变化，已有 PG 实例密码不匹配；共享 PG 的 `ALTER USER` 曾静默吞错；独立 PG Docker 卷已存在时 `POSTGRES_PASSWORD` 环境变量被 PG 忽略（仅首次初始化读取）；restart 直接读 `.db.env` 旧 `DATABASE_URL` 不同步新密码
+3. Docker 版独立 PG 密码同步容器名错误：`bin/service.sh` 用 `${PROJECT_NAME}-pg`，实际 `docker-compose.db.yml` 硬编码 `gift_bookkeeping_pg` → `docker exec` 找不到容器，密码同步从未生效
+4. `python_env.sh` 核心依赖检查仅查 flask 四件套——老部署已装时 `pip install -r requirements.txt` 整体跳过，后加入的 pyzipper/cryptography/psycopg 永远不被安装
+
+#### 修复
+- **PG 密码固定默认值**：`bin/config.sh` 新增 `PG_PASSWORD_DEFAULT`（默认 `gift_pass`，可在 config.local.sh 或环境变量覆盖），`resolve_pg_conn_params()` 不再随机生成；密码校验规则不变
+- **可靠 ALTER USER**：新增 `pg_sync_password()`（超级用户 socket → OS 级 peer 认证两路兑底），失败报错终止不再静默吞错
+- **独立 PG 就绪后强制同步**：容器就绪后 `ALTER USER` 兕底；Docker 版容器名修正 `gift_bookkeeping_pg` + `pg_isready` 就绪轮询（最长 30 秒）替代固定 sleep + 同步成功后 restart web；传统版独立 PG 同机制（容器名由 docker run --name 指定，名实一致）
+- **密码自动同步**：`bin/db_select.sh` 新增 `_PG_PASSWORD_AT_LOAD` 捕获用户显式指定的 `PG_PASSWORD`，已有 `.db.env` 配置的重启场景检测到新密码时自动重执行 setup 同步至数据库
+- **pyzipper 双修**：`python_env.sh` 核心依赖检查新增 pyzipper（老部署自动补装）；`routes_ext.py` 改用 `_ensure_pyzipper()` 实时检测函数（首次访问触发导入后缓存），删除 import 快照
+
+#### 验证结论
+- 沙盒验证 23 项全部通过：`resolve_pg_conn_params` 四场景两版（默认固定值/环境变量优先/单引号拒绝/URL 特殊字符警告放行）、两版函数体逐字一致、service.sh 与 docker-compose.db.yml 容器名闭环、`pg_isready` 轮询与 restart web 就位、`routes_ext.py` 两版 MD5 一致、help.sh 密码说明与 `PG_PASSWORD_DEFAULT` 存在性
+- pyzipper 行为实测：模块加载快照 `None`（修复前误报）→ `_ensure_pyzipper()` 返回 `True`（本机 pyzipper 实装，修复后正确）；渲染条件 `not has_pyzipper` 两条路径逐一验证
+- bash -n 两版全部脚本 + py_compile 两版 `routes_ext.py` 通过
+
+#### 涉及文件
+- `bin/config.sh` / `bin/db_setup.sh` / `bin/db_select.sh` / `bin/help.sh`（两版）；`bin/service.sh`（仅 Docker 版）；`bin/python_env.sh`（仅传统版）；`routes_ext.py`（共享文件，两版 MD5 一致）
 - `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
 
 ```text
