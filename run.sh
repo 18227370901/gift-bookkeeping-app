@@ -4,6 +4,9 @@
 # run.sh (传统版) — 模块加载与命令分发（V10.10.21 瘦身：399 → 约 40 行）
 # 自定义配置: bin/config.sh（账密/端口/SNI/PG 默认值；支持 bin/config.local.sh 服务器专属覆盖，不入库）
 # Python 环境: bin/python_env.sh | 启停操作: bin/service.sh | 帮助文本: bin/help.sh
+# 用法: ./run.sh {start|stop|status|restart|clean}
+#       ./run.sh {start|restart} --reconfig      重选数据库模式后执行
+#       ./run.sh {start|restart} --reconfig-db   同上（完整别名）
 # ============================================================
 
 # ===== 加载 bin/ 模块（按依赖顺序） =====
@@ -21,6 +24,15 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 . "$SCRIPT_DIR/bin/help.sh"          # ⑪ 帮助文本
 
 # ===== 主逻辑 =====
+
+# V10.10.23: --reconfig / --reconfig-db 后缀参数解析（替代 DB_RESET=1 环境变量，更直观）
+# 用法: ./run.sh restart --reconfig  或  ./run.sh start --reconfig-db
+# $1=子命令，$2 可选 --reconfig/--reconfig-db；DB_RESET=1 环境变量仍保留兼容（cron/CI 场景）
+case "$2" in
+    --reconfig|--reconfig-db)
+        DB_RESET=1
+        ;;
+esac
 
 case "$1" in
     start) start_service ;;
