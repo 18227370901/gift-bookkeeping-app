@@ -120,17 +120,22 @@ select_db_mode() {
         echo_e "   可用内存: ${AVAIL_MEM}MB"
         echo_e ""
 
-        _recommend=1
-        if [ -n "$PG_RUNNING_NAME" ] && [ "$AVAIL_MEM" -ge 400 ]; then
-            _recommend=2
-        elif [ -n "$PG_LOCAL_IMAGE" ] && [ "$AVAIL_MEM" -ge 700 ]; then
-            _recommend=3
+        # V10.10.27: 默认选项改由各版 bin/config.sh 的 DB_MENU_DEFAULT 指定（此前按内存阈值智能推荐，两版行为相同）
+        # 传统版默认 1 SQLite、Docker 版默认 2 共享 PG，实现两版首次部署体验差异化
+        # 环境兜底：默认共享 PG 但未检测到运行中的 PG 容器时回退 SQLite，避免默认选项必然失败
+        _recommend="${DB_MENU_DEFAULT:-1}"
+        case "$_recommend" in
+            1|2|3) ;;
+            *) _recommend=1 ;;
+        esac
+        if [ "$_recommend" = "2" ] && [ -z "$PG_RUNNING_NAME" ]; then
+            _recommend=1
         fi
 
         echo_e "  ┌─────────────────────────────────────────────────┐"
         echo_e "  │  请选择数据库部署方式                              │"
         echo_e "  ├─────────────────────────────────────────────────┤"
-        echo_e "  │  1) SQLite 本地文件                               │"
+        echo_e "  │  1) SQLite 本地文件$([ $_recommend -eq 1 ] && echo ' ⭐ 推荐')"
         echo_e "  │     零依赖、内存占用最低、适合单机轻量场景           │"
         if [ -n "$PG_RUNNING_NAME" ]; then
             echo_e "  │  2) 共享 PostgreSQL 实例$([ $_recommend -eq 2 ] && echo ' ⭐ 推荐')"
