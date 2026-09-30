@@ -1,5 +1,28 @@
 #!/bin/sh
 # db_setup.sh (传统版) — 数据库模式配置函数（SQLite/共享PG/独立PG，通过环境变量传递 DATABASE_URL）
+# V10.10.22: ALTER USER 密码同步改为可靠模式（不再静默吞错），独立 PG 容器就绪后强制 ALTER USER
+
+# V10.10.22: 可靠的 PG 密码同步（ALTER USER），两种连接方式兑底
+# 入参 $1: 容器名, $2: 超级用户名（可选，默认 postgres）, $3: 目标用户, $4: 新密码
+# 返回 0=成功 1=失败
+pg_sync_password() {
+    _psc="$1"
+    _pss="${2:-postgres}"
+    _psu="$3"
+    _psp="$4"
+    # 方式 1: 通过本地 socket + 超级用户（Docker 默认 trust 认证）
+    if docker exec "$_psc" psql -U "$_pss" -tAc "SELECT 1" >/dev/null 2>&1; then
+        docker exec "$_psc" psql -U "$_pss" -c "ALTER USER $_psu WITH PASSWORD '$_psp';" >/dev/null 2>&1
+        return $?
+    fi
+    # 方式 2: 通过 OS 级 peer 认证（docker exec -u postgres，无需密码）
+    if docker exec -u postgres "$_psc" psql -tAc "SELECT 1" >/dev/null 2>&1; then
+        docker exec -u postgres "$_psc" psql -c "ALTER USER $_psu WITH PASSWORD '$_psp';" >/dev/null 2>&1
+        return $?
+    fi
+    echo_e "${RED}❌ ALTER USER 密码同步失败：无法连接容器 $_psc 的 PostgreSQL（尝试了超级用户 $_pss 与 peer 认证）${NC}"
+    return 1
+}
 
 # 配置 SQLite 模式
 setup_sqlite() {
@@ -38,10 +61,18 @@ setup_shared_pg() {
     # V10.10.20: 连接参数解析（PG_USER/PG_PASSWORD/PG_DB 可自定义，未指定用默认值）
     resolve_pg_conn_params
     # 幂等创建/更新账号与库（已有部署时 ALTER 同步密码、保留数据）
+    # V10.10.22: ALTER USER 不再静默吞错——失败则报错终止，避免 DATABASE_URL 密码与 PG 实际密码不匹配
     if docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -tAc "SELECT 1 FROM pg_roles WHERE rolname='$PG_USER'" 2>/dev/null | grep -q 1; then
-        docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "ALTER USER $PG_USER WITH PASSWORD '$PG_PASSWORD';" >/dev/null 2>&1 || true
+        if ! pg_sync_password "$DB_PG_CONTAINER" "$PG_SUPERUSER" "$PG_USER" "$PG_PASSWORD"; then
+            echo_e "${RED}❌ 共享 PG 密码同步失败，请检查容器 $DB_PG_CONTAINER 的超级用户权限${NC}"
+            return 1
+        fi
     else
-        docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "CREATE USER $PG_USER WITH PASSWORD '$PG_PASSWORD';" >/dev/null 2>&1 || true
+        docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "CREATE USER $PG_USER WITH PASSWORD '$PG_PASSWORD';" >/dev/null 2>&1
+        if [ $? -ne 0 ]; then
+            echo_e "${RED}❌ CREATE USER $PG_USER 失败，请检查容器 $DB_PG_CONTAINER 的超级用户权限${NC}"
+            return 1
+        fi
     fi
     docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -tAc "SELECT 1 FROM pg_database WHERE datname='$PG_DB'" 2>/dev/null | grep -q 1 || \
         docker exec "$DB_PG_CONTAINER" psql -U "$PG_SUPERUSER" -c "CREATE DATABASE $PG_DB OWNER $PG_USER;" >/dev/null 2>&1 || true
@@ -144,5 +175,15 @@ setup_independent_pg() {
     done
     DATABASE_URL="postgresql://${PG_USER}:${PG_PASSWORD}@127.0.0.1:${PG_HOST_PORT}/${PG_DB}"
     export DATABASE_URL
-    echo_e "${GREEN}数据库模式: 独立 PostgreSQL (${PG_CONTAINER_NAME}, 端口 ${PG_HOST_PORT}, 库 ${PG_DB}/账号 ${PG_USER})${NC}"
+    echo_e "${GREEN}数据库模式: 独立 PostgreSQL (${PG_CONTAINER_NAME}, 端口 ${PG_HOST_PORT}, 库 ${PG_DB}/账号 ${PG_USER})...${NC}"
+    # V10.10.22: 容器就绪后强制 ALTER USER 同步密码——
+    # Docker 卷已存在时 POSTGRES_PASSWORD 环境变量被忽略（PG 只在首次初始化时读取），
+    # 需 ALTER USER 兑底确保密码与 DATABASE_URL 一致
+    if pg_sync_password "$PG_CONTAINER_NAME" "$PG_USER" "$PG_USER" "$PG_PASSWORD"; then
+        echo_e "${GREEN}✅ 独立 PG 密码已同步${NC}"
+    elif pg_sync_password "$PG_CONTAINER_NAME" "postgres" "$PG_USER" "$PG_PASSWORD"; then
+        echo_e "${GREEN}✅ 独立 PG 密码已同步（via postgres 超级用户）${NC}"
+    else
+        echo_e "${YELLOW}⚠️ 独立 PG 密码同步未成功，如遇连接失败请手动检查容器 $PG_CONTAINER_NAME${NC}"
+    fi
 }

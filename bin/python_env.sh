@@ -73,7 +73,9 @@ ensure_python_env() {
     fi
 
     # 检查核心依赖库是否存在，若缺失则强制安装（V10.10.18：镜像源自动兜底 清华源→阿里云→官方源）
-    if ! "$VENV_DIR/bin/python3" -c "import flask, flask_sqlalchemy, flask_wtf, flask_login" >/dev/null 2>&1; then
+    # V10.10.22: 增加 pyzipper 检查——此前仅查 flask 四件套，老部署已装时 pip install 整体跳过，
+    #            导致后加入 requirements.txt 的 pyzipper/cryptography/psycopg 等永远不被安装
+    if ! "$VENV_DIR/bin/python3" -c "import flask, flask_sqlalchemy, flask_wtf, flask_login, pyzipper" >/dev/null 2>&1; then
         echo_e "${GREEN}正在检查/补全项目依赖库...${NC}"
         pip_install_fb "install --upgrade pip" || true
         if [ -f "$APP_DIR/requirements.txt" ]; then
