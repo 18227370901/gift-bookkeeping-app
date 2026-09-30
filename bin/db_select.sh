@@ -12,6 +12,11 @@ DB_OVERRIDE="$APP_DIR/.temp/docker-compose.db-override.yml"
 # 因此第 ① 分支只认此处捕获的用户显式指定值。
 _DB_MODE_AT_LOAD="${DB_MODE:-}"
 
+# V10.10.22: 捕获模块加载时用户显式指定的 PG_PASSWORD（同 _DB_MODE_AT_LOAD 原理）。
+# 用途：restart 场景下 load_db_env 会从 .db.env 载入旧 PG_PASSWORD 覆盖当前值，
+# 第 ② 分支需用此处捕获的用户显式指定值判断“是否要同步新密码”。
+_PG_PASSWORD_AT_LOAD="${PG_PASSWORD:-}"
+
 # 检测服务器 PG 环境与可用内存
 detect_pg_environment() {
     PG_RUNNING_NAME=""
@@ -81,7 +86,22 @@ select_db_mode() {
     if [ -f "$DB_ENV_FILE" ]; then
         load_db_env
         export DATABASE_URL
-        echo_e "${GREEN}数据库模式: ${DB_MODE} (从配置文件读取)${NC}"
+        # V10.10.22: PG 密码自动同步——用户显式指定了 PG_PASSWORD 时，重新执行 setup 同步密码至数据库
+        # 场景：之前部署过 PG（.db.env 已存在），用户更新了 PG_PASSWORD，重启时自动 ALTER USER 同步最新密码
+        if [ -n "$_PG_PASSWORD_AT_LOAD" ] && [ "${DB_MODE:-}" != "sqlite" ]; then
+            PG_PASSWORD="$_PG_PASSWORD_AT_LOAD"
+            echo_e "${YELLOW}检测到 PG_PASSWORD 已更新，正在同步至数据库...${NC}"
+            case "$DB_MODE" in
+                shared) setup_shared_pg ;;
+                independent) setup_independent_pg ;;
+            esac
+            if [ $? -eq 0 ]; then
+                save_db_env
+                echo_e "${GREEN}✅ PG 密码已同步至数据库${NC}"
+            fi
+        else
+            echo_e "${GREEN}数据库模式: ${DB_MODE} (从配置文件读取)${NC}"
+        fi
         return
     fi
 
