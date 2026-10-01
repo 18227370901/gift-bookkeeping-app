@@ -80,9 +80,10 @@ select_db_mode() {
             independent) detect_pg_environment; setup_independent_pg ;;
             *) echo_e "${RED}无效的 DB_MODE: $DB_MODE${NC}"; exit 1 ;;
         esac
-        if [ -t 0 ] && [ "$DB_MODE" != "independent" ]; then
-            save_db_env
-        fi
+        # V10.10.29: 无条件持久化 .db.env（此前仅交互终端且非 independent 才保存）——
+        # independent 直通部署不保存导致 stop 无法识别模式、PG 容器无法释放（两版共有缺陷）；
+        # 非交互（cron/CI）直通部署同样保存，后续 stop 与无参 restart 均可正确复用配置
+        save_db_env
         return
     fi
 

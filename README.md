@@ -12,6 +12,7 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🔄 **V10.10.29 独立 PG 生命周期闭环：stop 无条件释放 + start 自动重建（两版同步）**：修复传统版独立 PG 部署后 `./run.sh stop` 不释放 PG 容器的问题——① **stop 无条件释放**：此前释放逻辑嵌在端口检查成功分支内（端口被占时整体跳过）且仅 `docker stop` 不删容器（Exited 残留）；现移出分支无条件执行 `docker rm -f`（对齐 Docker 版 compose down：容器删除、数据卷保留、start 时自动重建），容器名优先读 `.db.env` 持久化值，非 independent 模式按本版命名约定（`${PROJECT_NAME}-pg`）兑底清理遗留容器，共享 PG 模式提示"外部容器保留运行"；② **start 自动重建闭环**：容器非 running 时自动重建（V10.10.28 版本化数据卷自动接回原数据）、running 幂等跳过、重建失败降级 SQLite 时**中止启动**（已有 PG 数据绝不静默切库）、PROJECT_NAME 变更时先清理旧名容器防泄漏；③ **`.db.env` 持久化扩展（对齐 Docker 版做法）**：start 时写入容器名/镜像/挂载路径/连接参数（`grep -v` 剥旧字段再追加、空值不写入）；④ **`db_select.sh` 共享文件修正（两版同步）**：`DB_MODE` 环境变量直通部署改为无条件 `save_db_env`（此前 independent 直通不保存，stop 识别不了模式无法释放——Docker 版同场景下 compose down 不带 db.yml、pg 容器同样不释放）；沙盒 mock docker 26 项断言全部通过；存量老部署升级后建议执行一次 `./run.sh restart --reconfig` 重选独立 PG 补全持久化字段（一次性）。
 > - 🐘 **V10.10.28 独立 PG 版本化数据卷 + 存量卷自动迁移（两版同步）**：① **PG 版本化数据卷命名**——此前独立 PG 使用固定卷名（传统版 `${PROJECT_NAME}_pg_data` / Docker 版 `gift_pg_data`），跨 PG 版本镜像切换时同一卷内数据布局冲突导致 initdb 失败（PG16→18 报 "in 18+" / PG18→16 报 "not empty"）；现改为版本化卷名 `${...}_pg_data_${PG_MAJOR}`（如 `gift_app_pg_data_16`），各 PG 版本数据天然隔离；② **`detect_pg_major` 三级探测**——`docker image inspect` 读镜像 PG_MAJOR env → 镜像 tag 数字解析 → 未知 default；③ **存量卷自动迁移**——新版本化卷不存在而旧固定卷存在时，读取旧卷 PG_VERSION 判断兼容性：同版本 `cp -a` 迁移（保留旧卷备份）、跨版本保留旧卷用新空卷初始化（附 pg_upgrade 指引）；④ **Docker 版 `detect_pg_data_dir` 升级**——从旧版名字通配符匹配升级为 `docker image inspect` 查镜像真实 PGDATA（与 V10.10.25 传统版同步）；⑤ **Docker 版 `PG_MAJOR` 持久化**——`service.sh` 将 PG_MAJOR 写入 `.temp/.db.env`，restart 不漂移；`docker-compose.db.yml` 卷名改插值 `gift_pg_data_${PG_MAJOR:-default}`。
 > - 🎯 **V10.10.27 两版首次部署默认数据库差异化（两版同步）**：传统版首次部署交互菜单**默认 SQLite**、Docker 版**默认共享 PG**——`bin/config.sh` 新增 `DB_MENU_DEFAULT`（传统版=1、Docker 版=2，可被环境变量/config.local.sh 覆盖），`db_select.sh`（共享文件）默认选项改读该变量，替代此前按内存阈值的智能推荐（旧逻辑两版行为相同）；**环境兜底**：Docker 版默认共享 PG 但未检测到运行中的 PG 容器时自动回退 SQLite（避免默认选项必然失败），非法值/未设置同样回退 SQLite；菜单项 1（SQLite）补上与其他项一致的 ⭐ 推荐标记；五场景模拟验证通过（传统→1 / Docker 有 PG→2 / Docker 无 PG→回退 1 / 非法值→回退 1 / 未设置→回退 1）。
 > - 🔒 **V10.10.26 独立 PG 重启策略补齐 + 跨版本共享 PG 检测排除（两版同步）**：① **传统版独立 PG 补 `--restart unless-stopped`**——此前 `docker run` 无重启策略（默认 no），服务器重启/Docker 守护进程重启后独立 PG 容器不会自动恢复，现与 Docker 版 compose 策略一致；② **共享 PG 自动检测排除对侧单租户容器**——`detect_pg_environment` 排除 `gift_app-pg`（传统版）与 `gift_bookkeeping_pg`（Docker 版），防止同服务器双版本部署时交互菜单误推荐对侧独立 PG 容器为共享 PG（对侧 reconfig 时 `docker rm -f` 会摧毁本版正在共享的实例）；显式 `DB_PG_CONTAINER=<容器名>` 跨版本共享仍完全支持；③ **双版本 9 组合数据隔离矩阵确认**——账号（gift_user vs gift_docker_user）/库名（gift_bookkeeping vs gift_docker_db）/容器名/卷/宿主机端口/Nginx 配置文件/SECRET_KEY 全维度隔离，任一模式组合零冲突（六场景模拟验证通过）。
@@ -1251,6 +1252,35 @@ V10.10.14 修复了长连接监听线程写库硬编码路径问题后，用户�
 - `bin/db_setup.sh`（两版各自独立：新增 detect_pg_major / migrate 函数 / setup_independent_pg 版本化卷名 + Docker 版 detect_pg_data_dir 升级）
 - `docker-compose.db.yml`（Docker 版：卷名改插值 `gift_pg_data_${PG_MAJOR:-default}`）
 - `bin/service.sh`（Docker 版：PG_MAJOR 加入持久化参数列表）
+- `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
+
+### V10.10.29：独立 PG 生命周期闭环——stop 无条件释放 + start 自动重建（2026-10-01，传统版 + Docker 版同步）
+
+#### 背景问题
+传统版以独立 PG 方式部署后，`./run.sh stop` 不会自动释放 PG 容器。核实代码发现四处缺陷：
+- **stop 释放逻辑嵌在端口检查"成功"分支内**：`stop_service` 中 PG 停止逻辑位于端口清理检查的 else 分支内，端口清理失败（仍被其他进程占用）时直接 `return 1`，PG 容器完全不会被释放，且容器带 `--restart unless-stopped` 会一直运行
+- **只 `docker stop` 不删除容器**：容器 Exited 残留（`docker ps -a` 可见），与 Docker 版 `compose down`（容器删除、数据卷保留）行为不一致
+- **`DB_MODE=independent` 环境变量直通部署不保存 `.db.env`**（两版共有）：`db_select.sh` 第 ① 分支仅交互终端且非 independent 才 `save_db_env` → stop 时识别不了模式，释放逻辑整体跳过；Docker 版同场景 `compose down` 不带 `docker-compose.db.yml`，pg 容器同样不释放
+- **start 从不重建已释放的 PG 容器**：传统版 start 走 `.db.env` 复用分支只读旧 DATABASE_URL，无任何 `docker start`/重建逻辑（Docker 版靠 `compose up -d` 自动重建）；若只修 stop 不修 start，stop 释放后服务将无法连接 PG，越修越糟
+
+#### 变更内容
+- **stop 无条件释放（传统版 `bin/service.sh`）**：PG 释放逻辑移出端口检查分支，无论端口清理结果如何都执行；释放方式升级 `docker rm -f`（对齐 Docker 版 compose down：容器删除、数据卷保留、start 时自动重建）；失败输出警告不再打印虚假成功；容器名优先读 `.db.env` 持久化值（兜底 `${PROJECT_NAME}-pg` 拼接）；非 independent 模式（sqlite/shared/配置未持久化的存量直通部署）按本版命名约定兜底清理遗留容器；共享 PG 模式输出"外部容器保留运行不做操作"提示
+- **start 生命周期闭环（传统版 `bin/service.sh`）**：独立 PG 模式下检测容器非 running 时自动重建（V10.10.28 版本化数据卷自动接回原数据）、running 幂等跳过；重建时镜像兑底链：`.db.env` 持久化 PG_LOCAL_IMAGE > 本地镜像扫描（`detect_pg_environment`）> setup 内下载默认镜像；PROJECT_NAME 变更时先清理旧名容器防泄漏；**重建失败降级 SQLite 时中止启动**（已有 PG 数据绝不静默切库）；重建后 `save_db_env` 更新配置（端口重扫可能变化）
+- **`.db.env` 持久化扩展（传统版 `bin/service.sh`，对齐 Docker 版做法）**：start 时持久化 `PG_CONTAINER_NAME` / `PG_LOCAL_IMAGE` / `PG_DATA_DIR` / `PG_USER` / `PG_PASSWORD` / `PG_DB` / `PG_MAJOR`；`grep -v` 剥旧字段再追加（避免 `save_db_env` 整体重写时丢失）、空值不写入（存量老部署兼容）
+- **db_select.sh 共享文件修正（两版同步，MD5 逐字一致）**：第 ① 分支（DB_MODE 环境变量直通）改为无条件 `save_db_env`——修复 independent 直通部署后 stop 识别不了模式的漏洞（Docker 版同样受益：compose down 可正确带上 db.yml 删除 pg 容器）；非交互（cron/CI）直通部署同样保存，后续 stop 与无参 restart 均可正确复用配置
+
+#### 验证结论
+- 23 脚本 bash -n 语法检查全部通过
+- 共享文件 `db_select.sh` 两版 MD5 逐字一致
+- Git Bash 沙盒 mock docker 26 项断言全部通过，覆盖 12 场景：stop 正常释放 / 端口被占仍释放（旧代码会整体跳过）/ 容器不存在不误删 / shared 提示外部容器保留 + 遗留容器清理 / 无 .db.env 按命名约定兑底 / sqlite 无多余 docker 调用 / start running 幂等跳过 / 容器不存在自动重建 + 配置更新 / 有持久化镜像不走本地扫描（镜像一致性保住）/ 重建降级 SQLite 中止启动 / 老部署 .db.env 空值不写入 / PROJECT_NAME 变更旧名容器清理 + 新名持久化
+- 容器实际释放/重建行为需服务器实测（开发机无 docker）：`./run.sh stop` → `docker ps -a` 确认容器移除 → `./run.sh start` → 服务正常且 PG 数据仍在
+
+#### 老部署升级提示
+存量部署 `.db.env` 中无 PG_* 持久化字段（V10.10.29 前生成）：首次 stop→start 重建时镜像靠本地扫描兑底，若服务器存在多个 PG 镜像可能选错版本导致数据卷版本不匹配；建议升级后执行一次 `./run.sh restart --reconfig` 重选独立 PG 补全持久化字段（一次性动作，之后完全自动）。
+
+#### 涉及文件
+- `bin/service.sh`（传统版：stop_service 无条件释放 + start_service 重建闭环与 .db.env 持久化）
+- `bin/db_select.sh`（两版共享：直通部署无条件 save_db_env，MD5 一致）
 - `README.md` / `PSD_Design_Document.md` / `PSD_Design_Document.html`（两版同步）
 
 ```text
