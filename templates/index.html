@@ -29,51 +29,81 @@
         <button type="button" class="btn btn-outline-danger shadow-sm d-none btn-sm" id="batchDeleteBtn" onclick="submitBatchDelete()">
             <i class="fa-solid fa-trash me-1"></i> 批量删除 (<span id="selectedCount">0</span>)
         </button>
-        <button type="button" class="btn btn-danger shadow-sm btn-sm" data-bs-toggle="modal" data-bs-target="#deleteAllModal">
-            <i class="fa-solid fa-dumpster me-1"></i> 清空所有数据
+        {# V10.4: 级别1可正常新增，移除 != 1 限制 #}
+        <button type="button" class="btn btn-danger shadow-sm btn-sm" data-bs-toggle="modal" data-bs-target="#addRecordModal">
+            <i class="fa-solid fa-plus me-1"></i> 新增礼金记录
         </button>
-        <button type="button" class="btn btn-outline-success shadow-sm btn-sm" data-bs-toggle="modal" data-bs-target="#importCsvModal">
-            <i class="fa-solid fa-file-import me-1"></i> 批量导入
-        </button>
+        {# V10.11.1 统一导入/导出入口，合并原 CSV 导入 + Excel 导入 + 导出 CSV + 打印/导出 四个按钮 #}
         <div class="btn-group shadow-sm">
-            <button type="button" class="btn btn-outline-secondary btn-sm" id="exportCsvBtn" title="点击直接按当前条件导出">
-                <i class="fa-solid fa-file-export me-1"></i> 导出 CSV
+            <button type="button" class="btn btn-outline-success btn-sm dropdown-toggle" data-bs-toggle="dropdown" title="导入数据">
+                <i class="fa-solid fa-file-import me-1"></i>导入
             </button>
-            <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle dropdown-toggle-split" data-bs-toggle="dropdown" aria-expanded="false" title="选择导出范围">
-                <span class="visually-hidden">导出选项</span>
+            <ul class="dropdown-menu shadow border-0 py-2">
+                <li><a class="dropdown-item py-2" href="#" data-bs-toggle="modal" data-bs-target="#importExcelModal"><i class="fa-solid fa-file-excel text-success me-2"></i>Excel/CSV 批量导入（字段映射）</a></li>
+                <li><a class="dropdown-item py-2" href="#" data-bs-toggle="modal" data-bs-target="#importCsvModal"><i class="fa-solid fa-file-csv text-success me-2"></i>CSV 快速导入（传统通道）</a></li>
+                <li><a class="dropdown-item py-2" href="{{ url_for('download_import_template') }}"><i class="fa-solid fa-download text-primary me-2"></i>下载导入样例模版</a></li>
+                <li><hr class="dropdown-divider my-1"></li>
+                <li><a class="dropdown-item py-2" href="#" data-bs-toggle="modal" data-bs-target="#ocrImportModal"><i class="fa-solid fa-camera text-info me-2"></i>拍照识别录入</a></li>
+            </ul>
+        </div>
+        <div class="btn-group shadow-sm">
+            <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" data-bs-toggle="dropdown" title="导出与打印">
+                <i class="fa-solid fa-file-export me-1"></i>导出
             </button>
-            <ul class="dropdown-menu dropdown-menu-end shadow border-0 py-2" style="min-width: 220px;">
-                <li><h6 class="dropdown-header text-muted small fw-bold"><i class="fa-solid fa-download me-1"></i>选择导出范围</h6></li>
+            <ul class="dropdown-menu dropdown-menu-end shadow border-0 py-2" style="min-width: 260px;">
+                <li><h6 class="dropdown-header text-muted small fw-bold"><i class="fa-solid fa-download me-1"></i>导出礼金数据</h6></li>
                 <li>
-                    <a class="dropdown-item py-2 d-flex align-items-center justify-content-between" href="{{ url_for('export_csv', scope='all') }}" id="exportAllCsvBtn">
-                        <span><i class="fa-solid fa-database text-primary me-2"></i>导出全部数据 (所有数据)</span>
+                    <a class="dropdown-item py-2 d-flex align-items-center justify-content-between" href="{{ url_for('export_csv', scope='all', format='csv') }}">
+                        <span><i class="fa-solid fa-file-csv text-success me-2"></i>全部 → CSV</span>
                         <span class="badge bg-secondary-subtle text-secondary ms-2">{{ total_count }}笔</span>
                     </a>
                 </li>
                 <li>
-                    <a class="dropdown-item py-2 d-flex align-items-center justify-content-between" href="#" id="exportFilteredCsvBtn" onclick="exportDataByScope(event, 'filtered')">
-                        <span><i class="fa-solid fa-filter text-success me-2"></i>导出筛选后指定数据</span>
-                        <span class="badge bg-success-subtle text-success ms-2">当前筛选</span>
+                    <a class="dropdown-item py-2 d-flex align-items-center justify-content-between" href="{{ url_for('export_csv', scope='all', format='xlsx') }}">
+                        <span><i class="fa-solid fa-file-excel text-success me-2"></i>全部 → Excel</span>
+                        <span class="badge bg-secondary-subtle text-secondary ms-2">{{ total_count }}笔</span>
                     </a>
                 </li>
                 <li>
-                    <a class="dropdown-item py-2 d-flex align-items-center justify-content-between" href="#" id="exportPageCsvBtn" onclick="exportDataByScope(event, 'page')">
-                        <span><i class="fa-solid fa-file-lines text-info me-2"></i>导出当前页数据</span>
-                        <span class="badge bg-info-subtle text-info ms-2">第{{ pagination.page }}页</span>
+                    <a class="dropdown-item py-2" href="#" onclick="exportDataByScope(event, 'filtered', 'csv')">
+                        <i class="fa-solid fa-filter text-success me-2"></i>筛选后 → CSV
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item py-2" href="#" onclick="exportDataByScope(event, 'filtered', 'xlsx')">
+                        <i class="fa-solid fa-filter text-success me-2"></i>筛选后 → Excel
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item py-2" href="#" onclick="exportDataByScope(event, 'page', 'csv')">
+                        <i class="fa-solid fa-file-lines text-info me-2"></i>当前页 → CSV
                     </a>
                 </li>
                 <li><hr class="dropdown-divider my-1"></li>
                 <li>
-                    <a class="dropdown-item py-2 d-flex align-items-center justify-content-between disabled" href="#" id="exportSelectedCsvBtn" onclick="exportDataByScope(event, 'selected')">
-                        <span><i class="fa-solid fa-square-check text-warning me-2"></i>导出已勾选记录</span>
+                    <a class="dropdown-item py-2 d-flex align-items-center justify-content-between disabled" href="#" id="exportSelectedCsvBtn" onclick="exportDataByScope(event, 'selected', 'csv')">
+                        <span><i class="fa-solid fa-square-check text-warning me-2"></i>已勾选 → CSV</span>
                         <span class="badge bg-warning-subtle text-warning ms-2" id="exportSelectedCount">0项</span>
                     </a>
                 </li>
+                <li>
+                    <a class="dropdown-item py-2 d-flex align-items-center justify-content-between disabled" href="#" id="exportSelectedXlsxBtn" onclick="exportDataByScope(event, 'selected', 'xlsx')">
+                        <span><i class="fa-solid fa-square-check text-warning me-2"></i>已勾选 → Excel</span>
+                        <span class="badge bg-warning-subtle text-warning ms-2" id="exportSelectedXlsxCount">0项</span>
+                    </a>
+                </li>
+                <li><hr class="dropdown-divider my-1"></li>
+                <li><h6 class="dropdown-header text-muted small fw-bold"><i class="fa-solid fa-print me-1"></i>打印与报告</h6></li>
+                <li><a class="dropdown-item py-2" href="{{ url_for('export_print_giftbook') }}" target="_blank"><i class="fa-solid fa-newspaper text-dark me-2"></i>打印人情簿 (A4)</a></li>
+                <li><a class="dropdown-item py-2" href="{{ url_for('export_pdf_statement') }}"><i class="fa-solid fa-file-pdf text-danger me-2"></i>导出 PDF 对账单</a></li>
+                <li><a class="dropdown-item py-2" href="{{ url_for('poster_view') }}" target="_blank"><i class="fa-solid fa-image text-primary me-2"></i>生成长图海报</a></li>
             </ul>
         </div>
-        {# V10.4: 级别1可正常新增，移除 != 1 限制 #}
-        <button type="button" class="btn btn-danger shadow-sm btn-sm" data-bs-toggle="modal" data-bs-target="#addRecordModal">
-            <i class="fa-solid fa-plus me-1"></i> 新增礼金记录
+        <button type="button" class="btn btn-outline-info shadow-sm btn-sm" data-bs-toggle="modal" data-bs-target="#ocrImportModal">
+            <i class="fa-solid fa-camera me-1"></i>拍照识别
+        </button>
+        <button type="button" class="btn btn-outline-danger shadow-sm btn-sm" data-bs-toggle="modal" data-bs-target="#deleteAllModal">
+            <i class="fa-solid fa-dumpster me-1"></i> 清空数据
         </button>
     </div>
 </div>
@@ -608,6 +638,91 @@
     </div>
 </div>
 
+<!-- 功能三：Excel 批量导入 Modal（带字段映射预览） -->
+<div class="modal fade" id="importExcelModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title"><i class="fa-solid fa-file-excel me-2"></i>Excel/CSV 批量导入（字段映射）</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- 步骤1：选择文件 -->
+                <div id="excelStep1">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">选择 Excel 或 CSV 文件</label>
+                        <input class="form-control" type="file" id="excelFileInput" accept=".xlsx,.xls,.csv" onchange="handleExcelFileSelect(this)">
+                    </div>
+                    <div class="alert alert-info small mb-0">
+                        <i class="fa-solid fa-circle-info me-1"></i>支持 .xlsx / .xls / .csv 格式，上传后自动识别列名并匹配系统字段，可预览前 5 行数据确认后批量导入。
+                    </div>
+                </div>
+                <!-- 步骤2：字段映射与预览 -->
+                <div id="excelStep2" class="d-none">
+                    <input type="hidden" id="excelFileData">
+                    <input type="hidden" id="excelFileExt">
+                    <div class="alert alert-success small py-2">
+                        <i class="fa-solid fa-check-circle me-1"></i>已解析到 <strong id="excelTotalRows">0</strong> 行数据，请确认字段映射后导入。
+                    </div>
+                    <h6 class="fw-bold mb-2">字段映射</h6>
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-6"><label class="form-label small">姓名 *</label><select class="form-select form-select-sm" id="mapName"></select></div>
+                        <div class="col-md-6"><label class="form-label small">金额 *</label><select class="form-select form-select-sm" id="mapAmount"></select></div>
+                        <div class="col-md-6"><label class="form-label small">事由</label><select class="form-select form-select-sm" id="mapReason"></select></div>
+                        <div class="col-md-6"><label class="form-label small">收送类型</label><select class="form-select form-select-sm" id="mapType"></select></div>
+                        <div class="col-md-6"><label class="form-label small">备注</label><select class="form-select form-select-sm" id="mapNotes"></select></div>
+                    </div>
+                    <h6 class="fw-bold mb-2">预览（前 5 行）</h6>
+                    <div class="table-responsive" style="max-height: 200px; overflow-y: auto;">
+                        <table class="table table-sm table-bordered" id="excelPreviewTable"></table>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-success d-none" id="excelConfirmBtn" onclick="confirmExcelImport()"><i class="fa-solid fa-upload me-1"></i>确认导入</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 功能三：OCR 拍照识别 Modal -->
+<div class="modal fade" id="ocrImportModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header bg-info text-white">
+                <h5 class="modal-title"><i class="fa-solid fa-camera me-2"></i>拍照智能识别录入</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">上传/拍照人情簿图片</label>
+                        <input class="form-control mb-2" type="file" id="ocrFileInput" accept="image/*" onchange="handleOcrFileSelect(this)">
+                        <div class="text-center mt-2">
+                            <img id="ocrImagePreview" class="img-fluid rounded" style="max-height: 300px; display: none;">
+                        </div>
+                        <button type="button" class="btn btn-info mt-2 w-100" id="ocrRecognizeBtn" onclick="startOcrRecognize()" disabled>
+                            <i class="fa-solid fa-magnifying-glass me-1"></i>开始识别
+                        </button>
+                        <div id="ocrStatus" class="small text-muted mt-2"></div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-bold">识别结果（可编辑勾选）</label>
+                        <div id="ocrResultsContainer" style="max-height: 350px; overflow-y: auto;">
+                            <div class="text-center text-muted py-4"><i class="fa-solid fa-camera fa-2x mb-2 opacity-50 d-block"></i>上传图片后点击「开始识别」</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-info d-none" id="ocrConfirmBtn" onclick="confirmOcrImport()"><i class="fa-solid fa-check me-1"></i>确认入库 <span id="ocrResultCount"></span></button>
+            </div>
+        </div>
+    </div>
+</div>
+
 
 <script>
 function toggleSelectAll(selectAllCheckbox) {
@@ -633,17 +748,8 @@ function updateBatchDeleteBtn() {
         countSpan.textContent = '0';
     }
 
-    const exportSelBtn = document.getElementById('exportSelectedCsvBtn');
-    const exportSelCount = document.getElementById('exportSelectedCount');
-    if (exportSelBtn) {
-        if (checkedBoxes.length > 0) {
-            exportSelBtn.classList.remove('disabled');
-            if (exportSelCount) exportSelCount.textContent = checkedBoxes.length + '项';
-        } else {
-            exportSelBtn.classList.add('disabled');
-            if (exportSelCount) exportSelCount.textContent = '0项';
-        }
-    }
+    // 同步更新导出已勾选计数
+    if (typeof updateExportSelectedCount === 'function') updateExportSelectedCount();
 
     if (selectAll) {
         if (totalBoxes.length > 0 && checkedBoxes.length === totalBoxes.length) {
@@ -1028,9 +1134,10 @@ function submitNlpQuickAdd(e) {
     });
 }
 
-// 导出 CSV 多维度导出引擎（全部数据、筛选指定数据、当前页数据、已勾选数据）
-function exportDataByScope(e, scope) {
+// 导出引擎（全部数据、筛选指定数据、当前页数据、已勾选数据），支持 CSV / Excel 格式
+function exportDataByScope(e, scope, format) {
     if (e) e.preventDefault();
+    var fmt = format || 'csv';
     const checkedBoxes = document.querySelectorAll('input[name="record_ids"]:checked');
     const baseUrl = "{{ url_for('export_csv') }}";
 
@@ -1040,39 +1147,266 @@ function exportDataByScope(e, scope) {
             return;
         }
         const ids = Array.from(checkedBoxes).map(cb => cb.value).join(',');
-        window.location.href = baseUrl + '?ids=' + encodeURIComponent(ids);
+        window.location.href = baseUrl + '?ids=' + encodeURIComponent(ids) + '&format=' + fmt;
         return;
     }
 
     if (scope === 'all') {
-        window.location.href = baseUrl + '?scope=all';
+        window.location.href = baseUrl + '?scope=all&format=' + fmt;
         return;
     }
 
     const urlParams = new URLSearchParams(window.location.search);
     urlParams.set('scope', scope);
+    urlParams.set('format', fmt);
     window.location.href = baseUrl + '?' + urlParams.toString();
 }
 
+// 更新已勾选计数显示
+function updateExportSelectedCount() {
+    var checkedBoxes = document.querySelectorAll('input[name="record_ids"]:checked');
+    var count = checkedBoxes.length;
+    var csvBadge = document.getElementById('exportSelectedCount');
+    var xlsxBadge = document.getElementById('exportSelectedXlsxCount');
+    var csvBtn = document.getElementById('exportSelectedCsvBtn');
+    var xlsxBtn = document.getElementById('exportSelectedXlsxBtn');
+    if (csvBadge) csvBadge.textContent = count + '项';
+    if (xlsxBadge) xlsxBadge.textContent = count + '项';
+    if (csvBtn) { if (count > 0) csvBtn.classList.remove('disabled'); else csvBtn.classList.add('disabled'); }
+    if (xlsxBtn) { if (count > 0) xlsxBtn.classList.remove('disabled'); else xlsxBtn.classList.add('disabled'); }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
-    const exportBtn = document.getElementById('exportCsvBtn');
-    if (exportBtn) {
-        exportBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            const checkedBoxes = document.querySelectorAll('input[name="record_ids"]:checked');
-            if (checkedBoxes.length > 0) {
-                exportDataByScope(e, 'selected');
-            } else {
-                const search = new URLSearchParams(window.location.search);
-                if (search.get('search') || search.get('q') || search.get('reason') || search.get('type')) {
-                    exportDataByScope(e, 'filtered');
-                } else {
-                    exportDataByScope(e, 'all');
-                }
-            }
-        });
-    }
+    // 导出按钮已移入下拉菜单，无需单独绑定
+    updateExportSelectedCount();
 });
+
+// ===== 功能三：Excel/CSV 批量导入（字段映射） =====
+var excelFileBase64 = '';
+var excelFileExt = '';
+
+function handleExcelFileSelect(input) {
+    var file = input.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    excelFileExt = '.' + file.name.split('.').pop().toLowerCase();
+    reader.onload = function(e) {
+        // 转为 base64
+        var bytes = new Uint8Array(e.target.result);
+        var binary = '';
+        for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        excelFileBase64 = btoa(binary);
+
+        // 上传到服务器预览
+        var formData = new FormData();
+        formData.append('file', file);
+        var csrfToken = document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '{{ csrf_token }}';
+
+        fetch('/api/import/preview', {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-CSRFToken': csrfToken, 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (data.code !== 200) { alert(data.message || '文件解析失败'); return; }
+            // 显示步骤2
+            document.getElementById('excelStep1').classList.add('d-none');
+            document.getElementById('excelStep2').classList.remove('d-none');
+            document.getElementById('excelConfirmBtn').classList.remove('d-none');
+            document.getElementById('excelTotalRows').textContent = data.total_rows;
+            document.getElementById('excelFileData').value = excelFileBase64;
+            document.getElementById('excelFileExt').value = excelFileExt;
+
+            // 填充字段映射下拉
+            var headers = data.headers;
+            var fields = [
+                { id: 'mapName', name: 'name' },
+                { id: 'mapAmount', name: 'amount' },
+                { id: 'mapReason', name: 'event_reason' },
+                { id: 'mapType', name: 'record_type' },
+                { id: 'mapNotes', name: 'notes' }
+            ];
+            fields.forEach(function(f) {
+                var sel = document.getElementById(f.id);
+                sel.innerHTML = '<option value="">-- 无对应列 --</option>';
+                headers.forEach(function(h, idx) {
+                    var selected = data.auto_mapping && data.auto_mapping[f.name] === idx ? ' selected' : '';
+                    sel.innerHTML += '<option value="' + idx + '"' + selected + '>' + h + '</option>';
+                });
+            });
+
+            // 渲染预览表
+            var tableHtml = '<thead><tr>';
+            headers.forEach(function(h) { tableHtml += '<th>' + h + '</th>'; });
+            tableHtml += '</tr></thead><tbody>';
+            data.preview.forEach(function(row) {
+                tableHtml += '<tr>';
+                row.forEach(function(cell) { tableHtml += '<td>' + (cell || '') + '</td>'; });
+                tableHtml += '</tr>';
+            });
+            tableHtml += '</tbody>';
+            document.getElementById('excelPreviewTable').innerHTML = tableHtml;
+        })
+        .catch(function(err) { alert('文件解析失败: ' + err); });
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function confirmExcelImport() {
+    var mapping = {
+        name: parseInt(document.getElementById('mapName').value),
+        amount: parseInt(document.getElementById('mapAmount').value),
+        event_reason: parseInt(document.getElementById('mapReason').value),
+        record_type: parseInt(document.getElementById('mapType').value),
+        notes: parseInt(document.getElementById('mapNotes').value)
+    };
+    if (isNaN(mapping.name) || isNaN(mapping.amount)) {
+        alert('必须映射姓名和金额列');
+        return;
+    }
+    var csrfToken = document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '{{ csrf_token }}';
+    var data = {
+        file_data: document.getElementById('excelFileData').value,
+        file_ext: document.getElementById('excelFileExt').value,
+        mapping: mapping
+    };
+    // 将 NaN 转为 null
+    Object.keys(data.mapping).forEach(function(k) { if (isNaN(data.mapping[k])) data.mapping[k] = null; });
+
+    fetch('/api/import/confirm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify(data)
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        if (data.code === 200) {
+            alert(data.message);
+            bootstrap.Modal.getInstance(document.getElementById('importExcelModal')).hide();
+            window.location.reload();
+        } else {
+            alert(data.message || '导入失败');
+        }
+    });
+}
+
+// ===== 功能三：OCR 拍照智能识别 =====
+var ocrImageBase64 = '';
+var ocrResults = [];
+
+function handleOcrFileSelect(input) {
+    var file = input.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        // V3.2.1 修复：原图（手机拍照常为 3~10MB）直接 base64 提交会导致
+        // 网关/vision 模型拒绝（请求体过大或图片换算 token 超限），
+        // 与主流 AI 工具保持一致：先在 canvas 压缩（长边≤2048px、JPEG 0.85）。
+        var img = new Image();
+        img.onload = function() {
+            var MAX_EDGE = 2048;
+            var scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height));
+            var w = Math.round(img.width * scale);
+            var h = Math.round(img.height * scale);
+            var canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            var ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, w, h);
+            ctx.drawImage(img, 0, 0, w, h);
+            var compressed = canvas.toDataURL('image/jpeg', 0.85);
+            document.getElementById('ocrImagePreview').src = compressed;
+            document.getElementById('ocrImagePreview').style.display = 'block';
+            // 提取 base64（去掉 data:image/xxx;base64, 前缀）
+            ocrImageBase64 = compressed.split(',')[1];
+            document.getElementById('ocrRecognizeBtn').disabled = false;
+        };
+        img.onerror = function() {
+            // 压缩失败时退回原图（保证功能可用）
+            document.getElementById('ocrImagePreview').src = e.target.result;
+            document.getElementById('ocrImagePreview').style.display = 'block';
+            ocrImageBase64 = e.target.result.split(',')[1];
+            document.getElementById('ocrRecognizeBtn').disabled = false;
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+}
+
+function startOcrRecognize() {
+    if (!ocrImageBase64) return;
+    var btn = document.getElementById('ocrRecognizeBtn');
+    var statusEl = document.getElementById('ocrStatus');
+    btn.disabled = true;
+    statusEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>正在识别中，请稍候...';
+    var csrfToken = document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '{{ csrf_token }}';
+
+    fetch('/api/ocr/recognize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ image: ocrImageBase64 })
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        btn.disabled = false;
+        statusEl.innerHTML = '';
+        if (data.code === 200 && data.records && data.records.length > 0) {
+            ocrResults = data.records;
+            renderOcrResults();
+            document.getElementById('ocrConfirmBtn').classList.remove('d-none');
+            document.getElementById('ocrResultCount').textContent = '(' + data.records.length + '条)';
+        } else {
+            document.getElementById('ocrResultsContainer').innerHTML = '<div class="text-center text-danger py-4"><i class="fa-solid fa-circle-exclamation fa-2x mb-2 d-block"></i>' + (data.message || '识别失败') + '</div>';
+        }
+    })
+    .catch(function(err) {
+        btn.disabled = false;
+        statusEl.innerHTML = '<span class="text-danger">识别失败: ' + err + '</span>';
+    });
+}
+
+function renderOcrResults() {
+    var html = '';
+    ocrResults.forEach(function(r, i) {
+        var typeLabel = r.record_type === 'send' ? '送礼' : '收礼';
+        var typeColor = r.record_type === 'send' ? 'text-danger' : 'text-success';
+        html += '<div class="d-flex align-items-center gap-2 mb-2 p-2 bg-light rounded">' +
+            '<input class="form-check-input ocr-check" type="checkbox" checked data-idx="' + i + '">' +
+            '<div class="flex-grow-1">' +
+            '<div><strong>' + r.name + '</strong> <span class="' + typeColor + ' fw-bold">¥' + r.amount + '</span></div>' +
+            '<div class="small text-muted">' + typeLabel + ' · ' + r.event_reason + (r.notes ? ' · ' + r.notes : '') + '</div>' +
+            '</div></div>';
+    });
+    document.getElementById('ocrResultsContainer').innerHTML = html;
+}
+
+function confirmOcrImport() {
+    var checked = document.querySelectorAll('.ocr-check:checked');
+    if (checked.length === 0) { alert('请至少勾选一条记录'); return; }
+    var selected = [];
+    checked.forEach(function(cb) {
+        var idx = parseInt(cb.getAttribute('data-idx'));
+        selected.push(ocrResults[idx]);
+    });
+    var csrfToken = document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '{{ csrf_token }}';
+    fetch('/api/ocr/batch-add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ records: selected })
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        if (data.code === 200) {
+            alert(data.message);
+            bootstrap.Modal.getInstance(document.getElementById('ocrImportModal')).hide();
+            window.location.reload();
+        } else {
+            alert(data.message || '入库失败');
+        }
+    });
+}
 </script>
 {% endif %}
 {% endblock %}
