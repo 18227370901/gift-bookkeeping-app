@@ -12,6 +12,7 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🧩 **V10.11.5 AI 配置模型列表 + OCR 识别与 PDF 导出修复**：① **AI 配置页「获取模型列表」**——新增 `fetch_model_list()`（`GET {Base URL}/models`，OpenAI 兼容、`Authorization: Bearer`，覆盖网络超时/401/非 JSON/空列表错误分类）；配置卡片新增「获取模型列表」按钮 + 模型下拉（选择自动填入模型名）；API Key 与 Base URL 填齐后自动防抖 800ms 拉取一次，同一 key/url 组合不重复自动请求；② **OCR 拍照识别修复**——容错解析（中英文键名别名：name/姓名/金额/事由/类型；金额支持"¥1,200.50/五百元/500元"等写法；收送类型别名归一），Prompt 强化强制英文字段名+纯数字金额+空数组约定，识别 0 条时透出模型原始返回便于诊断；前端压缩改为长边 1600px + 质量 0.85→0.7→0.55 逐级降级（产物通常 <700KB，避免请求体超限被网关返回 HTML 413），并对非 JSON 响应做 HTTP 状态提示（不再误报 `SyntaxError: Unexpected token '<'`）；③ **PDF 对账单导出修复**——`Content-Disposition` 头写入中文文件名触发 `UnicodeEncodeError`（HTTP 头仅支持 latin-1，Werkzeug 真实 HTTP 服务器编码失败导致浏览器收不到响应，表现为"点击无反应"），改用 RFC 5987 `filename*=UTF-8''`（ASCII 兜底名 + 编码中文名），真实 HTTP 验证 200 正常下载。
 > - 🌤️ **V10.11.4 实时天气预报（Open-Meteo 数据源）**：新增天气查询功能——`weather_service.py` 封装 Open-Meteo Geocoding + Forecast API（城市名→经纬度/时区→实时天气+未来 3 天预报，`requests` 实现、无需新增依赖、无需 API Key）；WMO weather_code 全量中文映射（0 晴 / 61 小雨 / 95 雷阵雨等，未知码兜底）；`routes_weather.py` 提供页面 `/weather` 与 JSON API `/api/weather/query?city=xx`（所有登录用户可用，不占用菜单权限）；前端 `templates/weather.html` 展示实时温度/体感/湿度/风速/天气状况与未来 3 天最高最低温/降水概率，深浅色双主题自适应；错误分类处理——城市未找到 404、Open-Meteo 错误响应透传 reason、网络超时/不可用 503，未知异常 500 且不暴露堆栈。
 > - 📷 **V10.11.3 OCR/测试配置 404 修复 + Agnes 模型接入指引**：① **Base URL 智能清洗**——新增 `normalize_base_url()` 函数（可循环剥除 `/chat/completions`、`/images/generations`、`/messages`、`/responses`、`/embeddings` 等常见误填的完整端点后缀及尾斜杠），统一应用于 AI 聊天（`_call_openai`）、配置测试（`test_ai_config`）与 OCR 识别（`recognize_gift_image`）三条调用链；修复用户把完整接口地址当 Base URL 填入时，OpenAI SDK 自动追加 `/chat/completions` 拼出不存在路径导致 404 `Invalid URL` 的问题；② **测试错误归类修正**——404 + `Invalid URL` 不再误报为"模型名称不存在"，改为明确提示"Base URL 疑似误填完整接口地址，请改填根地址"；③ **图像生成模型检测**——新增 `_is_image_gen_model()` 检测（agnes-image-\*/DALL-E/Flux 等画图模型），测试与 OCR 失败时针对性提示"该模型只能生成图片、不能看图识别文字，请改用支持图像理解的文本模型（如 agnes-2.5-flash）"；④ **OCR 失败信息增强**——全部尝试失败时透出最后 3 条真实错误并附模型类型/URL 格式针对性引导。**Agnes 官方接入参数**：OCR/对话请用 `agnes-2.5-flash`（官方明确支持图像理解：截图分析/视觉问答/结构化提取），Base URL 填根地址 `https://apihub.agnes-ai.com/v1`；`agnes-image-2.5-flash` 是图像生成模型（文生图/图生图，端点 `/v1/images/generations`），不能用于 OCR。
 > - 🔒 **V10.11.2 新增菜单同步权限控制与Webhook推送矩阵**：① **菜单权限控制体系**——`app.py` 批量/单用户权限配置的 `ALL_MENUS` 与 `MENU_NAMES` 补齐 `dashboard`/`family`（修复管理员保存用户设置时静默清零新菜单权限的严重 bug）；`routes_ext.py` 工单申请清单 `TICKET_MENU_OPTIONS` 补齐两项（普通用户可申请「数据分析」「家庭记账」权限）；`menu_map` 拦截器补充 `api_family_invitable_users`/`api_family_my_perspective_users`/`export_*`/`poster_*` 等新路由的权限映射；`admin_users.html` 单用户与批量配置弹窗新增「数据分析」（0~1 级）和「家庭记账」（0~3 级）的复选框+数据权限下拉；② **Webhook 推送矩阵**——`webhook_utils.py` 的 `PAGE_NAMES` 新增 `'dashboard':'数据分析'`/`'family':'家庭记账'`，`PAGE_EVENT_MATRIX` 新增 `family` 行（create/delete/status_change/security 事件），`dashboard` 为只读看板不加入矩阵；家庭组创建/邀请/解散路由补充 `trigger_webhook_event` 推送调用。
@@ -220,6 +221,12 @@ AIGC:
 - 🌡️ **实时天气详情**：当前温度、体感温度、相对湿度、天气状况（WMO weather_code 中文映射）、风速。
 - 📅 **未来 3 天预报**：每日最高/最低温度、降水概率、天气状况（中文描述 + 图标），日期显示"月日 周几"。
 - 🛡️ **错误分类提示**：城市未找到 / 参数错误 / Open-Meteo 服务 error / 网络超时与不可用分别给出中文指引，日志不泄露堆栈。
+
+### 19. AI 配置模型列表与识别修复 (AI Config Models & Fixes) `V10.11.5 新增`
+- 📋 **获取可用模型列表**：AI 配置页新增「获取模型列表」按钮，调用 `{Base URL}/models`（OpenAI 兼容、Bearer 鉴权）；返回的模型下拉可一键选中填入模型名称，杜绝手输模型名出错；API Key 与 Base URL 填齐后自动防抖拉取一次（同一组合不重复自动请求）。
+- 🔍 **OCR 容错解析**：识别结果支持中英文键名别名（name/姓名/金额/事由/类型等）、金额多种写法（¥1,200.50 / 五百元 / 500元）、收送类型别名归一；识别 0 条时透出模型原始返回内容辅助诊断。
+- 🖨️ **PDF 对账单下载修复**：中文文件名改用 RFC 5987 编码（`filename*=UTF-8''`），修复真实 HTTP 服务下 `UnicodeEncodeError` 导致点击导出无下载的问题。
+- 🛡️ **前端防御**：图片压缩长边 1600px + 质量逐级降级（产物 <700KB）；对非 JSON 异常响应给出 HTTP 状态码提示，不再出现 `SyntaxError: Unexpected token '<'` 这类误导性报错。
 
 ---
 

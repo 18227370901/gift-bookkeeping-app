@@ -6173,7 +6173,17 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
             response = make_response(pdf_buffer.getvalue())
             response.headers['Content-Type'] = 'application/pdf'
-            response.headers['Content-Disposition'] = f'attachment; filename="礼金对账单_{datetime.now().strftime("%Y%m%d")}.pdf"'
+            # V10.11.4 修复：HTTP 头仅支持 latin-1，中文文件名直接写入会触发
+            # UnicodeEncodeError（Werkzeug http.server 编码头部失败 → 浏览器收不到响应，
+            # 表现为"点击导出 PDF 对账单无反应"）。改用 RFC 5987：
+            # filename 放 ASCII 兜底名 + filename*=UTF-8'' 携带中文名。
+            from urllib.parse import quote as _url_quote
+            pdf_date = datetime.now().strftime('%Y%m%d')
+            pdf_filename = f'礼金对账单_{pdf_date}.pdf'
+            response.headers['Content-Disposition'] = (
+                "attachment; filename=\"gift_statement_{0}.pdf\"; "
+                "filename*=UTF-8''{1}"
+            ).format(pdf_date, _url_quote(pdf_filename))
             return response
         except Exception as e:
             flash(f'生成 PDF 失败: {str(e)}', 'danger')

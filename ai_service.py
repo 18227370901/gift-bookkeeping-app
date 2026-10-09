@@ -6,6 +6,7 @@ AI 助手核心服务层
 import os
 import re
 import time
+import requests
 from datetime import datetime
 
 # 延迟导入 OpenAI SDK（可选依赖，未安装时降级为本地引擎）
@@ -30,6 +31,7 @@ def _ensure_openai():
 from models import db, User, ChatSession, ChatMessage, AIQueryLog
 from models import encrypt_credential, decrypt_credential
 from web_search import needs_search, search_and_summarize
+from gift_utils import cn2num as _cn2num
 
 
 # ==================== System Prompt ====================
@@ -149,7 +151,8 @@ def normalize_base_url(base_url):
         return url
     # 常见完整端点后缀（含 OpenAI/Anthropic/图像生成/响应/向量化各类接口）
     suffixes = ('/chat/completions', '/images/generations', '/images/edits',
-                '/completions', '/messages', '/responses', '/embeddings')
+                '/completions', '/messages', '/responses', '/embeddings',
+                '/models')
     changed = True
     while changed:
         changed = False
@@ -298,6 +301,71 @@ def test_ai_config(api_key, base_url, model):
             'latency_ms': latency_ms,
             'detail': err_str[:500]
         }
+
+
+# ==================== 获取可用模型列表 ====================
+
+def fetch_model_list(api_key, base_url):
+    """
+    调用 {base_url}/models 获取可用模型列表（OpenAI 兼容接口，V10.11.4 新增）
+    - 请求: GET {base_url}/models, 请求头 Authorization: Bearer {api_key}
+    - 返回: {"data": [{"id": "gpt-4o", ...}, ...]}
+    返回 dict: { success, models: [str], message, detail }
+    """
+    if not api_key:
+        return {'success': False, 'models': [], 'message': 'API Key 为空，请先填写', 'detail': ''}
+
+    # Base URL 清洗：剥除误填的完整端点后缀（含 /models），取根地址再拼 /models
+    base = normalize_base_url(base_url) if base_url else 'https://api.openai.com/v1'
+    models_url = base.rstrip('/') + '/models'
+
+    try:
+        resp = requests.get(
+            models_url,
+            headers={'Authorization': 'Bearer ' + api_key},
+            timeout=(5, 15)  # 连接 5s / 读取 15s
+        )
+    except requests.Timeout:
+        return {'success': False, 'models': [], 'message': '请求模型列表超时，请检查 Base URL 与网络', 'detail': 'timeout'}
+    except requests.RequestException as e:
+        return {'success': False, 'models': [], 'message': '无法连接模型列表接口，请检查 Base URL 与网络', 'detail': str(e)[:300]}
+
+    try:
+        data = resp.json()
+    except ValueError:
+        return {'success': False, 'models': [],
+                'message': '接口返回的不是有效 JSON（可能不是 OpenAI 兼容的 /models 接口）',
+                'detail': resp.text[:300]}
+
+    if resp.status_code in (401, 403):
+        return {'success': False, 'models': [],
+                'message': 'API Key 无效或无权访问模型列表（HTTP {0}）'.format(resp.status_code),
+                'detail': resp.text[:300]}
+
+    if resp.status_code != 200:
+        # OpenAI 风格: {"error": {...}}；Open-Meteo 风格: {"reason": ...}
+        err_obj = data.get('error') or {}
+        if isinstance(err_obj, dict):
+            reason = err_obj.get('message') or data.get('reason') or 'HTTP {0}'.format(resp.status_code)
+        else:
+            reason = data.get('reason') or 'HTTP {0}'.format(resp.status_code)
+        return {'success': False, 'models': [],
+                'message': '模型列表接口返回错误：{0}'.format(reason),
+                'detail': resp.text[:300]}
+
+    models = []
+    for item in data.get('data') or []:
+        if isinstance(item, dict) and item.get('id'):
+            models.append(str(item['id']))
+
+    if not models:
+        return {'success': False, 'models': [],
+                'message': '模型列表接口返回的模型列表为空',
+                'detail': resp.text[:300]}
+
+    return {'success': True, 'models': models,
+            'message': '成功获取 {0} 个可用模型'.format(len(models)),
+            'detail': ''}
 
 
 # ==================== 本地兜底引擎 ====================
@@ -490,6 +558,70 @@ def _get_suggestions():
 
 # ==================== OCR 图片智能识别（功能三） ====================
 
+def _pick_field(record, keys):
+    """从记录字典中按候选键名（中英文别名）取第一个非空值（V10.11.4 容错解析）
+    部分视觉模型不严格遵循提示词，会返回中文键名（如 {"姓名":...}），
+    仅取英文键会把所有记录过滤掉导致"成功识别 0 条记录"。
+    """
+    if not isinstance(record, dict):
+        return ''
+    for k in keys:
+        v = record.get(k)
+        if v is not None and str(v).strip():
+            return str(v).strip()
+    return ''
+
+
+def _parse_amount(value):
+    """OCR 金额容错解析（V10.11.4 增强）
+    支持：500 / 500.0 / "500元" / "¥500.00" / "五百" / "五百元" / "1,000" 等写法
+    """
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        try:
+            return round(float(value), 2)
+        except (ValueError, TypeError):
+            return 0.0
+    s = str(value).strip()
+    if not s:
+        return 0.0
+    # 去除常见货币符号与单位、千分位分隔符
+    cleaned = re.sub(r'[¥￥$,\s]', '', s)
+    cleaned = cleaned.replace('元', '').replace('圆', '').replace('块', '').replace('整', '')
+    # 纯数字直接转换
+    try:
+        return round(float(cleaned), 2)
+    except ValueError:
+        pass
+    # 汉字数字/汉字金额（如"五百"、"五百元"、"壹仟"）
+    if re.search(r'[零〇一二两三四五六七八九十百千万亿壹贰叁肆伍陆柒捌玖拾佰仟]', s):
+        try:
+            val = _cn2num(s)
+            if val > 0:
+                return round(val, 2)
+        except Exception:
+            pass
+    # 最后尝试提取数字部分（如"约500元"、"500左右"）
+    m = re.search(r'\d+(?:\.\d+)?', s)
+    if m:
+        try:
+            return round(float(m.group()), 2)
+        except (ValueError, TypeError):
+            return 0.0
+    return 0.0
+
+
+def _parse_record_type(value):
+    """OCR 收送类型容错归一：统一为 receive / send"""
+    s = str(value or '').strip().lower()
+    if s in ('receive', 'recv', 'in', 'get', 'income', '收', '收礼', '收到', '收礼金', '收钱', '礼金收入'):
+        return 'receive'
+    if s in ('send', 'give', 'out', 'paid', '支出', '送礼', '送', '送人', '礼金支出'):
+        return 'send'
+    return 'receive'  # 无法识别时默认收礼
+
+
 def _sniff_image_mime(image_base64):
     """根据 base64 头部嗅探图片真实 MIME 类型（部分网关严格校验 data URI 的 MIME）
 
@@ -551,15 +683,16 @@ def recognize_gift_image(image_base64, user=None):
     image_base64 = ''.join(str(image_base64).split())
     image_mime = _sniff_image_mime(image_base64)
 
-    # OCR 识别 Prompt
+    # OCR 识别 Prompt（V10.11.4：强调英文字段名与纯数字金额，降低模型自由发挥概率）
     ocr_prompt = (
         "请识别这张人情簿/礼金簿图片中的所有记录。"
         "每条记录包含：姓名、金额（元）、事由、收礼或送礼类型。"
         "请以 JSON 数组格式返回，每条记录格式如下：\n"
         '[{"name":"张三","amount":500,"event_reason":"婚宴","record_type":"receive"}]\n'
         "其中 record_type 只有两个值：receive（收礼）或 send（送礼）。\n"
-        "如果无法识别某字段，对应值设为 null。\n"
-        "请只返回 JSON 数组，不要添加其他文字说明。"
+        "金额 amount 只填阿拉伯数字，不要带'元'、'¥'等符号。\n"
+        "如果无法识别某字段，对应值设为 null；如果图片中没有礼金记录，请返回空数组 []。\n"
+        "请只返回 JSON 数组，不要添加任何其他文字说明或代码块标记。"
     )
 
     # 收集每次尝试的真实错误，全部失败时透出便于诊断
@@ -615,28 +748,37 @@ def recognize_gift_image(image_base64, user=None):
                 if start != -1 and end != -1:
                     json_str = content[start:end + 1]
                     records = json.loads(json_str)
-                    # 清理和验证记录
+                    # 清理和验证记录（V10.11.4：中英文键名容错 + 金额容错解析）
                     cleaned = []
                     for r in records:
                         if not isinstance(r, dict):
                             continue
-                        name = str(r.get('name', '')).strip()
-                        amount = r.get('amount')
-                        try:
-                            amount = float(amount) if amount is not None else 0
-                        except (ValueError, TypeError):
-                            amount = 0
+                        name = _pick_field(r, ('name', '姓名', '名字', '人名', '客人', '客人姓名', '户主'))
+                        amount = _parse_amount(_pick_field(
+                            r, ('amount', '金额', '礼金', '数额', '数目', 'money', 'price')))
                         if not name or amount <= 0:
                             continue
                         cleaned.append({
                             'name': name,
                             'amount': amount,
-                            # V3.1.1 修复：字段值为 null 时 r.get(...) 返回 None 而非默认值，
-                            # str(None) 会变成 'None' 字符串，改用 or 兜底
-                            'event_reason': (str(r.get('event_reason') or '其它').strip()) or '其它',
-                            'record_type': 'send' if str(r.get('record_type', 'receive')).lower() in ('send', 'give') else 'receive',
-                            'notes': str(r.get('notes') or '').strip()
+                            'event_reason': _pick_field(r, ('event_reason', '事由', '原因', '事项', '场合', '类型')) or '其它',
+                            'record_type': _parse_record_type(_pick_field(
+                                r, ('record_type', '类型', '收送', '收礼', '送礼', 'relation', 'direction'))),
+                            'notes': _pick_field(r, ('notes', '备注', '说明', '备注说明'))
                         })
+
+                    # V10.11.4：识别成功但字段无效时给出可读诊断（提示模型实际返回内容）
+                    if not cleaned:
+                        raw_snippet = content[:200] if content else '（空）'
+                        return {
+                            'code': 200,
+                            'records': cleaned,
+                            'message': (
+                                f'成功识别 0 条记录（使用模型: {target_model}）。'
+                                f'模型返回内容无法解析出有效记录（姓名/金额缺失），原始返回: {raw_snippet}'
+                            ),
+                            'config_name': cfg.get('name', '')
+                        }
 
                     return {
                         'code': 200,

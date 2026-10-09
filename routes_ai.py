@@ -9,7 +9,7 @@ from datetime import datetime
 from flask import render_template, request, redirect, url_for, flash, jsonify, session, abort
 from flask_login import login_required, current_user
 from models import db, User, ChatSession, ChatMessage, AIQueryLog
-from ai_service import ai_chat, _build_config_list, _get_suggestions, test_ai_config
+from ai_service import ai_chat, _build_config_list, _get_suggestions, test_ai_config, fetch_model_list
 from webhook_utils import trigger_webhook_event
 from models import WebhookConfig
 
@@ -358,6 +358,46 @@ def register_ai_routes(app, log_action=None):
         model = (data.get('model') or '').strip()
 
         result = test_ai_config(api_key, base_url, model)
+        return jsonify({'code': 200, 'data': result})
+
+    # ==================== 获取可用模型列表（仅管理员） ====================
+
+    @app.route('/api/ai/config/models', methods=['POST'])
+    @login_required
+    def api_ai_config_models():
+        """获取 AI 服务可用模型列表（仅管理员）
+        支持两种模式：
+        1) 传 config_index: 从已保存的配置中取对应条目的 key/base_url
+        2) 传 api_key/base_url: 直接拉取未保存配置的模型列表
+        调用 {base_url}/models（OpenAI 兼容接口），Authorization: Bearer {api_key}
+        """
+        if not current_user.is_admin:
+            return jsonify({'code': 403, 'message': '此接口仅管理员可访问'}), 403
+
+        data = request.get_json(silent=True) or {}
+
+        # 模式1：按索引取已保存的配置
+        config_index = data.get('config_index')
+        api_key = (data.get('api_key') or '').strip()
+        base_url = (data.get('base_url') or '').strip()
+        if config_index is not None:
+            try:
+                config_index = int(config_index)
+            except (ValueError, TypeError):
+                return jsonify({'code': 400, 'message': 'config_index 必须是整数'}), 400
+
+            configs = current_user.get_ai_configs()
+            if config_index < 0 or config_index >= len(configs):
+                return jsonify({'code': 400, 'message': '配置索引超出范围'}), 400
+
+            cfg = configs[config_index]
+            api_key = cfg.get('api_key', '')
+            base_url = cfg.get('base_url', '')
+
+        if not api_key:
+            return jsonify({'code': 400, 'message': 'API Key 为空，请先填写后再获取模型列表'}), 400
+
+        result = fetch_model_list(api_key, base_url)
         return jsonify({'code': 200, 'data': result})
 
     # ==================== AI 授权管理（仅管理员） ====================

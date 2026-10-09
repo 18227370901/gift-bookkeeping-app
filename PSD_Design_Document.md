@@ -11,7 +11,7 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.11.4  
+> **版本**：V10.11.5  
 > **生成日期**：2026-10-09  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
@@ -1341,12 +1341,39 @@ graph LR
 
 ---
 
+### 10.10 V10.11.5 AI 配置模型列表 + OCR 识别修复 + PDF 导出修复
+
+#### 功能设计
+
+| 项 | 说明 |
+|---|---|
+| 模型列表 | `ai_service.fetch_model_list()`：`GET {Base URL}/models`（OpenAI 兼容、`Authorization: Bearer`，连接 5s/读取 15s）；错误分类——超时/连接失败/401/403/非 JSON/空列表均返回中文提示与 detail |
+| 后端路由 | `routes_ai.py POST /api/ai/config/models`（仅管理员）：支持 `config_index`（已存配置）或直接传 `api_key/base_url` 两种模式 |
+| 前端 | `admin_ai_config.html`：配置卡新增「获取模型列表」按钮 + 模型下拉（选择自动填入模型名）；API Key/Base URL 变更触发防抖 800ms 自动拉取；同一 key+url 组合不重复自动请求（手动按钮可强制刷新） |
+| OCR 容错 | `_pick_field()` 中英文键名别名；`_parse_amount()` 金额容错（¥/千分位/中文数字/汉字金额，复用 gift_utils.cn2num）；`_parse_record_type()` 收送类型归一；Prompt 强制英文字段名 + 纯数字金额 + 空数组约定；0 条时透出模型原始返回片段 |
+| OCR 前端防御 | 压缩长边 2048→1600px、质量 0.85→0.7→0.55 逐级降级（产物 <700KB）；`startOcrRecognize` 对非 JSON 响应（HTML 413/网关错误页）先查状态码与 Content-Type 再解析，报错信息带 HTTP 状态 |
+| PDF 导出修复 | `routes_ext.py export_pdf_statement`：`Content-Disposition` 中文文件名触发 `UnicodeEncodeError`（HTTP 头 latin-1 限制，Werkzeug 真实服务器编码失败 → 浏览器收不到响应 = "点击无反应"）；改 RFC 5987 `filename*=UTF-8''{quote(name)}` + ASCII 兜底 `gift_statement_{date}.pdf` |
+
+#### 验证结论
+
+| 场景 | 结果 |
+|---|---|
+| 「获取模型列表」真实拉取（agnes apihub） | 成功获取 12 个模型（agnes-2.5-pro-alpha / agnes-3.0-flash 等）✅ |
+| 下拉选择模型自动填入 | 选中模型名自动写入输入框 ✅ |
+| 自动拉取（改 Base URL 防抖触发） | 自动重新拉取并渲染 ✅ |
+| OCR 首次识别（真实 agnes-2.5-flash + 测试礼金簿图） | 张三 500 婚宴 / 李四 300 满月酒 / 王五 600 寿宴 3 条正确 ✅ |
+| OCR 二次识别 | 正常返回 JSON，无 SyntaxError/HTML ✅ |
+| PDF 导出（真实 HTTP 服务） | 200 + application/pdf + RFC5987 文件名，不再 UnicodeEncodeError ✅ |
+| 前端控制台 | 0 报错 ✅ |
+
+---
+
 ## 附录：文档元数据
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V10.11.4 |
-| 生成日期 | 2026-10-09（V10.11.4 修订，实时天气预报接入 Open-Meteo；承接 V10.11.3 OCR/测试配置 404 修复与 Agnes 模型接入指引） |
+| 文档版本 | V10.11.5 |
+| 生成日期 | 2026-10-09（V10.11.5 修订，AI 配置模型列表 + OCR 识别与 PDF 导出修复；承接 V10.11.4 实时天气预报） |
 | 审计基线 | 代码 commit main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建）） |
 | 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |
