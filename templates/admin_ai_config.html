@@ -196,15 +196,21 @@ function renderConfigs() {
                     </div>
                     <div class="col-md-6">
                         <label class="form-label small">模型名称</label>
-                        <input type="text" class="form-control form-control-sm" value="${escapeHtml(cfg.model || '')}" 
-                               onchange="updateConfig(${idx}, 'model', this.value)" placeholder="如：gpt-4o-mini">
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control" value="${escapeHtml(cfg.model || '')}" 
+                                   onchange="updateConfig(${idx}, 'model', this.value)" placeholder="如：gpt-4o-mini">
+                            <button class="btn btn-outline-info" type="button" onclick="fetchModels(${idx}, false)" id="modelsBtn-${idx}" title="调用 {Base URL}/models 拉取可用模型列表">
+                                <i class="fa-solid fa-list me-1"></i>获取模型列表
+                            </button>
+                        </div>
+                        <div id="modelsResult-${idx}"></div>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label small">API Key</label>
                         <div class="input-group input-group-sm">
                             <input type="password" class="form-control" id="apiKey-${idx}" 
                                    value="${escapeHtml(cfg.api_key || '')}" 
-                                   onchange="updateConfig(${idx}, 'api_key', this.value)" placeholder="sk-...">
+                                   onchange="updateConfig(${idx}, 'api_key', this.value); scheduleAutoFetchModels(${idx})" placeholder="sk-...">
                             <button class="btn btn-outline-secondary" type="button" onclick="toggleKeyVisibility(${idx})">
                                 <i class="fa-regular fa-eye" id="keyIcon-${idx}"></i>
                             </button>
@@ -213,7 +219,7 @@ function renderConfigs() {
                     <div class="col-md-6">
                         <label class="form-label small">Base URL（可选）</label>
                         <input type="text" class="form-control form-control-sm" value="${escapeHtml(cfg.base_url || '')}" 
-                               onchange="updateConfig(${idx}, 'base_url', this.value)" placeholder="如：https://api.openai.com/v1">
+                               onchange="updateConfig(${idx}, 'base_url', this.value); scheduleAutoFetchModels(${idx})" placeholder="如：https://api.openai.com/v1">
                     </div>
                     <div class="col-12">
                         <div class="form-check form-switch">
@@ -274,6 +280,103 @@ function toggleKeyVisibility(idx) {
         input.type = 'password';
         icon.className = 'fa-regular fa-eye';
     }
+}
+
+// ===== 获取可用模型列表（V10.11.4 新增） =====
+const modelFetchDebounce = {};   // 自动拉取防抖定时器
+const modelFetchedKey = {};      // 已自动拉取的 key|url 组合（避免重复请求）
+
+// 手动获取模型列表（silent=true 时不展示警告类提示，供自动拉取静默使用）
+async function fetchModels(idx, silent) {
+    const cfg = aiConfigs[idx];
+    if (!cfg) return;
+    const btn = document.getElementById(`modelsBtn-${idx}`);
+    const resultDiv = document.getElementById(`modelsResult-${idx}`);
+    if (!btn || !resultDiv) return;
+
+    // 先同步当前输入框的值（与测试按钮行为一致）
+    const keyInput = document.getElementById(`apiKey-${idx}`);
+    const urlInput = document.querySelector(`#config-${idx} input[onchange*="base_url"]`);
+    if (keyInput) cfg.api_key = keyInput.value;
+    if (urlInput) cfg.base_url = urlInput.value;
+
+    if (!cfg.api_key || !cfg.base_url) {
+        if (!silent) {
+            resultDiv.innerHTML = `<div class="alert alert-warning py-1 mb-0 mt-2 small test-result"><i class="fa-solid fa-triangle-exclamation me-1"></i>请先填写 API Key 与 Base URL，再获取模型列表</div>`;
+        }
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>获取中';
+    resultDiv.innerHTML = '<div class="text-muted small mt-1"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在调用 {Base URL}/models 拉取模型列表...</div>';
+
+    try {
+const data = await aiFetch('/api/ai/config/models', {
+            method: 'POST',
+            body: JSON.stringify({ config_index: idx })
+        });
+
+        if (data && data.code === 200 && data.data) {
+            const result = data.data;
+            if (result.success && result.models && result.models.length > 0) {
+                modelFetchedKey[idx] = (cfg.api_key || '') + '|' + (cfg.base_url || '');
+                renderModelSelect(idx, result.models, result.message);
+            } else {
+                resultDiv.innerHTML = `<div class="alert alert-danger py-1 mb-0 mt-2 test-result"><i class="fa-solid fa-circle-xmark me-1"></i>${escapeHtml(result.message || '获取失败')}${result.detail ? `<div class="small text-muted">${escapeHtml(result.detail)}</div>` : ''}</div>`;
+            }
+        } else {
+            resultDiv.innerHTML = `<div class="alert alert-danger py-1 mb-0 mt-2 test-result"><i class="fa-solid fa-circle-xmark me-1"></i>${escapeHtml(data?.message || '获取模型列表失败')}</div>`;
+        }
+    } catch (err) {
+        resultDiv.innerHTML = `<div class="alert alert-danger py-1 mb-0 mt-2 test-result"><i class="fa-solid fa-circle-xmark me-1"></i>请求异常: ${escapeHtml(String(err))}</div>`;
+    }
+
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fa-solid fa-list me-1"></i>获取模型列表';
+}
+
+// 渲染模型下拉列表（消息 + 下拉一次性写入，点击后自动填入模型输入框）
+function renderModelSelect(idx, models, message) {
+    const resultDiv = document.getElementById(`modelsResult-${idx}`);
+    if (!resultDiv) return;
+    const optionsHtml = models.map(m =>
+        `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`
+    ).join('');
+    resultDiv.innerHTML = `
+        <div class="text-success small mt-1"><i class="fa-solid fa-circle-check me-1"></i>${escapeHtml(message || '成功获取模型列表')}（点击下拉选择可自动填入）</div>
+        <div class="mt-1">
+            <select class="form-select form-select-sm" id="modelSelect-${idx}" onchange="applyModel(${idx}, this.value)">
+                <option value="">-- 选择模型（自动填入） --</option>
+                ${optionsHtml}
+            </select>
+        </div>`;
+}
+
+// 选择模型 → 填入模型名称输入框
+function applyModel(idx, model) {
+    if (!model) return;
+    const input = document.querySelector(`#config-${idx} input[onchange*="model"]`);
+    if (input) input.value = model;
+    if (aiConfigs[idx]) aiConfigs[idx].model = model;
+}
+
+// 自动获取（防抖 800ms）：API Key 与 Base URL 均填写后触发一次
+function scheduleAutoFetchModels(idx) {
+    clearTimeout(modelFetchDebounce[idx]);
+    modelFetchDebounce[idx] = setTimeout(function () {
+        const cfg = aiConfigs[idx];
+        if (!cfg) return;
+        const keyInput = document.getElementById(`apiKey-${idx}`);
+        const urlInput = document.querySelector(`#config-${idx} input[onchange*="base_url"]`);
+        const key = (keyInput ? keyInput.value : '') || (cfg.api_key || '');
+        const url = (urlInput ? urlInput.value : '') || (cfg.base_url || '');
+        if (!key || !url) return;
+        const fetchKey = key + '|' + url;
+        // 同一 key/url 组合已拉取过则不重复自动请求（手动按钮仍可强制刷新）
+        if (modelFetchedKey[idx] === fetchKey) return;
+        fetchModels(idx, true);
+    }, 800);
 }
 
 // 保存配置

@@ -1302,21 +1302,41 @@ function handleOcrFileSelect(input) {
     reader.onload = function(e) {
         // V3.2.1 修复：原图（手机拍照常为 3~10MB）直接 base64 提交会导致
         // 网关/vision 模型拒绝（请求体过大或图片换算 token 超限），
-        // 与主流 AI 工具保持一致：先在 canvas 压缩（长边≤2048px、JPEG 0.85）。
+        // 先在 canvas 压缩。V10.11.4 加强：长边降至 1600px、质量逐级降级重试
+        //（0.85→0.7→0.55），压缩产物 base64 通常 < 1MB，避免请求体超限
+        //（Nginx client_max_body_size 默认 1m 时超限会返回 HTML 413，
+        //  前端误报 SyntaxError: Unexpected token '<'）。
         var img = new Image();
         img.onload = function() {
-            var MAX_EDGE = 2048;
+            var MAX_EDGE = 1600;
             var scale = Math.min(1, MAX_EDGE / Math.max(img.width, img.height));
-            var w = Math.round(img.width * scale);
-            var h = Math.round(img.height * scale);
-            var canvas = document.createElement('canvas');
-            canvas.width = w;
-            canvas.height = h;
-            var ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, w, h);
-            ctx.drawImage(img, 0, 0, w, h);
-            var compressed = canvas.toDataURL('image/jpeg', 0.85);
+            var w = Math.max(1, Math.round(img.width * scale));
+            var h = Math.max(1, Math.round(img.height * scale));
+            var qualities = [0.85, 0.7, 0.55];
+            var compressed = null;
+            for (var qi = 0; qi < qualities.length; qi++) {
+                try {
+                    var canvas = document.createElement('canvas');
+                    canvas.width = w;
+                    canvas.height = h;
+                    var ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, w, h);
+                    ctx.drawImage(img, 0, 0, w, h);
+                    var candidate = canvas.toDataURL('image/jpeg', qualities[qi]);
+                    // 体积超限时降级质量重试（目标 < 700KB）
+                    if (candidate.length < 700 * 1024) {
+                        compressed = candidate;
+                        break;
+                    }
+                } catch (ex) {
+                    // 单次压缩失败继续尝试更低质量
+                }
+            }
+            if (!compressed) {
+                // 全部压缩尝试失败：退回原图（罕见，兜底保证可用）
+                compressed = e.target.result;
+            }
             document.getElementById('ocrImagePreview').src = compressed;
             document.getElementById('ocrImagePreview').style.display = 'block';
             // 提取 base64（去掉 data:image/xxx;base64, 前缀）
@@ -1324,7 +1344,7 @@ function handleOcrFileSelect(input) {
             document.getElementById('ocrRecognizeBtn').disabled = false;
         };
         img.onerror = function() {
-            // 压缩失败时退回原图（保证功能可用）
+            // 图片解码失败时退回原图（保证功能可用）
             document.getElementById('ocrImagePreview').src = e.target.result;
             document.getElementById('ocrImagePreview').style.display = 'block';
             ocrImageBase64 = e.target.result.split(',')[1];
@@ -1348,7 +1368,19 @@ function startOcrRecognize() {
         headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
         body: JSON.stringify({ image: ocrImageBase64 })
     })
-    .then(function(res) { return res.json(); })
+    .then(function(res) {
+        // V10.11.4 修复：服务异常时可能返回 HTML（如 413 请求体超限/502 网关错误页），
+        // 直接 res.json() 会抛 "SyntaxError: Unexpected token '<'" 误导排查。
+        // 先判断响应类型与状态码，再决定是否解析 JSON。
+        var contentType = res.headers.get('Content-Type') || '';
+        if (!res.ok && contentType.indexOf('application/json') === -1) {
+            throw new Error('HTTP ' + res.status + (res.status === 413 ? '：图片数据过大，服务端已拒绝（请更换更小的图片重试）' : '：服务器返回异常，请稍后重试或联系管理员'));
+        }
+        if (contentType.indexOf('application/json') === -1 && res.status === 401) {
+            throw new Error('登录状态已失效，请刷新页面重新登录');
+        }
+        return res.json();
+    })
     .then(function(data) {
         btn.disabled = false;
         statusEl.innerHTML = '';

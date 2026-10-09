@@ -114,7 +114,7 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.11.4</span>
+    <span><strong>版本</strong>：V10.11.5</span>
     <span><strong>生成日期</strong>：2026-10-01</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
@@ -1156,13 +1156,43 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 10 部分：V10.11.5 模型列表与修复 ==================== -->
+<div class="section" id="s10b">
+<h1>第 10 部分补充：V10.11.5 AI 配置模型列表 + OCR 识别与 PDF 导出修复</h1>
+
+<h2>10.7 获取可用模型列表</h2>
+<table>
+<tr><th>层</th><th>实现</th></tr>
+<tr><td>服务</td><td><code>ai_service.fetch_model_list()</code>：<code>GET {Base URL}/models</code>（OpenAI 兼容、Bearer 鉴权），错误分类（超时/网络/401/非 JSON/空列表）返回中文提示 + detail</td></tr>
+<tr><td>路由</td><td><code>routes_ai.py POST /api/ai/config/models</code>（仅管理员）：支持 <code>config_index</code> 或直接传参两种模式</td></tr>
+<tr><td>前端</td><td>配置卡片「获取模型列表」按钮 + 模型下拉自动填入；API Key/Base URL 变更防抖 800ms 自动拉取；同 key/url 组合不重复自动请求</td></tr>
+</table>
+
+<h2>10.2 OCR 识别修复</h2>
+<p>① 容错解析：中英文键名别名（<code>_pick_field</code>）、金额多写法（<code>_parse_amount</code>：¥/千分位/汉字金额，复用 gift_utils.cn2num）、收送类型归一（<code>_parse_record_type</code>）；② Prompt 强制英文字段名 + 纯数字金额 + 空数组约定；③ 识别 0 条时透出模型原始返回；④ 前端压缩长边 1600px + 质量逐级降级（产物 &lt;700KB，避免网关 HTML 413），非 JSON 响应先查状态码/Content-Type，报错含 HTTP 状态码（不再误报 <code>SyntaxError: Unexpected token '&lt;'</code>）。</p>
+
+<h2>10.3 PDF 导出修复</h2>
+<p><strong>根因</strong>：<code>Content-Disposition</code> 头写入中文文件名触发 <code>UnicodeEncodeError</code>（HTTP 头仅支持 latin-1，Werkzeug 真实 HTTP 服务器编码失败 → 浏览器收不到响应，表现为"点击导出 PDF 无反应"）。<strong>修复</strong>：RFC 5987 <code>filename*=UTF-8''{quote(中文名)}</code> + ASCII 兜底名 <code>gift_statement_{date}.pdf</code>；真实 HTTP 验证 200 正常下载。</p>
+
+<h2>10.4 验证结论</h2>
+<table>
+<tr><th>场景</th><th>结果</th></tr>
+<tr><td>模型列表真实拉取（agnes apihub）</td><td>12 个模型 ✅</td></tr>
+<tr><td>下拉选择自动填入 / 自动拉取防抖</td><td>✅ / ✅</td></tr>
+<tr><td>OCR 首次识别（真实模型）</td><td>3 条记录正确识别（张三 500 婚宴 / 李四 300 满月酒 / 王五 600 寿宴）✅</td></tr>
+<tr><td>OCR 二次识别</td><td>正常 JSON，无 HTML/SyntaxError ✅</td></tr>
+<tr><td>PDF 导出（真实 HTTP）</td><td>200 + application/pdf，无 UnicodeEncodeError ✅</td></tr>
+<tr><td>前端控制台</td><td>0 报错 ✅</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.4</td></tr>
-<tr><td>生成日期</td><td>2026-10-09（V10.11.4 修订，实时天气预报接入 Open-Meteo；承接 V10.11.3 OCR/测试配置 404 修复与 Agnes 模型接入指引）</td></tr>
+<tr><td>文档版本</td><td>V10.11.5</td></tr>
+<tr><td>生成日期</td><td>2026-10-09（V10.11.5 修订，AI 配置模型列表 + OCR 识别与 PDF 导出修复；承接 V10.11.4 实时天气预报）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
