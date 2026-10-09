@@ -11,7 +11,7 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.11.6  
+> **版本**：V10.11.7  
 > **生成日期**：2026-10-09  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
@@ -1405,14 +1405,79 @@ graph LR
 | `webhook_utils.py` | `PAGE_NAMES`/`PAGE_EVENT_MATRIX` 补 weather（及 dashboard 注释） |
 | `README.md` | 公告 + 功能章节 20 同步 |
 
+### 10.12 V10.11.7 表格列宽手动调整 + 天气页面改版
+
+#### 功能一：全平台表格列宽拖拽调整
+
+| 项 | 说明 |
+|---|---|
+| 启用机制 | `<table data-resizable="表ID">` + 每个 `<th data-col="列key">`；全局脚本 `static/js/table-resizer.js`（base.html 全局引入，零依赖原生 JS）自动初始化 |
+| 固化宽度 | 首次进入将各列 auto 布局下的自然宽度固化为显式像素写入 `th.style.width`，同时切 `table-layout: fixed`，拖拽实时生效 |
+| 分隔条 | 每个 th 右缘注入 8px 命中区（`.colw-resizer`），hover 高亮 + `col-resize` 光标（Bootstrap CSS 变量双主题适配） |
+| 约束 | 默认 min 60px / max 480px；单列可用 `data-col-min/max` 覆盖（checkbox 36、操作列 110+ 等） |
+| 横向滚动 | 总宽超容器由 `.table-responsive` 出横向滚动条，不压缩其他列 |
+| 双击自适应 | 同帧内切 auto 布局测该列最大内容宽 +16px 余量，再切回 fixed（无闪烁） |
+| 持久化 | localStorage 键 `gift_colw_{用户ID}_{表ID}`（按用户+表格隔离），拖动结束保存全部列宽，加载自动恢复 |
+| 重置入口 | JS 自动在容器右上角注入「↺ 重置列宽」小按钮，点击清存储恢复默认 |
+| 防误选 | 拖动时 body 加 `colw-resizing` 类 → `user-select: none` + 全局 col-resize 光标 |
+| 触摸/降级 | Pointer Events 统一；屏宽 <768px 自动 teardown 不拖拽不恢复，回退自然布局；跨断点 resize 防抖自动重绑 |
+| title 提示 | 初始化/拖拽后为超宽截断单元格补 `title` 悬停看全文 |
+| 覆盖范围 | 21 张主业务表：礼金账本 14 列、人情对账 2 张、用户管理 2 张、Webhook 2 张、备份管理 4 张、宴席列表+详情 2 张、回收站、纪念日、操作日志、权限工单、系统广播、分享台账（`excelPreviewTable` 动态预览小表不启用） |
+
+#### 功能二：天气页面改版（15 天 + 级联选择 + 首页式布局）
+
+| 项 | 说明 |
+|---|---|
+| 15 天预报 | `weather_service.fetch_forecast` 的 `forecast_days` 参数化（默认 15，1~16）；`/api/weather/query` 新增 `days` 参数 |
+| 实时指标扩充 | current 增 surface_pressure/云量/wind_direction_10m（角度→中文方位）/wind_gusts_10m |
+| 每日扩充 | daily 增 sunrise/sunset/uv_index_max/precipitation_sum |
+| 级联数据 | `static/js/china-regions.js`（144KB）本地内置：阿里云 DataV GeoAtlas（34 省/476 市/2875 区县 + 行政中心坐标）；直辖市市级层显示省名；台湾/省直辖县级市自动补齐三级 |
+| 根因说明 | GeoNames 中文库缺中国区县级地名（「双流区」0 候选、仅同名村镇错配），级联改用内置坐标直查 |
+| 坐标模式 | `query_weather_by_coords(lat, lon, days, label)`：中国范围粗校验（纬 3~54/经 73~136）+ `timezone=auto` 直查；`/api/weather/query?lat=&lon=&label=` |
+| 文本模式 | 保留 `city` 自由输入（Geocoding，兼容旧版）；`province/city2` 可选消歧参数（多候选 admin1/admin2 匹配打分 + 404 去后缀降级重试） |
+| 首页式布局 | 大卡片（大温度数字 + 2×4 指标网格，文字不截断）→ 15 天温度趋势双折线图（本地化 ECharts 5.5.0，深浅主题）→ 15 天卡片网格（每行 5 个，今天高亮） |
+| 记忆 | localStorage `gift_weather_mode/region/city`：刷新/再次进入自动恢复上次查询方式与地区，首次默认北京 |
+| 网络策略修复 | `_http_get`：禁代理直连优先（国内直连可达）+ 失败回落系统代理；修复用户机器开梯子且代理不稳时持续超时 |
+
+#### 验证结论
+
+| 场景 | 结果 |
+|---|---|
+| 礼金账本 14 列初始化（fixed + 14 resizer + 重置按钮） | ✅ |
+| 真实鼠标拖拽 +130px（80→210px） | ✅ |
+| 刷新后 210px 恢复 + localStorage 保存 | ✅ |
+| 重置按钮恢复默认 80px + 存储清除 | ✅ |
+| 拖 -300px 钓到 min 60px | ✅ |
+| 双击自适应 100px（内容最大宽） | ✅ |
+| 总宽 1214 > 容器 936 → 横向滚动不压列 | ✅ |
+| 抽查人情对账/用户管理/工单/操作日志/纪念日 resizer 全就绪 | ✅ |
+| 回收站空数据不渲染表格（条件渲染） | ✅ 非缺陷 |
+| 天气默认北京自动查询（15 天 + 全部扩充指标） | ✅ |
+| 级联四川→成都→双流定位准（气压 961hPa 海拔效应坐标准确） | ✅ |
+| 刷新后级联记忆恢复自动查询 | ✅ |
+| 黑夜模式视觉（趋势图配色/卡片对比度） | ✅ |
+| 指标文字完整无截断 + 趋势图在卡片前布局 | ✅ |
+
+#### 文件变更清单
+
+| 文件 | 变更 |
+|---|---|
+| `static/js/table-resizer.js` | 新增：全局列宽拖拽脚本 |
+| `static/js/china-regions.js` | 新增：行政区划+坐标数据（本地内置） |
+| `templates/base.html` | 全局列宽样式 + `data-user-id` 注入 + table-resizer.js 引入 |
+| 14 个模板 21 张表 | 补 `data-resizable` / `th data-col` 标记（index/reconciliation/admin_users/admin_webhooks/admin_backups/admin_logs/admin_broadcasts/reminders/recycle_bin/permission_tickets/banquets/banquet_detail/shared_ledger） |
+| `weather_service.py` | 15 天参数化 + 指标扩充 + 坐标直查入口 + 级联消歧 + `_http_get` 双路径网络策略 |
+| `routes_weather.py` | `days/lat/lon/label/province/city2` 参数 |
+| `templates/weather.html` | 重写：级联 + 自由输入双模式、首页式布局、趋势图、记忆恢复 |
+
 ---
 
 ## 附录：文档元数据
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V10.11.6 |
-| 生成日期 | 2026-10-09（V10.11.6 修订，天气权限管控 + Webhook 推送矩阵 + 登记时间自定义；承接 V10.11.5 AI 配置模型列表） |
+| 文档版本 | V10.11.7 |
+| 生成日期 | 2026-10-09（V10.11.7 修订，表格列宽手动调整 + 天气页面改版；承接 V10.11.6 天气权限管控） |
 | 审计基线 | 代码 commit main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建）） |
 | 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |
