@@ -12,6 +12,14 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🌤️ **V10.11.4 实时天气预报（Open-Meteo 数据源）**：新增天气查询功能——`weather_service.py` 封装 Open-Meteo Geocoding + Forecast API（城市名→经纬度/时区→实时天气+未来 3 天预报，`requests` 实现、无需新增依赖、无需 API Key）；WMO weather_code 全量中文映射（0 晴 / 61 小雨 / 95 雷阵雨等，未知码兜底）；`routes_weather.py` 提供页面 `/weather` 与 JSON API `/api/weather/query?city=xx`（所有登录用户可用，不占用菜单权限）；前端 `templates/weather.html` 展示实时温度/体感/湿度/风速/天气状况与未来 3 天最高最低温/降水概率，深浅色双主题自适应；错误分类处理——城市未找到 404、Open-Meteo 错误响应透传 reason、网络超时/不可用 503，未知异常 500 且不暴露堆栈。
+> - 📷 **V10.11.3 OCR/测试配置 404 修复 + Agnes 模型接入指引**：① **Base URL 智能清洗**——新增 `normalize_base_url()` 函数（可循环剥除 `/chat/completions`、`/images/generations`、`/messages`、`/responses`、`/embeddings` 等常见误填的完整端点后缀及尾斜杠），统一应用于 AI 聊天（`_call_openai`）、配置测试（`test_ai_config`）与 OCR 识别（`recognize_gift_image`）三条调用链；修复用户把完整接口地址当 Base URL 填入时，OpenAI SDK 自动追加 `/chat/completions` 拼出不存在路径导致 404 `Invalid URL` 的问题；② **测试错误归类修正**——404 + `Invalid URL` 不再误报为"模型名称不存在"，改为明确提示"Base URL 疑似误填完整接口地址，请改填根地址"；③ **图像生成模型检测**——新增 `_is_image_gen_model()` 检测（agnes-image-\*/DALL-E/Flux 等画图模型），测试与 OCR 失败时针对性提示"该模型只能生成图片、不能看图识别文字，请改用支持图像理解的文本模型（如 agnes-2.5-flash）"；④ **OCR 失败信息增强**——全部尝试失败时透出最后 3 条真实错误并附模型类型/URL 格式针对性引导。**Agnes 官方接入参数**：OCR/对话请用 `agnes-2.5-flash`（官方明确支持图像理解：截图分析/视觉问答/结构化提取），Base URL 填根地址 `https://apihub.agnes-ai.com/v1`；`agnes-image-2.5-flash` 是图像生成模型（文生图/图生图，端点 `/v1/images/generations`），不能用于 OCR。
+> - 🔒 **V10.11.2 新增菜单同步权限控制与Webhook推送矩阵**：① **菜单权限控制体系**——`app.py` 批量/单用户权限配置的 `ALL_MENUS` 与 `MENU_NAMES` 补齐 `dashboard`/`family`（修复管理员保存用户设置时静默清零新菜单权限的严重 bug）；`routes_ext.py` 工单申请清单 `TICKET_MENU_OPTIONS` 补齐两项（普通用户可申请「数据分析」「家庭记账」权限）；`menu_map` 拦截器补充 `api_family_invitable_users`/`api_family_my_perspective_users`/`export_*`/`poster_*` 等新路由的权限映射；`admin_users.html` 单用户与批量配置弹窗新增「数据分析」（0~1 级）和「家庭记账」（0~3 级）的复选框+数据权限下拉；② **Webhook 推送矩阵**——`webhook_utils.py` 的 `PAGE_NAMES` 新增 `'dashboard':'数据分析'`/`'family':'家庭记账'`，`PAGE_EVENT_MATRIX` 新增 `family` 行（create/delete/status_change/security 事件），`dashboard` 为只读看板不加入矩阵；家庭组创建/邀请/解散路由补充 `trigger_webhook_event` 推送调用。
+> - 🔧 **V10.11.1 导入导出格式统一 + 页面布局优化 + 海报二维码 + 看板趋势选择器**：① **全系统导出支持 Excel 格式**——礼金记录导出路由 `/export/csv` 新增 `format=xlsx` 参数（openpyxl 生成 .xlsx，自动列宽），宴席台账导出修复名不副实问题（`banquet_export_excel` 真实输出 .xlsx），导入模版下载支持 `format=xlsx`；② **礼金账本按钮区重构**——合并「批量导入(CSV)」和「Excel导入」为统一「导入」下拉入口（含 Excel/CSV 字段映射导入、CSV 快速导入、模版下载、拍照识别），合并「导出CSV」和「打印/导出」为统一「导出」下拉入口（含全部/筛选/勾选 × CSV/Excel 双格式 + 打印人情簿 + PDF 对账单 + 长图海报），高危「清空数据」移至最右侧并改为暗色样式；③ **导航栏防换行**——导航菜单项 CSS 新增 `white-space: nowrap` + 紧凑 padding，消除文字被拆行问题；④ **海报二维码自定义**——管理员可在「系统管理 > 海报二维码设置」中配置注册 URL（`SystemSetting.poster_qr_url`），海报底部二维码从静态占位文字升级为真实二维码（qrcode-generator 1.4.4 本地化）；⑤ **数据分析看板趋势选择器**——月度模式新增月份范围选择器（`<input type="month">` 起始~结束），年度模式新增年份范围选择器（数字输入框），API `/api/dashboard/stats` 新增 `start_month/end_month/start_year/end_year` 可选参数，支持查询特定时间段的走势数据。
+> - 📊 **V10.11 可视化数据分析看板（功能一）**：集成 ECharts 5.5.0（本地化 `static/vendor/echarts/`），新增数据分析看板页面 `/dashboard`；支持月度/年度礼金收送走势折线图、事由分布饼图、亲友往来 TOP10 横向柱状图与净现金流汇总卡片；月度/年度趋势一键切换，适配黑夜/白天双主题；导航栏新增「数据分析」菜单项，菜单权限体系新增 `dashboard` 键。
+> - 👨‍👩‍👧‍👦 **V10.11 家庭多成员协作记账（功能二）**：新增 `FamilyGroup`（家庭组）+ `FamilyMember`（家庭成员关联）两张表（`_SCHEMA_VERSION` 升至 1018）；支持创建家庭组、邀请已注册用户为成员（角色：家长 head / 成员 member / 只读 viewer）、家庭昵称、解散家庭组；家长可查看全家成员汇总数据，成员默认仅看自己数据；导航栏新增「家庭记账」菜单项，菜单权限体系新增 `family` 键。
+> - 📁 **V10.11 批量导入与智能识别（功能三）**：① **Excel 批量导入**——新增 `openpyxl` 依赖，支持 `.xlsx/.xls/.csv` 文件上传后自动识别列名并智能匹配系统字段（姓名/金额/事由/收送类型等），预览前 5 行数据确认后批量入库；② **OCR 图片智能识别**——`ai_service.py` 新增 `recognize_gift_image()` 函数，调用用户已配置的 AI Vision 模型识别人情簿/礼金簿图片，结构化提取姓名/金额/事由/收送类型后可编辑勾选入库；礼金账本页面新增「Excel 导入」与「拍照识别」入口。
+> - 🖨️ **V10.11 人情簿打印与海报导出（功能四）**：① **A4 打印人情簿**——纯 CSS `@media print` 实现传统中式竖排风格人情簿 A4 打印预览（`templates/print_giftbook.html`），每页约 20 条、页眉/页脚/汇总栏/金额大写全要素；② **PDF 对账单**——新增 `reportlab` 依赖 + `pdf_generator.py` 模块，服务端生成含封面/汇总/明细的 PDF 对账单；③ **手机长图海报**——`html2canvas`（本地化 `static/vendor/html2canvas/`）将暖色中式风格海报模板渲染为 PNG 长图，含收送汇总/TOP5 亲友/事由分布/二维码水印；礼金账本页面新增「打印/导出」下拉按钮。
 > - 🔄 **V10.10.29 独立 PG 生命周期闭环：stop 无条件释放 + start 自动重建（两版同步）**：修复传统版独立 PG 部署后 `./run.sh stop` 不释放 PG 容器的问题——① **stop 无条件释放**：此前释放逻辑嵌在端口检查成功分支内（端口被占时整体跳过）且仅 `docker stop` 不删容器（Exited 残留）；现移出分支无条件执行 `docker rm -f`（对齐 Docker 版 compose down：容器删除、数据卷保留、start 时自动重建），容器名优先读 `.db.env` 持久化值，非 independent 模式按本版命名约定（`${PROJECT_NAME}-pg`）兑底清理遗留容器，共享 PG 模式提示"外部容器保留运行"；② **start 自动重建闭环**：容器非 running 时自动重建（V10.10.28 版本化数据卷自动接回原数据）、running 幂等跳过、重建失败降级 SQLite 时**中止启动**（已有 PG 数据绝不静默切库）、PROJECT_NAME 变更时先清理旧名容器防泄漏；③ **`.db.env` 持久化扩展（对齐 Docker 版做法）**：start 时写入容器名/镜像/挂载路径/连接参数（`grep -v` 剥旧字段再追加、空值不写入）；④ **`db_select.sh` 共享文件修正（两版同步）**：`DB_MODE` 环境变量直通部署改为无条件 `save_db_env`（此前 independent 直通不保存，stop 识别不了模式无法释放——Docker 版同场景下 compose down 不带 db.yml、pg 容器同样不释放）；沙盒 mock docker 26 项断言全部通过；存量老部署升级后建议执行一次 `./run.sh restart --reconfig` 重选独立 PG 补全持久化字段（一次性）。
 > - 🐘 **V10.10.28 独立 PG 版本化数据卷 + 存量卷自动迁移（两版同步）**：① **PG 版本化数据卷命名**——此前独立 PG 使用固定卷名（传统版 `${PROJECT_NAME}_pg_data` / Docker 版 `gift_pg_data`），跨 PG 版本镜像切换时同一卷内数据布局冲突导致 initdb 失败（PG16→18 报 "in 18+" / PG18→16 报 "not empty"）；现改为版本化卷名 `${...}_pg_data_${PG_MAJOR}`（如 `gift_app_pg_data_16`），各 PG 版本数据天然隔离；② **`detect_pg_major` 三级探测**——`docker image inspect` 读镜像 PG_MAJOR env → 镜像 tag 数字解析 → 未知 default；③ **存量卷自动迁移**——新版本化卷不存在而旧固定卷存在时，读取旧卷 PG_VERSION 判断兼容性：同版本 `cp -a` 迁移（保留旧卷备份）、跨版本保留旧卷用新空卷初始化（附 pg_upgrade 指引）；④ **Docker 版 `detect_pg_data_dir` 升级**——从旧版名字通配符匹配升级为 `docker image inspect` 查镜像真实 PGDATA（与 V10.10.25 传统版同步）；⑤ **Docker 版 `PG_MAJOR` 持久化**——`service.sh` 将 PG_MAJOR 写入 `.temp/.db.env`，restart 不漂移；`docker-compose.db.yml` 卷名改插值 `gift_pg_data_${PG_MAJOR:-default}`。
 > - 🎯 **V10.10.27 两版首次部署默认数据库差异化（两版同步）**：传统版首次部署交互菜单**默认 SQLite**、Docker 版**默认共享 PG**——`bin/config.sh` 新增 `DB_MENU_DEFAULT`（传统版=1、Docker 版=2，可被环境变量/config.local.sh 覆盖），`db_select.sh`（共享文件）默认选项改读该变量，替代此前按内存阈值的智能推荐（旧逻辑两版行为相同）；**环境兜底**：Docker 版默认共享 PG 但未检测到运行中的 PG 容器时自动回退 SQLite（避免默认选项必然失败），非法值/未设置同样回退 SQLite；菜单项 1（SQLite）补上与其他项一致的 ⭐ 推荐标记；五场景模拟验证通过（传统→1 / Docker 有 PG→2 / Docker 无 PG→回退 1 / 非法值→回退 1 / 未设置→回退 1）。
@@ -181,6 +189,37 @@ AIGC:
 - ⏰ **定时备份调度器**：支持 Cron 表达式配置定时备份任务，后台守护线程每 60 秒检查并自动执行加密备份上传到 WebDAV。
 - 👥 **备份功能授权**：管理员可授权普通用户使用备份功能（参照 AI 授权模式），被授权用户可执行备份操作。
 - 📊 **定时任务管理**：支持创建/编辑/删除/启用/禁用定时备份任务，查看最近执行时间和状态。
+
+### 14. 可视化数据分析看板 (Dashboard) `V10.11 新增`
+- 📊 **ECharts 5.5.0 本地化集成**：ECharts JS 库下载至 `static/vendor/echarts/5.5.0/`，不依赖任何 CDN，国内环境零障碍加载。
+- 📈 **月度/年度礼金走势**：双折线图展示收礼与送礼的月度或年度趋势，一键切换趋势粒度，区域填充渐变直观呈现收支波动。
+- 🏆 **亲友往来 TOP10 榜单**：横向堆叠柱状图，按总交互金额排序 TOP10 亲友，收/送分色堆叠一目了然。
+- 🥧 **事由分布饼图**：环形饼图展示各办事事由（婚宴/满月酒/寿宴等）的金额占比，悬停显示具体金额与百分比。
+- 💰 **净现金流看板**：四张统计卡片实时汇总收礼总额、送出总额、净现金流与总笔数。
+- 🌗 **双主题适配**：ECharts 图表配色随黑夜/白天主题动态切换，与全站主题切换无缝联动。
+
+### 15. 家庭多成员协作记账 (Family Group) `V10.11 新增`
+- 👨‍👩‍👧‍👦 **家庭组创建与管理**：创建家庭组（输入名称+描述），创建者自动成为家长角色；支持邀请已注册系统用户加入家庭组。
+- 🔐 **三级协作角色**：家长（head，可管理成员与查看全家数据）、成员（member，可记账与查看自己数据）、只读（viewer，仅可查看家庭汇总数据）。
+- 📝 **主子账本切换**：在礼金账本页面通过视角切换查看「我的账本」「指定成员账本」或「全家汇总账本」（仅家长/admin 可用）。
+- 🏷️ **家庭内昵称**：成员可设置家庭内昵称（如"爸爸""妈妈""大伯"），便于区分身份关系。
+- 🗑️ **家庭组解散**：仅家长可解散家庭组，二次确认后级联删除所有成员关联（不删除成员的用户账号与记账数据）。
+
+### 16. 批量导入与智能识别 (Import & OCR) `V10.11 新增`
+- 📁 **Excel/CSV 批量导入（字段映射）**：上传 `.xlsx/.xls/.csv` 文件后自动解析表头并智能匹配系统字段（姓名/金额/事由/收送类型等），用户可在预览界面确认或调整列映射关系，预览前 5 行数据后一键批量入库。
+- 📷 **OCR 拍照智能识别**：上传人情簿/礼金簿图片，调用用户已配置的 AI Vision 模型（如 GPT-4o、qwen-vl 等）自动识别图片中的所有礼金记录，结构化提取姓名、金额、事由与收送类型，识别结果可编辑勾选后一键入库。
+- 🔗 **AI 配置依赖**：OCR 功能依赖用户在「AI 配置」中设置支持图片识别的 AI 服务（需支持 Vision 接口）；未配置时显示友好提示。
+
+### 17. 人情簿打印与海报导出 (Print & Poster) `V10.11 新增`
+- 🖨️ **传统中式人情簿 A4 打印**：纯 CSS `@media print` 实现传统中式竖排风格人情簿排版，A4 纵向每页约 20 条记录，深红 #8B0000 主色调+楷体/宋体字体栈；页眉显示家庭名称与年度，汇总栏展示收/送/净额，表格含序号/姓名/往来类型/金额/大写金额/事由/备注/日期。
+- 📄 **PDF 对账单生成**：基于 `reportlab` 服务端生成 PDF 对账单，含封面页（标题+日期）、汇总页（收/送/净额统计表）与明细页（全量记录分页表格），自动注册中文字体（Noto CJK / SimSun / 系统字体三级兜底）。
+- 📱 **手机分享长图海报**：基于 `html2canvas` 将暖色中式风格海报模板渲染为 PNG 长图，375px 手机端宽度；内容含收送汇总卡片、TOP5 亲友往来排行、事由分布进度条与品牌水印二维码；一键生成并下载。
+
+### 18. 实时天气预报 (Weather) `V10.11.4 新增`
+- 🌤️ **Open-Meteo 免费数据源**：城市名通过 Geocoding API 解析经纬度与时区，再经 Forecast API 查询实时天气与未来 3 天预报；服务端 `requests` 调用，无跨域问题、无需 API Key。
+- 🌡️ **实时天气详情**：当前温度、体感温度、相对湿度、天气状况（WMO weather_code 中文映射）、风速。
+- 📅 **未来 3 天预报**：每日最高/最低温度、降水概率、天气状况（中文描述 + 图标），日期显示"月日 周几"。
+- 🛡️ **错误分类提示**：城市未找到 / 参数错误 / Open-Meteo 服务 error / 网络超时与不可用分别给出中文指引，日志不泄露堆栈。
 
 ---
 

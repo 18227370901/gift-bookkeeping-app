@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}实时天气 - 人情礼金记账系统{% endblock %}
+
+{% block content %}
+<div class="card shadow-sm">
+    <div class="card-header">
+        <i class="fa-solid fa-cloud-sun me-2 text-primary"></i>实时天气预报
+        <span class="small text-muted ms-2">数据来源：Open-Meteo（免费天气接口，无需密钥）</span>
+    </div>
+    <div class="card-body">
+        <!-- 城市搜索框 -->
+        <div class="row g-2 mb-4">
+            <div class="col-sm-8 col-md-6 col-lg-5">
+                <div class="input-group">
+                    <span class="input-group-text"><i class="fa-solid fa-magnifying-glass"></i></span>
+                    <input type="text" class="form-control" id="cityInput" placeholder="输入城市名，如：北京" maxlength="30" autocomplete="off">
+                    <button class="btn btn-primary" type="button" id="searchBtn">
+                        <i class="fa-solid fa-cloud-sun me-1"></i>查询天气
+                    </button>
+                </div>
+            </div>
+            <div class="col-sm-4 col-md-6 col-lg-7 d-flex align-items-center">
+                <div id="queryStatus" class="small text-muted"></div>
+            </div>
+        </div>
+
+        <!-- 查询结果区域 -->
+        <div id="weatherResult"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    'use strict';
+
+    // ===== 元素引用 =====
+    var cityInput = document.getElementById('cityInput');
+    var searchBtn = document.getElementById('searchBtn');
+    var queryStatus = document.getElementById('queryStatus');
+    var weatherResult = document.getElementById('weatherResult');
+
+    // ===== 工具函数 =====
+    function escapeHtml(str) {
+        if (str === null || str === undefined) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function getCsrfToken() {
+        var meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    }
+
+    // "2026-10-09" → "10月9日 周五"
+    function formatDate(dateStr) {
+        var parts = String(dateStr).split('-').map(Number);
+        if (parts.length < 3 || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) {
+            return dateStr || '';
+        }
+        var d = new Date(parts[0], parts[1] - 1, parts[2]);
+        var weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
+        return parts[1] + '月' + parts[2] + '日 ' + weekdays[d.getDay()];
+    }
+
+    // 数值显示兜底：null/undefined/空 → '--'
+    function fmt(v, suffix) {
+        if (v === null || v === undefined || v === '') return '--';
+        return v + (suffix || '');
+    }
+
+    // ===== 渲染 =====
+    function renderResult(data) {
+        var city = data.city || {};
+        var cur = data.current || {};
+        var daily = data.daily || [];
+        var cityName = [city.name, city.admin1].filter(Boolean).join('，');
+        var country = city.country || '';
+        var html = '';
+
+        // ---- 实时天气卡片 ----
+        html += '<div class="card border mb-3">';
+        html += '  <div class="card-body">';
+        html += '    <div class="d-flex align-items-center mb-3">';
+        html += '      <div class="flex-grow-1">';
+        html += '        <h5 class="mb-0"><i class="fa-solid fa-location-dot me-2 text-danger"></i>' + escapeHtml(cityName) + '</h5>';
+        html += '        <div class="small text-muted">' + escapeHtml(country) + (cur.time ? ' ｜ 更新时间：' + escapeHtml(cur.time) : '') + '</div>';
+        html += '      </div>';
+        html += '    </div>';
+        html += '    <div class="row align-items-center">';
+        html += '      <div class="col-md-6 d-flex align-items-center mb-3 mb-md-0">';
+        html += '        <i class="fa-solid ' + (cur.icon || 'fa-cloud') + ' fa-4x me-3 text-warning"></i>';
+        html += '        <div>';
+        html += '          <div class="display-6 fw-bold">' + fmt(cur.temperature, '') + '<span class="fs-4">°C</span></div>';
+        html += '          <div class="text-muted">' + escapeHtml(cur.weather_text || '未知') + '</div>';
+        html += '        </div>';
+        html += '      </div>';
+        html += '      <div class="col-md-6">';
+        html += '        <table class="table table-sm table-borderless mb-0">';
+        html += '          <tbody>';
+        html += '            <tr><td class="text-muted w-50"><i class="fa-solid fa-temperature-half me-2"></i>体感温度</td><td class="fw-semibold">' + fmt(cur.apparent_temperature, '°C') + '</td></tr>';
+        html += '            <tr><td class="text-muted w-50"><i class="fa-solid fa-droplet me-2"></i>相对湿度</td><td class="fw-semibold">' + fmt(cur.humidity, '%') + '</td></tr>';
+        html += '            <tr><td class="text-muted w-50"><i class="fa-solid fa-wind me-2"></i>风速</td><td class="fw-semibold">' + fmt(cur.wind_speed, ' km/h') + '</td></tr>';
+        html += '          </tbody>';
+        html += '        </table>';
+        html += '      </div>';
+        html += '    </div>';
+        html += '  </div>';
+        html += '</div>';
+
+        // ---- 未来 3 天预报卡片 ----
+        if (daily.length > 0) {
+            html += '<h6 class="text-muted mb-2"><i class="fa-solid fa-calendar-days me-2"></i>未来 ' + daily.length + ' 天预报</h6>';
+            html += '<div class="row g-3">';
+            daily.forEach(function (d) {
+                html += '  <div class="col-md-4">';
+                html += '    <div class="card h-100 border text-center shadow-sm">';
+                html += '      <div class="card-body">';
+                html += '        <div class="small text-muted mb-2">' + escapeHtml(formatDate(d.date)) + '</div>';
+                html += '        <i class="fa-solid ' + (d.icon || 'fa-cloud') + ' fa-2x text-warning mb-2"></i>';
+                html += '        <div class="fw-bold">' + escapeHtml(d.weather_text || '未知') + '</div>';
+                html += '        <div class="mt-2">';
+                html += '          <span class="text-danger fw-semibold">' + fmt(d.temp_max, '°') + '</span>';
+                html += '          <span class="text-muted mx-1">/</span>';
+                html += '          <span class="text-primary fw-semibold">' + fmt(d.temp_min, '°') + '</span>';
+                html += '        </div>';
+                html += '        <div class="small text-muted mt-2"><i class="fa-solid fa-umbrella me-1"></i>降水概率 ' + fmt(d.precip_prob, '%') + '</div>';
+                html += '      </div>';
+                html += '    </div>';
+                html += '  </div>';
+            });
+            html += '</div>';
+        }
+
+        weatherResult.innerHTML = html;
+    }
+
+    function showError(message) {
+        weatherResult.innerHTML =
+            '<div class="alert alert-warning shadow-sm"><i class="fa-solid fa-circle-exclamation me-2"></i>' +
+            escapeHtml(message) + '</div>';
+    }
+
+    // ===== 查询逻辑 =====
+    function doQuery() {
+        var city = cityInput.value.trim();
+        if (!city) {
+            showError('请输入城市名称');
+            cityInput.focus();
+            return;
+        }
+
+        queryStatus.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>正在查询「' + escapeHtml(city) + '」的天气…';
+        searchBtn.disabled = true;
+        searchBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>查询中';
+
+        fetch('/api/weather/query?city=' + encodeURIComponent(city), {
+            method: 'GET',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': getCsrfToken()
+            }
+        })
+        .then(function (res) {
+            return res.json().catch(function () {
+                return { code: res.status, message: '服务响应异常' };
+            });
+        })
+        .then(function (data) {
+            if (data.code === 200 && data.data) {
+                queryStatus.innerHTML = '<span class="text-success"><i class="fa-solid fa-circle-check me-1"></i>查询成功</span>';
+                renderResult(data.data);
+            } else {
+                showError(data.message || '查询失败，请稍后重试');
+            }
+        })
+        .catch(function () {
+            showError('网络请求失败，请稍后重试');
+        })
+        .finally(function () {
+            searchBtn.disabled = false;
+            searchBtn.innerHTML = '<i class="fa-solid fa-cloud-sun me-1"></i>查询天气';
+        });
+    }
+
+    // ===== 事件绑定 =====
+    searchBtn.addEventListener('click', doQuery);
+    cityInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            doQuery();
+        }
+    });
+
+    // 页面加载后自动查询默认城市（北京）
+    cityInput.value = '北京';
+    doQuery();
+})();
+</script>
+{% endblock %}
