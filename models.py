@@ -1127,3 +1127,40 @@ class FamilyMember(db.Model):
     @property
     def is_head(self):
         return self.role == 'head'
+
+
+class AlertPushConfig(db.Model):
+    """V10.11.8 告警消息推送配置（单行全局配置，id 固定为 1）
+    管理员菜单权限 ↔ WebDAV 页告警推送配置联调：
+      - 总开关关闭 / 权限全部回收时，后台巡检线程自动停用推送（配置保留不生效）
+      - 静默期：同类型告警在 silence_minutes 内不重复推送，避免告警风暴
+    """
+    __tablename__ = 'alert_push_configs'
+    id = db.Column(db.Integer, primary_key=True)                 # 固定 1（单行全局）
+    enabled = db.Column(db.Boolean, default=False)               # 总开关
+    weather_alert_on = db.Column(db.Boolean, default=False)      # 触发条件：天气预警
+    interface_error_on = db.Column(db.Boolean, default=False)    # 触发条件：接口异常
+    data_integrity_on = db.Column(db.Boolean, default=False)     # 触发条件：数据完整性
+    task_failed_on = db.Column(db.Boolean, default=False)        # 触发条件：定时任务失败
+    silence_minutes = db.Column(db.Integer, default=30)          # 静默期（分钟）
+    merge_push = db.Column(db.Boolean, default=True)             # 一次巡检多告警合并为一条推送
+    alert_cities = db.Column(db.String(200), default='北京')      # 天气预警巡检城市（逗号/顿号分隔，上限 5 个）
+    last_push_at = db.Column(db.Text, default='{}')              # 各类型上次推送时间 JSON：{"weather_alert": "...", ...}
+    last_inspect_time = db.Column(db.DateTime, nullable=True)    # 上次巡检时间（前端展示用）
+    updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)
+
+
+class AlertPushGrant(db.Model):
+    """V10.11.8 告警操作授权（按用户，复用「定时任务授权」模式）
+    权限粒度：可编辑配置 / 可发送测试推送 / 可查看推送日志
+    超级管理员（is_admin）默认全部权限；普通管理员按本表授权判定
+    """
+    __tablename__ = 'alert_push_grants'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False, unique=True)
+    can_edit = db.Column(db.Boolean, default=False)              # 可编辑告警推送配置
+    can_test = db.Column(db.Boolean, default=False)              # 可发送测试推送
+    can_view_log = db.Column(db.Boolean, default=False)          # 可查看推送日志
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('alert_push_grant', uselist=False, lazy=True))

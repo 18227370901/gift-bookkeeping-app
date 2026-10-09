@@ -11,7 +11,7 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.11.7  
+> **版本**：V10.11.8  
 > **生成日期**：2026-10-09  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
@@ -1470,14 +1470,90 @@ graph LR
 | `routes_weather.py` | `days/lat/lon/label/province/city2` 参数 |
 | `templates/weather.html` | 重写：级联 + 自由输入双模式、首页式布局、趋势图、记忆恢复 |
 
+### 10.13 V10.11.8 天气页面全面增强 + 告警消息推送（权限联调）
+
+#### 功能一：天气查询交互修复（4 项）
+
+| 项 | 说明 |
+|---|---|
+| 级联任意级查询 | 省级（未选市）→省会坐标、市级（未选县）→市中心坐标、县级→县坐标；`doCascadeQuery` 放开三级全选限制，label 按所选层级拼接去重 |
+| 懒加载逐级展开 | 初始仅显省下拉；选省后显市下拉（`citySelectWrap`）；选市后显县下拉（`districtSelectWrap`）；重选/清空时逐级隐藏 |
+| 自由输入本地匹配 | `localMatchCity(text)`：归一化去后缀 + 省/市/县三级匹配（与后端 `_norm_region` 同规则），更具体层级优先（县>市>省）；命中走坐标模式直查（修复「成都市」在线解析 404），未命中回退后端 Geocoding（保留国外城市能力） |
+| 双按钮冲突修复 | 每个按钮独立 loading（`btnPending` 计数，只改被点按钮文案），另一按钮保持原状；`reqSeq` 请求序号防竞态（旧响应丢弃不渲染） |
+| 页面锁死修复 | ① 前端 `AbortController` 30s 超时（后端直连+代理兑底最坏 26s，超时必恢复按钮，杜绝永久「查询中」）；② 记忆键全部追加用户 ID（`gift_weather_{uid}_*`，同浏览器多账号不串扰，修复退出重进残留他人查询）；③ 新增「重置记忆」按钮一键清空恢复默认北京 |
+
+#### 功能二：天数自定义 + 日历视图 + 对比 + 指数 + 空气质量
+
+| 项 | 说明 |
+|---|---|
+| 天数控件 | 分段按钮（7/15/16）+ 下拉框（1~16）组合；切换即按当前查询上下文重查，localStorage 记忆 |
+| 日历月视图 | 当月网格（周一起始）每日含图标/高低温/降水概率；预报范围外灰置「—」不可点；月份导航不可早于当前月；今日蓝高亮、选中绿描边 |
+| 日历周视图 | 今天起 7 天全要素行（天气/温度/降水概率/紫外线/降水总量/日出日落） |
+| 点击联动 | 选中日期 → 详情面板（8 项指标）+ 趋势图绿色虚线标记线（markLine）+ 月/周视图同步高亮 |
+| 多城对比 | 输入省/市/县名添加（本地匹配、去重、上限 3 个）；主城 + 对比城最高温同图叠加（ECharts 多系列 + 图例）；单城失败跳过并提示；记忆持久化 |
+| 生活指数 | 穿衣（体感 6 档）/雨伞（降水概率 3 档）/防晒（紫外线 5 档）/洗车（雨雪码+概率）/出行（风速 3 档）/舒适度（温湿度区间）—— 6 项自研规则 2×3 卡片 |
+| 空气质量 | `fetch_air_quality`（Air Quality API `current=pm10,pm2_5,us_aqi`）失败静默降级；PM2.5 按中国 24h 标准分级（0-35 优→>250 严重）配色徽章 + PM10 数值 |
+
+#### 功能三：告警消息推送（管理员菜单权限 ↔ WebDAV 告警配置联调）
+
+| 项 | 说明 |
+|---|---|
+| 数据模型 | `alert_push_configs`（单行全局配置：总开关/4 类触发/静默期/合并推送/巡检城市/last_push_at JSON）+ `alert_push_grants`（按用户操作授权，user_id 唯一）；`_SCHEMA_VERSION` 1018 → **1019** |
+| 巡检线程 | `alert_service.start_alert_inspector`：daemon 线程，首轮延迟 60s 后每 30 分钟一轮；每轮实时判定总开关 + 有效授权（无任何授权用户自动停用推送，配置保留不生效） |
+| 天气预警规则 | 巡检城市逐一调 Open-Meteo（8 天窗口）：降温≥8℃ / 日降水概率≥70% / 阵风≥50km/h / 最低温≤0℃ / 最高温≥38℃ |
+| 接口异常 | 巡检中天气接口调用失败即事件源（城市 + 错误摘要） |
+| 数据完整性 | 关键文件非空校验（china-regions.js/table-resizer.js/echarts/weather.html/base.html/weather_service.py/routes_weather.py/alert_service.py） |
+| 定时任务失败 | 扫描 35 分钟回溯窗口内 `scheduled_task_execution_logs` failed 记录（同任务去重） |
+| 频控 | 同类型静默期内不重复推（`should_push`/`mark_pushed`，持久化重启后仍有效）；同类型多条合并一条消息（日志分类准确） |
+| 推送执行 | 复用 `trigger_webhook_event(force_channels=True)`：企微长连接/钉钉/飞书/pushplus/通用 URL 全支持；邮件本轮不含 |
+| 路由 | `routes_alert.py`：config（GET/POST）/test/run/logs/logs-csv/grants（GET/POST）；全部操作级实时校验 + menu_map backups 门控 |
+| 前端配置区 | `admin_backups.html` 新增「告警消息推送」卡片：配置区 + 立即巡检 + 测试推送 + 授权管理表（仅超管）+ 日志筛选（类型/结果/分页/CSV 导出）；权限三态渲染（无编辑→置灰+提示条；无测试→隐藏按钮；无日志→隐藏区） |
+| 联调规则 | 无 backups 菜单权限 URL 直访被 menu_map 拦截；操作中权限回收 → 403 + 前端提示跳首页；保存失败事务回滚保留原配置；权限全回收 → 巡检自动停用（无孤儿任务）；授权保存立即生效 |
+
+#### 功能四：AI 配置网络策略修复
+
+| 项 | 说明 |
+|---|---|
+| 问题现象 | AI 配置页「获取模型列表」持续超时；「测试」约 26s 后报 Connection error（API 配置本身正确） |
+| 根因 | `requests` 与 OpenAI SDK（httpx）默认 `trust_env` 自动走系统代理；用户机器代理进程存活但出口节点不通时，全部 AI 出网请求挂死在坏代理上直至超时（与 V10.11.7 天气修复前同款问题） |
+| 双路径函数 | `_ai_http_get(url)`：requests 禁代理直连优先 + 系统代理兜底，超时 `AI_HTTP_TIMEOUT=(5, 20)`；`_chat_with_fallback`：SDK `httpx.Client(trust_env=False)` 直连优先，仅 `APIConnectionError`（连接类异常含超时）回落系统代理重试一次，鉴权/参数类错误不回落 |
+| 覆盖调用链 | `fetch_model_list`（模型列表）/ `test_ai_config`（配置测试，timeout=15）/ `_call_openai`（AI 对话，timeout=30）/ `recognize_gift_image`（OCR，timeout=120）全部 4 条 |
+| 验证 | 「获取模型列表」秒回 12 个 Agnes 模型；「测试」`agnes-3.0-flash` 5.1s 返回「测试成功」（修复前 26.3s Connection error）；个别模型返回空内容时提示「接口连通正常但返回内容为空，请检查模型名称」（属模型侧行为非网络问题） |
+
+#### 验证结论（隔离副本库 55 项断言 + 11444 临时实例）
+
+| 场景 | 结果 |
+|---|---|
+| 6 文件语法编译 + schema 1019 迁移 + 两新表建表 | ✅ |
+| 16/7 天预报 + air_quality 真实返回（pm25=43.5） | ✅ |
+| 告警配置初始化/授权判定/回收失效/静默期/巡检跳过/开启巡检/完整性/任务失败检测/城市解析 | ✅ |
+| admin 全流程（config 保存/越界拒/空城拒/测试无通道提示/手动巡检/日志/筛选/CSV/授权/回收） | ✅ |
+| 普通用户 5 个接口全部被拦截（menu_map 门控） | ✅ |
+| 副本库运行库隔离确认（运行库仍 1018 无 alert 表） | ✅ |
+| AI 网络策略修复（模型列表 12 个秒回 + 配置测试 5.1s 成功） | ✅ |
+
+#### 文件变更清单
+
+| 文件 | 变更 |
+|---|---|
+| `models.py` | 新增 `AlertPushConfig` / `AlertPushGrant` 两模型 |
+| `app.py` | `_SCHEMA_VERSION` 1019 + 两表建表迁移 + 告警路由注册 + 巡检线程启动 |
+| `alert_service.py` | 新增：配置/授权/频控/四类检测/巡检线程/测试推送 |
+| `routes_alert.py` | 新增：告警 8 个 API（config/test/run/logs/csv/grants） |
+| `routes_ext.py` | `menu_map` 补 8 个告警 endpoint（backups 门控） |
+| `weather_service.py` | 新增 `fetch_air_quality` + `_build_result` 扩展 air_quality 字段 |
+| `templates/weather.html` | 重写：4 bug 修复 + 天数控件 + 日历月/周 + 对比 + 指数 + 空气质量 + 用户级记忆 |
+| `templates/admin_backups.html` | 新增「告警消息推送」卡片（配置/授权/日志三区） |
+| `ai_service.py` | 新增 `_ai_http_get` / `_chat_with_fallback` 双路径出网函数，改造 4 处调用点（模型列表/测试/对话/OCR） |
+
 ---
 
 ## 附录：文档元数据
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V10.11.7 |
-| 生成日期 | 2026-10-09（V10.11.7 修订，表格列宽手动调整 + 天气页面改版；承接 V10.11.6 天气权限管控） |
+| 文档版本 | V10.11.8 |
+| 生成日期 | 2026-10-09（V10.11.8 修订，天气页面全面增强 + 告警消息推送权限联调 + AI 配置网络策略修复；承接 V10.11.7 表格列宽与天气改版） |
 | 审计基线 | 代码 commit main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建）） |
 | 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |

@@ -431,6 +431,156 @@
 
 <div class="row g-4">
   <div class="col-12">
+    <!-- V10.11.8 告警消息推送（管理员菜单权限 ↔ WebDAV 告警配置联调；无权限用户本卡片自动隐藏） -->
+    <div class="card border-0 shadow-sm rounded-4 mb-4" id="alertPushCard" style="display:none">
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+          <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-bell text-warning me-2"></i>告警消息推送</h5>
+          <div class="form-text small text-muted mt-1"><i class="fa-solid fa-shield-halved me-1"></i>权限与配置联调：权限变更后本区状态实时生效；后台每 30 分钟自动巡检</div>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3" id="alertRunBtn" onclick="runAlertInspection()">
+            <i class="fa-solid fa-play me-1"></i>立即巡检
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-warning rounded-pill px-3" id="alertTestBtn" onclick="sendAlertTest()">
+            <i class="fa-solid fa-paper-plane me-1"></i>发送测试推送
+          </button>
+        </div>
+      </div>
+      <div class="card-body">
+        <!-- 无编辑权限提示条（只读管理员视觉表现：可查看、配置置灰） -->
+        <div id="alertPermBanner" class="alert alert-warning py-2 small d-none mb-3">
+          <i class="fa-solid fa-lock me-1"></i>您当前无告警配置编辑权限，仅可查看（如权限已变更，<a href="javascript:location.reload()">刷新页面</a>获取最新状态）
+        </div>
+
+        <!-- 配置区 -->
+        <div class="row g-3 mb-3">
+          <div class="col-md-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="alertEnabled">
+              <label class="form-check-label small fw-bold" for="alertEnabled">推送总开关</label>
+              <div class="form-text small text-muted">关闭后巡检保留、推送跳过，配置不丢失</div>
+            </div>
+          </div>
+          <div class="col-md-9">
+            <div class="small fw-bold mb-2"><i class="fa-solid fa-bolt text-warning me-1"></i>触发条件</div>
+            <div class="d-flex flex-wrap gap-3">
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="alertWeatherOn">
+                <label class="form-check-label small" for="alertWeatherOn">天气预警（降温/暴雨/大风/冰冻/高温）</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="alertInterfaceOn">
+                <label class="form-check-label small" for="alertInterfaceOn">接口异常</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="alertIntegrityOn">
+                <label class="form-check-label small" for="alertIntegrityOn">数据完整性</label>
+              </div>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="alertTaskOn">
+                <label class="form-check-label small" for="alertTaskOn">定时任务失败</label>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label small text-muted mb-1" for="alertSilence">推送频率限制（静默期）</label>
+            <div class="input-group input-group-sm">
+              <input type="number" class="form-control" id="alertSilence" min="0" max="1440" value="30">
+              <span class="input-group-text">分钟</span>
+            </div>
+            <div class="form-text small text-muted">同类型告警静默期内不重复推送，避免告警风暴</div>
+          </div>
+          <div class="col-md-3">
+            <div class="form-check form-switch mt-4">
+              <input class="form-check-input" type="checkbox" id="alertMerge">
+              <label class="form-check-label small fw-bold" for="alertMerge">合并推送</label>
+              <div class="form-text small text-muted">同类型多条告警合并为一条消息</div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label small text-muted mb-1" for="alertCities">天气预警巡检城市</label>
+            <input type="text" class="form-control form-control-sm" id="alertCities" value="北京" maxlength="200" placeholder="多个城市用逗号分隔，最多 5 个，如：北京，成都">
+            <div class="form-text small text-muted">按行政区划库匹配（支持省/市/区县名），巡检时逐城检测预警规则</div>
+          </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+          <button type="button" class="btn btn-sm btn-primary rounded-pill px-3" id="alertSaveBtn" onclick="saveAlertConfig()">
+            <i class="fa-solid fa-floppy-disk me-1"></i>保存配置
+          </button>
+          <span class="small text-muted" id="alertMeta"></span>
+        </div>
+        <div id="alertStatus" class="small"></div>
+
+        <!-- 操作授权管理（仅超级管理员可见） -->
+        <div id="alertGrantArea" class="d-none mt-4">
+          <h6 class="fw-bold mb-2"><i class="fa-solid fa-user-gear text-success me-1"></i>操作授权（按用户；超级管理员默认全部权限）</h6>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0" data-resizable="admin_alert_grants">
+              <thead class="table-light">
+                <tr>
+                  <th class="ps-3" data-col="user">用户名</th>
+                  <th data-col="edit" data-col-min="90" data-col-max="160">可编辑配置</th>
+                  <th data-col="test" data-col-min="90" data-col-max="160">可测试推送</th>
+                  <th data-col="log" data-col-min="90" data-col-max="160">可查日志</th>
+                  <th data-col="op" data-col-min="90" data-col-max="160">操作</th>
+                </tr>
+              </thead>
+              <tbody id="alertGrantBody"></tbody>
+            </table>
+          </div>
+          <div class="form-text small text-muted mt-1"><i class="fa-solid fa-circle-info me-1"></i>权限全部回收后，告警推送任务自动停用（配置保留不生效，不产生孤儿任务）；授权保存后立即生效</div>
+        </div>
+
+        <!-- 推送日志（需查看日志权限） -->
+        <div id="alertLogArea" class="d-none mt-4">
+          <h6 class="fw-bold mb-2"><i class="fa-solid fa-list-check text-primary me-1"></i>推送日志（记录时间/类型/结果，与配置变更时间线可对应）</h6>
+          <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+            <select id="alertLogType" class="form-select form-select-sm" style="width:auto">
+              <option value="">全部类型</option>
+              <option value="weather_alert">天气预警</option>
+              <option value="interface_error">接口异常</option>
+              <option value="data_integrity">数据完整性</option>
+              <option value="task_failed">定时任务失败</option>
+              <option value="alert_test">测试推送</option>
+            </select>
+            <select id="alertLogResult" class="form-select form-select-sm" style="width:auto">
+              <option value="">全部结果</option>
+              <option value="success">仅成功</option>
+              <option value="failed">仅失败</option>
+            </select>
+            <button type="button" class="btn btn-sm btn-outline-primary" onclick="loadAlertLogs(1)"><i class="fa-solid fa-magnifying-glass me-1"></i>筛选</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="exportAlertLogsCsv()"><i class="fa-solid fa-file-csv me-1"></i>导出 CSV</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 small" data-resizable="admin_alert_logs">
+              <thead class="table-light">
+                <tr>
+                  <th data-col="time" data-col-min="110" data-col-max="170">时间</th>
+                  <th data-col="type" data-col-min="80" data-col-max="140">类型</th>
+                  <th data-col="result" data-col-min="70" data-col-max="120">结果</th>
+                  <th data-col="resp">响应摘要</th>
+                </tr>
+              </thead>
+              <tbody id="alertLogBody"></tbody>
+            </table>
+          </div>
+          <div class="d-flex justify-content-between align-items-center mt-2">
+            <span class="small text-muted" id="alertLogPage"></span>
+            <div class="btn-group btn-group-sm">
+              <button type="button" class="btn btn-outline-secondary" onclick="alertLogPrev()"><i class="fa-solid fa-chevron-left"></i></button>
+              <button type="button" class="btn btn-outline-secondary" onclick="alertLogNext()"><i class="fa-solid fa-chevron-right"></i></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-12">
     <!-- WebDAV 云端备份与恢复 -->
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
@@ -1249,5 +1399,266 @@ if (btnTestWebdavUser) {
     });
   });
 }
+// ==================== V10.11.8 告警消息推送（权限与配置联调） ====================
+// 权限三态渲染依据：alertPerms（后端实时校验，前端不硬编码）
+var alertPerms = { edit: false, test: false, view_log: false, is_admin: false };
+var alertLogPageNum = 1, alertLogTotalPages = 1;
+
+function alertCsrfHeaders() {
+  return {
+    'X-CSRFToken': '{{ csrf_token }}',
+    'X-CSRF-Token': '{{ csrf_token }}',
+    'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest'
+  };
+}
+
+function setAlertStatus(ok, message) {
+  var box = document.getElementById('alertStatus');
+  if (!box) return;
+  box.innerHTML = ok
+    ? '<span class="text-success"><i class="fa-solid fa-circle-check me-1"></i>' + (message || '操作成功') + '</span>'
+    : '<span class="text-danger"><i class="fa-solid fa-circle-exclamation me-1"></i>' + (message || '操作失败') + '</span>';
+}
+
+// 联调规则：权限被动态回收 → 当前操作立即失效，提示权限已变更并跳回首页
+function handleAlertDeny(status, data) {
+  if (status === 403) {
+    alert((data && data.message) || '权限已变更，本次操作被拒绝');
+    location.href = '/';
+    return true;
+  }
+  return false;
+}
+
+// 页面加载：拉取配置 + 权限快照并渲染（无权限用户卡片自动隐藏）
+function loadAlertConfig() {
+  fetch('/admin/alerts/config', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(function (r) { return r.json().catch(function () { return { success: false }; }); })
+    .then(function (d) {
+      var card = document.getElementById('alertPushCard');
+      if (!card) return;
+      if (!d.success || !d.visible) { card.style.display = 'none'; return; }
+      card.style.display = '';
+      var c = d.config || {};
+      document.getElementById('alertEnabled').checked = !!c.enabled;
+      document.getElementById('alertWeatherOn').checked = !!c.weather_alert_on;
+      document.getElementById('alertInterfaceOn').checked = !!c.interface_error_on;
+      document.getElementById('alertIntegrityOn').checked = !!c.data_integrity_on;
+      document.getElementById('alertTaskOn').checked = !!c.task_failed_on;
+      document.getElementById('alertSilence').value = c.silence_minutes;
+      document.getElementById('alertMerge').checked = !!c.merge_push;
+      document.getElementById('alertCities').value = c.alert_cities || '北京';
+      var meta = [];
+      if (c.last_inspect_time) meta.push('上次巡检：' + c.last_inspect_time);
+      if (c.updated_at) meta.push('配置更新：' + c.updated_at);
+      document.getElementById('alertMeta').textContent = meta.join(' ｜ ');
+      alertPerms = d.perms || alertPerms;
+      applyAlertPerms();
+      if (alertPerms.view_log) loadAlertLogs(1);
+      if (alertPerms.is_admin) loadAlertGrants();
+    })
+    .catch(function () { /* 静默失败：不阻塞备份页其他功能 */ });
+}
+
+// 权限三态应用：无编辑 → 控件置灰+保存禁用；无测试 → 测试按钮隐藏；无日志权限 → 日志区隐藏；非超管 → 授权区隐藏
+function applyAlertPerms() {
+  var ids = ['alertEnabled', 'alertWeatherOn', 'alertInterfaceOn', 'alertIntegrityOn',
+             'alertTaskOn', 'alertSilence', 'alertMerge', 'alertCities'];
+  ids.forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.disabled = !alertPerms.edit;
+  });
+  var saveBtn = document.getElementById('alertSaveBtn');
+  if (saveBtn) {
+    saveBtn.disabled = !alertPerms.edit;
+    saveBtn.classList.toggle('btn-secondary', !alertPerms.edit);
+    saveBtn.classList.toggle('btn-primary', alertPerms.edit);
+  }
+  var banner = document.getElementById('alertPermBanner');
+  if (banner) banner.classList.toggle('d-none', alertPerms.edit);
+  var testBtn = document.getElementById('alertTestBtn');
+  if (testBtn) testBtn.classList.toggle('d-none', !alertPerms.test);
+  var runBtn = document.getElementById('alertRunBtn');
+  if (runBtn) runBtn.classList.toggle('d-none', !alertPerms.edit);
+  var logArea = document.getElementById('alertLogArea');
+  if (logArea) logArea.classList.toggle('d-none', !alertPerms.view_log);
+  var grantArea = document.getElementById('alertGrantArea');
+  if (grantArea) grantArea.classList.toggle('d-none', !alertPerms.is_admin);
+}
+
+// 保存配置（后端逐项校验；失败保留原配置）
+function saveAlertConfig() {
+  if (!alertPerms.edit) return;
+  var payload = {
+    enabled: document.getElementById('alertEnabled').checked,
+    weather_alert_on: document.getElementById('alertWeatherOn').checked,
+    interface_error_on: document.getElementById('alertInterfaceOn').checked,
+    data_integrity_on: document.getElementById('alertIntegrityOn').checked,
+    task_failed_on: document.getElementById('alertTaskOn').checked,
+    silence_minutes: parseInt(document.getElementById('alertSilence').value, 10) || 0,
+    merge_push: document.getElementById('alertMerge').checked,
+    alert_cities: document.getElementById('alertCities').value
+  };
+  fetch('/admin/alerts/config', { method: 'POST', headers: alertCsrfHeaders(), body: JSON.stringify(payload) })
+    .then(function (r) {
+      return r.json().catch(function () { return { success: false, message: '服务响应异常' }; })
+        .then(function (d) { return { status: r.status, data: d }; });
+    })
+    .then(function (res) {
+      if (handleAlertDeny(res.status, res.data)) return;
+      setAlertStatus(!!res.data.success, res.data.message);
+      if (res.data.success) {
+        var c = res.data.config || {};
+        var meta = [];
+        if (c.last_inspect_time) meta.push('上次巡检：' + c.last_inspect_time);
+        if (c.updated_at) meta.push('配置更新：' + c.updated_at);
+        document.getElementById('alertMeta').textContent = meta.join(' ｜ ');
+      }
+    })
+    .catch(function () { setAlertStatus(false, '网络请求失败，配置未保存（原配置保留）'); });
+}
+
+// 发送测试推送（走真实渠道，成败即时反馈）
+function sendAlertTest() {
+  if (!alertPerms.test) return;
+  var btn = document.getElementById('alertTestBtn');
+  btn.disabled = true;
+  fetch('/admin/alerts/test', { method: 'POST', headers: alertCsrfHeaders(), body: '{}' })
+    .then(function (r) {
+      return r.json().catch(function () { return { success: false, message: '服务响应异常' }; })
+        .then(function (d) { return { status: r.status, data: d }; });
+    })
+    .then(function (res) {
+      btn.disabled = false;
+      if (handleAlertDeny(res.status, res.data)) return;
+      setAlertStatus(!!res.data.success, res.data.message);
+    })
+    .catch(function () { btn.disabled = false; setAlertStatus(false, '网络请求失败'); });
+}
+
+// 立即巡检（配置后立即验证，无需等待自动巡检）
+function runAlertInspection() {
+  if (!alertPerms.edit) return;
+  var btn = document.getElementById('alertRunBtn');
+  btn.disabled = true;
+  setAlertStatus(true, '巡检执行中，请稍候…');
+  fetch('/admin/alerts/run', { method: 'POST', headers: alertCsrfHeaders(), body: '{}' })
+    .then(function (r) {
+      return r.json().catch(function () { return { success: false, message: '服务响应异常' }; })
+        .then(function (d) { return { status: r.status, data: d }; });
+    })
+    .then(function (res) {
+      btn.disabled = false;
+      if (handleAlertDeny(res.status, res.data)) return;
+      setAlertStatus(!!res.data.success, res.data.message);
+      loadAlertConfig();  // 巡检后刷新上次巡检时间
+    })
+    .catch(function () { btn.disabled = false; setAlertStatus(false, '网络请求失败'); });
+}
+
+// ===== 推送日志（筛选 + 分页 + 导出） =====
+function loadAlertLogs(page) {
+  if (!alertPerms.view_log) return;
+  if (page) alertLogPageNum = page;
+  var et = document.getElementById('alertLogType').value;
+  var rs = document.getElementById('alertLogResult').value;
+  fetch('/admin/alerts/logs?page=' + alertLogPageNum + '&event_type=' + encodeURIComponent(et) + '&result=' + encodeURIComponent(rs),
+        { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(function (r) {
+      return r.json().catch(function () { return { success: false }; })
+        .then(function (d) { return { status: r.status, data: d }; });
+    })
+    .then(function (res) {
+      if (handleAlertDeny(res.status, res.data)) return;
+      if (!res.data.success) return;
+      var body = document.getElementById('alertLogBody');
+      var items = res.data.items || [];
+      if (!items.length) {
+        body.innerHTML = '<tr><td colspan="4" class="text-center text-muted py-3">暂无推送日志</td></tr>';
+      } else {
+        body.innerHTML = items.map(function (it) {
+          return '<tr>' +
+            '<td>' + it.created_at + '</td>' +
+            '<td>' + it.event_type_name + '</td>' +
+            '<td><span class="badge bg-' + (it.is_success ? 'success' : 'danger') + '">' + (it.is_success ? '成功' : '失败') + (it.status_code ? ' (' + it.status_code + ')' : '') + '</span></td>' +
+            '<td class="text-muted" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (it.response_body || '').replace(/"/g, '&quot;') + '">' + (it.response_body || '—') + '</td>' +
+            '</tr>';
+        }).join('');
+      }
+      alertLogTotalPages = res.data.pages || 1;
+      document.getElementById('alertLogPage').textContent =
+        '第 ' + (res.data.page || 1) + ' / ' + alertLogTotalPages + ' 页，共 ' + (res.data.total || 0) + ' 条';
+    })
+    .catch(function () { /* 静默 */ });
+}
+
+function alertLogPrev() { if (alertLogPageNum > 1) { alertLogPageNum--; loadAlertLogs(); } }
+function alertLogNext() { if (alertLogPageNum < alertLogTotalPages) { alertLogPageNum++; loadAlertLogs(); } }
+
+function exportAlertLogsCsv() {
+  if (!alertPerms.view_log) return;
+  var et = document.getElementById('alertLogType').value;
+  window.open('/admin/alerts/logs/csv?event_type=' + encodeURIComponent(et), '_blank');
+}
+
+// ===== 操作授权管理（仅超级管理员） =====
+function loadAlertGrants() {
+  if (!alertPerms.is_admin) return;
+  fetch('/admin/alerts/grants', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    .then(function (r) {
+      return r.json().catch(function () { return { success: false }; })
+        .then(function (d) { return { status: r.status, data: d }; });
+    })
+    .then(function (res) {
+      if (handleAlertDeny(res.status, res.data)) return;
+      if (!res.data.success) return;
+      var body = document.getElementById('alertGrantBody');
+      var users = res.data.users || [];
+      if (!users.length) {
+        body.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">暂无用户</td></tr>';
+        return;
+      }
+      body.innerHTML = users.map(function (u) {
+        var isAdmin = !!u.is_admin;
+        var dis = isAdmin ? ' disabled' : '';
+        var badge = isAdmin ? ' <span class="badge bg-primary">管理员</span>' : (u.backup_authorized ? ' <span class="badge bg-secondary">备份授权</span>' : '');
+        return '<tr>' +
+          '<td class="ps-3"><i class="fa-solid fa-user text-secondary me-1"></i>' + u.username + badge + '</td>' +
+          '<td><input class="form-check-input" type="checkbox" id="agr_edit_' + u.id + '"' + (u.can_edit ? ' checked' : '') + dis + '></td>' +
+          '<td><input class="form-check-input" type="checkbox" id="agr_test_' + u.id + '"' + (u.can_test ? ' checked' : '') + dis + '></td>' +
+          '<td><input class="form-check-input" type="checkbox" id="agr_log_' + u.id + '"' + (u.can_view_log ? ' checked' : '') + dis + '></td>' +
+          '<td>' + (isAdmin ? '<span class="small text-muted">默认全部权限</span>' :
+            '<button class="btn btn-sm btn-outline-success py-0 px-2" onclick="saveAlertGrant(' + u.id + ', \'' + u.username + '\')"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>') + '</td>' +
+          '</tr>';
+      }).join('');
+    })
+    .catch(function () { /* 静默 */ });
+}
+
+function saveAlertGrant(userId, username) {
+  if (!alertPerms.is_admin) return;
+  var payload = {
+    user_id: userId,
+    can_edit: document.getElementById('agr_edit_' + userId).checked,
+    can_test: document.getElementById('agr_test_' + userId).checked,
+    can_view_log: document.getElementById('agr_log_' + userId).checked
+  };
+  fetch('/admin/alerts/grants', { method: 'POST', headers: alertCsrfHeaders(), body: JSON.stringify(payload) })
+    .then(function (r) {
+      return r.json().catch(function () { return { success: false, message: '服务响应异常' }; })
+        .then(function (d) { return { status: r.status, data: d }; });
+    })
+    .then(function (res) {
+      if (handleAlertDeny(res.status, res.data)) return;
+      setAlertStatus(!!res.data.success, res.data.message);
+      if (res.data.success) loadAlertGrants();  // 刷新授权状态展示
+    })
+    .catch(function () { setAlertStatus(false, '网络请求失败，授权未保存（原授权保留）'); });
+}
+
+// 页面加载时初始化告警配置区（权限与配置实时拉取）
+loadAlertConfig();
 </script>
+
 {% endblock %}
