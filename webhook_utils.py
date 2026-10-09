@@ -464,6 +464,7 @@ PAGE_NAMES = {
     'admin_backups': 'WebDAV备份', 'ai_assistant': 'AI助手', 'ai_config': 'AI助手配置',
     'security': '系统安全', 'invites': '邀请链接', 'permission_tickets': '权限工单',
     'dashboard': '数据分析', 'family': '家庭记账',
+    'weather': '天气',
 }
 
 ALL_PAGES = list(PAGE_NAMES.keys())
@@ -495,6 +496,9 @@ PAGE_EVENT_MATRIX = {
     'invites':           ['create', 'delete', 'status_change'],
     'permission_tickets': ['create', 'status_change', 'delete'],
     'family':            ['create', 'delete', 'status_change', 'security'],
+    # 只读页面：数据分析（dashboard）与天气（weather）不产生业务事件，矩阵留空展示为"—"
+    'dashboard':         [],
+    'weather':           [],
 }
 
 # 事件类型 → 开关字段名映射

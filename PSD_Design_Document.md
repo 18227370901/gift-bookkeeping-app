@@ -11,7 +11,7 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.11.5  
+> **版本**：V10.11.6  
 > **生成日期**：2026-10-09  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
@@ -1366,14 +1366,53 @@ graph LR
 | PDF 导出（真实 HTTP 服务） | 200 + application/pdf + RFC5987 文件名，不再 UnicodeEncodeError ✅ |
 | 前端控制台 | 0 报错 ✅ |
 
+### 10.11 V10.11.6 天气权限管控 + Webhook 推送矩阵 + 登记时间自定义
+
+#### 功能设计
+
+| 项 | 说明 |
+|---|---|
+| 天气权限模型 | 「天气」从"所有登录用户可用"收紧为受控菜单：0=无权限 / 1=可查看实时天气（只读工具菜单，无数据权限维度）；`models.py` 的 `User.get_allowed_menus/get_menu_perm/set_menu_permissions` 与 `app.py` 的 `admin_update_user_permissions` 的 `ALL_MENUS` 均补充 `weather` |
+| 权限回填 | `_do_startup_sync()` 启动时幂等追加：非管理员用户 `allowed_menus` 不含 `weather` 则追加（仅追加、幂等、打印回填数量），避免 V10.11.4 开放期老用户权限回退；新注册用户默认无天气权限 |
+| 全链路门控 | `routes_ext.py menu_map` 新增 `weather_page`/`api_weather_query → 'weather'`，`menu_names` 补「天气」；`base.html` 导航天气入口改 `current_user.is_admin or can_access_menu('weather')` 条件渲染 |
+| 工单申请 | `routes_ext.py` 权限申请清单 `TICKET_MENU_OPTIONS` 新增 `('weather', '天气')`，普通用户可提交天气权限申请 |
+| 管理页配置 | `admin_users.html` 单用户权限弹窗 + 批量权限弹窗各新增「天气」复选框 + 0/1 级下拉（无天气访问权限 / 可查看实时天气） |
+| Webhook 矩阵 | `webhook_utils.PAGE_NAMES` 新增 `'weather':'天气'`；`PAGE_EVENT_MATRIX` 新增 `weather: []` 只读行（无业务事件，界面展示"—"；同批补 `dashboard: []` 注释说明只读页面不产生事件） |
+| 登记时间自定义 | `index.html` 编辑弹窗新增 `edit_created_at`（`datetime-local`，`name=created_at`），编辑按钮 `data-created` 回填原时间；`app.py edit_record` 解析 `%Y-%m-%dT%H:%M`，非法格式返回 400/表单错误，留空保持不变 |
+
+#### 验证结论
+
+| 场景 | 结果 |
+|---|---|
+| 管理员导航/页面/API | 全部可见可访问 ✅ |
+| 无权限用户导航 | 天气入口隐藏，直接访问 `/weather` 跳权限申请页 ✅ |
+| 有权限普通用户 | 导航可见、页面正常查询 ✅ |
+| 权限回填 | 启动自动为老用户追加 weather，测试用户手动授权后权限准确 ✅ |
+| 编辑登记时间 | 新记录编辑 → 改 `2026-03-15T08:45` → 保存成功，列表时间更新 ✅ |
+| 非法时间格式 | 返回 400「登记时间格式不正确」✅ |
+| Webhook 配置页 | 页面矩阵新增天气行（—），不影响既有推送 ✅ |
+
+#### 文件变更清单
+
+| 文件 | 变更 |
+|---|---|
+| `app.py` | `_do_startup_sync` 天气权限回填；`admin_update_user_permissions` ALL_MENUS/MENU_NAMES 补 weather；`edit_record` 登记时间解析 |
+| `models.py` | `get_allowed_menus`（管理员列表）、`get_menu_perm`、`set_menu_permissions` 的 ALL_MENUS 补 weather |
+| `routes_ext.py` | `menu_map`/`menu_names` 补 weather；`TICKET_MENU_OPTIONS` 补天气 |
+| `templates/base.html` | 天气导航改为权限条件渲染 |
+| `templates/admin_users.html` | 单用户 + 批量权限弹窗新增天气项 |
+| `templates/index.html` | 编辑弹窗新增登记时间字段 + `data-created` 回填 |
+| `webhook_utils.py` | `PAGE_NAMES`/`PAGE_EVENT_MATRIX` 补 weather（及 dashboard 注释） |
+| `README.md` | 公告 + 功能章节 20 同步 |
+
 ---
 
 ## 附录：文档元数据
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V10.11.5 |
-| 生成日期 | 2026-10-09（V10.11.5 修订，AI 配置模型列表 + OCR 识别与 PDF 导出修复；承接 V10.11.4 实时天气预报） |
+| 文档版本 | V10.11.6 |
+| 生成日期 | 2026-10-09（V10.11.6 修订，天气权限管控 + Webhook 推送矩阵 + 登记时间自定义；承接 V10.11.5 AI 配置模型列表） |
 | 审计基线 | 代码 commit main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建）） |
 | 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |
