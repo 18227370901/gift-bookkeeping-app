@@ -147,7 +147,7 @@ class User(UserMixin, db.Model):
 
     def get_allowed_menus(self):
         if getattr(self, 'is_admin', False):
-            return ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'admin_users', 'admin_logs', 'admin_broadcasts', 'admin_webhooks', 'admin_backups']
+            return ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'admin_users', 'admin_logs', 'admin_broadcasts', 'admin_webhooks', 'admin_backups']
         raw = getattr(self, 'allowed_menus', '') or ''
         return [m.strip() for m in raw.split(',') if m.strip()]
 
@@ -165,7 +165,7 @@ class User(UserMixin, db.Model):
                 res = json.loads(raw)
             except Exception:
                 res = {}
-        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
+        ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
         final_perms = {}
         for m in ALL_MENUS:
             val = res.get(m)
@@ -191,7 +191,7 @@ class User(UserMixin, db.Model):
     def set_menu_permissions(self, perms_dict):
         """设置各菜单独立数据权限配置"""
         clean_perms = {}
-        ALL_MENUS = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
+        ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
         for m in ALL_MENUS:
             val = perms_dict.get(m, 0) if isinstance(perms_dict, dict) else 0
             try:
@@ -1082,3 +1082,48 @@ class WebhookLog(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.now)
     user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('webhook_logs', lazy=True))
     operator = db.relationship('User', foreign_keys=[operator_id])
+
+
+class FamilyGroup(db.Model):
+    """家庭多成员协作记账 - 家庭组模型"""
+    __tablename__ = 'family_groups'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)           # 家庭名称，如"张家"
+    owner_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)  # 创建者（家长）
+    description = db.Column(db.String(256), nullable=True)     # 家庭描述
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    owner = db.relationship('User', foreign_keys=[owner_id], backref=db.backref('owned_family_groups', lazy=True))
+    members = db.relationship('FamilyMember', backref='group', lazy=True, cascade='all, delete-orphan')
+
+    @property
+    def member_count(self):
+        return len(self.members) if self.members else 0
+
+    def get_member_user_ids(self):
+        """获取该家庭组所有成员的 user_id 列表"""
+        return [m.user_id for m in self.members]
+
+    def get_head_user_ids(self):
+        """获取家长角色的 user_id 列表（含创建者）"""
+        ids = [m.user_id for m in self.members if m.role == 'head']
+        if self.owner_id and self.owner_id not in ids:
+            ids.append(self.owner_id)
+        return ids
+
+
+class FamilyMember(db.Model):
+    """家庭多成员协作记账 - 成员关联表"""
+    __tablename__ = 'family_members'
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('family_groups.id', ondelete='CASCADE'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    role = db.Column(db.String(20), default='member')         # head（家长）/ member（成员）/ viewer（只读）
+    nickname = db.Column(db.String(64), nullable=True)       # 家庭内昵称，如"爸爸"、"妈妈"
+    joined_at = db.Column(db.DateTime, default=datetime.now)
+
+    user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('family_memberships', lazy=True))
+
+    @property
+    def is_head(self):
+        return self.role == 'head'

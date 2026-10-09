@@ -114,7 +114,7 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.10.29</span>
+    <span><strong>版本</strong>：V10.11.4</span>
     <span><strong>生成日期</strong>：2026-10-01</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
@@ -222,7 +222,10 @@
 <tr><td>WSGI 容器</td><td>Gunicorn <span class="tag tag-drift">已声明未使用</span></td><td>22.0.0</td><td><code>requirements.txt:6</code>；<code>run.sh:167-174</code> 实际用 <code>python3 app.py</code></td></tr>
 <tr><td>反向代理</td><td>Nginx (SNI 多项目 443)</td><td>—</td><td><code>nginx_ssl.conf</code>、<code>run.sh:224-291</code></td></tr>
 <tr><td>前端</td><td>Jinja2 + Bootstrap 5 + 原生 JS</td><td>—</td><td><code>templates/base.html:23-25、256</code>（<span class="tag tag-ok">V10.10.18 已本地化 static/vendor/ 加载</span>）</td></tr>
-<tr><td>图表</td><td>Chart.js</td><td>—</td><td>模板内已无引用（历史记载的 CDN 引入实际不存在）</td></tr>
+<tr><td>图表</td><td>ECharts 5.5.0（V10.11 新增，本地化 static/vendor/echarts/）</td><td>5.5.0</td><td><code>templates/dashboard.html</code>、<code>static/vendor/echarts/5.5.0/echarts.min.js</code></td></tr>
+<tr><td>Excel 解析</td><td>openpyxl（V10.11 新增）</td><td>&gt;=3.1.0</td><td><code>requirements.txt:18</code>、<code>routes_ext.py</code> 导入路由</td></tr>
+<tr><td>PDF 生成</td><td>reportlab（V10.11 新增）</td><td>&gt;=4.0.0</td><td><code>requirements.txt:19</code>、<code>pdf_generator.py</code></td></tr>
+<tr><td>长图海报</td><td>html2canvas（V10.11 新增，本地化 static/vendor/html2canvas/）</td><td>1.4.1</td><td><code>templates/poster_template.html</code>、<code>static/vendor/html2canvas/1.4.1/html2canvas.min.js</code></td></tr>
 <tr><td>PWA</td><td>Service Worker</td><td>—</td><td><code>static/sw.js</code>（1053 bytes）</td></tr>
 <tr><td>AI 接入</td><td>OpenAI Python SDK</td><td>&gt;=1.0.0</td><td><code>requirements.txt:14</code>、<code>ai_service.py</code></td></tr>
 <tr><td>联网搜索</td><td>DuckDuckGo Search</td><td>&gt;=4.0.0</td><td><code>requirements.txt:15</code>、<code>web_search.py</code></td></tr>
@@ -1094,13 +1097,72 @@ graph LR
 </div>
 </div>
 
+<!-- ==================== 第 10 部分：V10.11.4 实时天气预报 ==================== -->
+<div class="section" id="s10">
+<h1>第 10 部分：V10.11.4 实时天气预报（Open-Meteo 数据源）</h1>
+
+<h2>10.1 功能设计</h2>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>数据源</td><td>Open-Meteo（Geocoding + Forecast API），免费、无需 API Key、无需代理</td></tr>
+<tr><td>服务封装</td><td><code>weather_service.py</code>：<code>geocode_city()</code> 城市名→经纬度/时区；<code>fetch_forecast()</code> 实时+3 日预报（daily 必带 timezone）；<code>query_weather()</code> 组合主入口；<code>WeatherError</code> 统一异常（中文 message + 建议 HTTP 状态码）；<code>weather_code_cn()</code> WMO 码中文映射（未知码兜底）</td></tr>
+<tr><td>路由</td><td><code>routes_weather.py</code>：<code>GET /weather</code> 页面（login_required）；<code>GET /api/weather/query?city=</code> JSON API（login_required，city 非空/≤30 字校验）</td></tr>
+<tr><td>前端</td><td><code>templates/weather.html</code>：城市搜索框 + 实时天气卡片（温度/体感/湿度/天气状况/风速）+ 3 天预报卡片（最高最低温/降水概率/天气状况+图标），fetch 携带 CSRF 头，深浅色双主题自适应</td></tr>
+<tr><td>入口</td><td><code>base.html</code> 导航栏新增「天气」菜单（所有登录用户可见，不占用菜单权限体系）</td></tr>
+<tr><td>跨域</td><td>服务端 requests 调用，无 CORS 问题（Open-Meteo 本身亦支持 CORS）</td></tr>
+</table>
+
+<h2>10.2 API 调用要点（严格遵循官方约束）</h2>
+<table>
+<tr><th>接口</th><th>请求</th><th>说明</th></tr>
+<tr><td>地理编码</td><td><code>GET https://geocoding-api.open-meteo.com/v1/search?name={城市}&amp;count=1&amp;language=zh&amp;format=json</code></td><td>取 <code>results[0]</code> 的 <code>latitude</code>/<code>longitude</code>/<code>timezone</code></td></tr>
+<tr><td>天气预报</td><td><code>GET https://api.open-meteo.com/v1/forecast</code> + <code>current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m</code> + <code>daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max</code> + <code>timezone=auto</code> + <code>forecast_days=3</code></td><td><strong>请求 daily 时必须携带 timezone</strong>（优先地理编码返回值，缺省回落 <code>auto</code>），否则接口报错</td></tr>
+<tr><td>错误格式</td><td><code>{"error": true, "reason": "..."}</code></td><td>服务层检测后透传 reason 为中文提示</td></tr>
+</table>
+
+<h2>10.3 WMO weather_code → 中文映射</h2>
+<p><code>0 晴 / 1 基本晴朗 / 2 局部多云 / 3 阴天 / 4 阴天 / 45 雾 / 48 冻雾 / 51·53·55 毛毛雨 / 56·57 冻毛毛雨 / 61 小雨 / 63 中雨 / 65 大雨 / 66·67 冻雨 / 71 小雪 / 73 中雪 / 75 大雪 / 77 米雪 / 80·81·82 阵雨 / 85·86 阵雪 / 95 雷阵雨 / 96 雷暴伴小冰雹 / 99 雷暴伴大冰雹</code>；未知码兜底「未知天气(N)」。</p>
+
+<h2>10.4 错误处理矩阵</h2>
+<table>
+<tr><th>场景</th><th>返回</th></tr>
+<tr><td>城市名为空 / 超长</td><td>400「请输入城市名称」/「城市名称过长」</td></tr>
+<tr><td>地理编码无结果</td><td>404「未找到该城市，请检查城市名称是否正确」</td></tr>
+<tr><td>Open-Meteo 返回 error</td><td>透传 <code>reason</code>（502）</td></tr>
+<tr><td>网络超时 / 连接失败</td><td>503「…服务超时/暂时不可用，请稍后重试」</td></tr>
+<tr><td>未知异常</td><td>500「服务器内部错误」，日志记录不泄漏堆栈</td></tr>
+</table>
+
+<h2>10.5 文件变更清单</h2>
+<table>
+<tr><th>文件</th><th>变更</th></tr>
+<tr><td><code>weather_service.py</code></td><td>新增（约 260 行）</td></tr>
+<tr><td><code>routes_weather.py</code></td><td>新增（约 45 行）</td></tr>
+<tr><td><code>templates/weather.html</code></td><td>新增（约 210 行）</td></tr>
+<tr><td><code>app.py</code></td><td>末尾注册 <code>register_weather_routes(app)</code></td></tr>
+<tr><td><code>templates/base.html</code></td><td>导航栏新增「天气」入口</td></tr>
+<tr><td><code>README.md</code> / <code>PSD_Design_Document.md</code> / <code>.html</code></td><td>公告 + 功能章节同步</td></tr>
+</table>
+
+<h2>10.6 验证结论（浏览器实测）</h2>
+<table>
+<tr><th>场景</th><th>结果</th></tr>
+<tr><td>默认查询「北京」</td><td>实时天气 + 3 天预报完整展示 ✅</td></tr>
+<tr><td>查询「上海」</td><td>正常，weather_code 中文映射正确（毛毛雨/局部多云） ✅</td></tr>
+<tr><td>查询不存在城市</td><td>提示「未找到该城市，请检查城市名称是否正确」 ✅</td></tr>
+<tr><td>空输入</td><td>提示「请输入城市名称」 ✅</td></tr>
+<tr><td>黑夜模式</td><td>页面样式自适应，无回归 ✅</td></tr>
+<tr><td>未登录访问</td><td>重定向登录页（login_required 生效） ✅</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.10.29</td></tr>
-<tr><td>生成日期</td><td>2026-10-01（V1.7 修订，代码基线 V10.10.29）</td></tr>
+<tr><td>文档版本</td><td>V10.11.4</td></tr>
+<tr><td>生成日期</td><td>2026-10-09（V10.11.4 修订，实时天气预报接入 Open-Meteo；承接 V10.11.3 OCR/测试配置 404 修复与 Agnes 模型接入指引）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>

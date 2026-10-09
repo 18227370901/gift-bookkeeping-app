@@ -135,6 +135,45 @@ def _build_config_list(user=None):
 
 # ==================== OpenAI 调用 ====================
 
+def normalize_base_url(base_url):
+    """清洗用户填写的 Base URL（V10.11.3 OCR/测试配置 404 修复）
+
+    常见误填：用户把完整接口端点当 Base URL 填入（如
+    https://apihub.agnes-ai.com/v1/images/generations），
+    而 OpenAI SDK 的 chat 接口会自动追加 /chat/completions，
+    拼出不存在的 /v1/images/generations/chat/completions → 404 Invalid URL。
+    此处剥除常见 endpoint 后缀，还原为根地址，可循环剥除多层。
+    """
+    url = (base_url or '').strip()
+    if not url:
+        return url
+    # 常见完整端点后缀（含 OpenAI/Anthropic/图像生成/响应/向量化各类接口）
+    suffixes = ('/chat/completions', '/images/generations', '/images/edits',
+                '/completions', '/messages', '/responses', '/embeddings')
+    changed = True
+    while changed:
+        changed = False
+        # 先剥尾斜杠再匹配后缀（处理 /chat/completions/ 这类带斜杠写法）
+        stripped = url.rstrip('/')
+        if stripped != url:
+            url = stripped
+            changed = True
+        for suf in suffixes:
+            if url.lower().endswith(suf):
+                url = url[: -len(suf)]
+                changed = True
+    return url.rstrip('/')
+
+
+def _is_image_gen_model(model):
+    """检测模型名是否为图像生成模型（如 agnes-image-2.5-flash）。
+    图像生成模型只能"生成图片"，不能"看懂图片提取文字"，
+    用于 OCR/对话场景必然失败。"""
+    m = (model or '').lower()
+    return 'image' in m and ('gen' in m or 'flux' in m or 'dall' in m or
+                             'sd' in m.split('-') or 'agnes-image' in m or 'video' in m)
+
+
 def _call_openai(prompt, api_key, base_url, model):
     """
     调用 OpenAI API
@@ -147,7 +186,8 @@ def _call_openai(prompt, api_key, base_url, model):
     try:
         client_kwargs = {'api_key': api_key}
         if base_url:
-            client_kwargs['base_url'] = base_url
+            # V10.11.3：清洗 Base URL，剥除误填的完整端点后缀
+            client_kwargs['base_url'] = normalize_base_url(base_url)
         client = OpenAI(**client_kwargs)
 
         resp = client.chat.completions.create(
@@ -191,7 +231,8 @@ def test_ai_config(api_key, base_url, model):
     try:
         client_kwargs = {'api_key': api_key}
         if base_url:
-            client_kwargs['base_url'] = base_url
+            # V10.11.3：清洗 Base URL，剥除误填的完整端点后缀
+            client_kwargs['base_url'] = normalize_base_url(base_url)
         client = OpenAI(**client_kwargs)
 
         # 发送极简测试消息，max_tokens 限制为 20 以快速返回
@@ -228,7 +269,11 @@ def test_ai_config(api_key, base_url, model):
 
         # 常见错误自动归类提示
         err_lower = err_str.lower()
-        if 'authentication' in err_lower or 'api key' in err_lower or '401' in err_lower:
+        if 'invalid url' in err_lower or ('invalid_request_error' in err_lower and '404' in err_lower):
+            # V10.11.3：404 + Invalid URL 是端点路径拼接错误（Base URL 误填完整端点），
+            # 而非模型名错误——SDK 自动追加 /chat/completions 拼出不存在的路径
+            reason = 'Base URL 疑似误填了完整接口地址（SDK 会自动追加 /chat/completions），请改填根地址（如 https://apihub.agnes-ai.com/v1）'
+        elif 'authentication' in err_lower or 'api key' in err_lower or '401' in err_lower:
             reason = 'API Key 无效或已过期'
         elif 'connection' in err_lower or 'connect' in err_lower or 'timeout' in err_lower or 'refused' in err_lower:
             reason = '无法连接到 API 地址，请检查 Base URL 是否正确'
@@ -240,6 +285,12 @@ def test_ai_config(api_key, base_url, model):
             reason = 'API 账户余额不足或额度已用尽'
         else:
             reason = '未知错误'
+
+        # V10.11.3：图像生成模型检测——agnes-image-* 等模型只能"生成图片"，
+        # 不能用于对话/识图（OCR），给出针对性引导
+        if _is_image_gen_model(model):
+            reason += ('；注意：该模型为图像生成模型（画图用），不支持对话与看图识别，'
+                       '请改用支持图像理解的文本模型（如 agnes-2.5-flash）')
 
         return {
             'success': False,
@@ -534,8 +585,9 @@ def recognize_gift_image(image_base64, user=None):
             try:
                 # V3.2.1：显式设置超时（大图 + 慢网关场景；SDK 默认虽为 600s，
                 # 但部分网关/网络环境更早断连，明确超时便于错误信息定位）
+                # V10.11.3：Base URL 清洗——剥除误填的完整端点后缀
                 client = OpenAI(api_key=api_key,
-                                base_url=base_url if base_url else None,
+                                base_url=normalize_base_url(base_url) if base_url else None,
                                 timeout=120)
                 response = client.chat.completions.create(
                     model=target_model,
@@ -610,8 +662,18 @@ def recognize_gift_image(image_base64, user=None):
 
     # 全部配置与候选模型均失败：透出最后 3 条真实错误，帮助用户定位
     detail = '；'.join(attempts_errors[-3:]) if attempts_errors else '无可用尝试'
+    # V10.11.3：针对性引导——用户模型为图像生成模型或 Base URL 误填完整端点
+    hints = []
+    for cfg in enabled_configs:
+        cfg_model = (cfg.get('model', '') or '').strip()
+        if _is_image_gen_model(cfg_model):
+            hints.append(f'配置 [{cfg.get("name", "未命名")}] 的模型 {cfg_model} 是图像生成模型（画图用），'
+                         f'不支持看图识别文字，请改用支持图像理解的文本模型（如 agnes-2.5-flash）')
+        if 'invalid url' in str(detail).lower():
+            hints.append('Base URL 请填写根地址（如 https://apihub.agnes-ai.com/v1），不要带 /images/generations 或 /chat/completions 等端点后缀')
+    hint_text = ('。' + '；'.join(hints)) if hints else ''
     return {'code': 503,
             'message': f'图片识别失败（已尝试 {len(attempts_errors)} 次）。最后错误：{detail}。'
                        f'请检查 AI 配置的 API Key、接口地址与模型名是否正确，'
-                       f'且所用模型需支持图片输入。',
+                       f'且所用模型需支持图片输入。{hint_text}',
             'records': []}

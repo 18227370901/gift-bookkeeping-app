@@ -11,8 +11,8 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.10.29  
-> **生成日期**：2026-10-01  
+> **版本**：V10.11.4  
+> **生成日期**：2026-10-09  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
 > **文档定位**：以代码为实现真相（Ground Truth），历史文档为设计意图真相，显式揭露漂移，证据链闭环。
@@ -133,7 +133,10 @@ AIGC:
 | **WSGI 容器** | Gunicorn (已声明但**未实际使用**) | 22.0.0 | `requirements.txt:6`；`run.sh:167-174` 实际用 `python3 app.py` |
 | **反向代理** | Nginx (SNI 多项目 443) | — | `nginx_ssl.conf`、`run.sh:224-291` |
 | **前端** | Jinja2 + Bootstrap 5 + 原生 JS | — | `templates/base.html:23-25、256`（**V10.10.18 已本地化 `static/vendor/` 加载**） |
-| **图表** | Chart.js | — | 模板内已无引用（历史记载的 CDN 引入实际不存在） |
+| **图表** | ECharts 5.5.0（V10.11 新增，本地化 `static/vendor/echarts/`） | 5.5.0 | `templates/dashboard.html`、`static/vendor/echarts/5.5.0/echarts.min.js` |
+| **Excel 解析** | openpyxl（V10.11 新增） | >=3.1.0 | `requirements.txt:18`、`routes_ext.py` 导入路由 |
+| **PDF 生成** | reportlab（V10.11 新增） | >=4.0.0 | `requirements.txt:19`、`pdf_generator.py` |
+| **长图海报** | html2canvas（V10.11 新增，本地化 `static/vendor/html2canvas/`） | 1.4.1 | `templates/poster_template.html`、`static/vendor/html2canvas/1.4.1/html2canvas.min.js` |
 | **PWA** | Service Worker | — | `static/sw.js`（1053 bytes） |
 | **AI 接入** | OpenAI Python SDK | >=1.0.0 | `requirements.txt:14`、`ai_service.py` |
 | **联网搜索** | DuckDuckGo Search | >=4.0.0 | `requirements.txt:15`、`web_search.py` |
@@ -1091,12 +1094,259 @@ graph LR
 
 ---
 
+## 第 10 部分：V10.11 四项新功能设计
+
+### 10.1 可视化数据分析看板（功能一）
+
+| 项 | 说明 |
+|------|------|
+| **图表库** | ECharts 5.5.0，本地化至 `static/vendor/echarts/5.5.0/echarts.min.js`（~1MB），不依赖 CDN |
+| **页面路由** | `GET /dashboard` → `templates/dashboard.html` |
+| **数据 API** | `GET /api/dashboard/stats` → JSON（summary + monthly_trend + yearly_trend + reason_distribution + top10_contacts） |
+| **权限控制** | 新增 `dashboard` 菜单键，复用 4 级权限体系（ALL_MENUS 已扩展） |
+| **图表组件** | ① 月度/年度收送走势折线图（双线+区域填充）② 事由分布环形饼图 ③ 亲友往来 TOP10 横向堆叠柱状图 |
+| **主题适配** | ECharts 主题色随 `data-bs-theme` 属性动态切换（黑夜/白天） |
+
+### 10.2 家庭多成员协作记账（功能二）
+
+| 项 | 说明 |
+|------|------|
+| **数据模型** | `FamilyGroup`（家庭组）+ `FamilyMember`（成员关联），`_SCHEMA_VERSION` 1017→1018 |
+| **角色体系** | `head`（家长，可管理成员与查看全家数据）、`member`（成员，可记账与查看自己数据）、`viewer`（只读，仅可查看家庭汇总数据） |
+| **页面路由** | `GET /family` → `templates/family.html` |
+| **API 路由** | `POST /api/family/create`、`GET /api/family/my-groups`、`POST /api/family/<id>/invite`、`DELETE /api/family/<id>/dissolve`、`GET /api/family/<id>/invitable-users` |
+| **权限控制** | 新增 `family` 菜单键，家长角色自动获得组内所有成员 view 权限 |
+| **DB 迁移** | `CREATE TABLE IF NOT EXISTS family_groups` + `family_members`（幂等，SQLite/PG 双模式兼容） |
+
+### 10.3 批量导入与智能识别（功能三）
+
+#### 10.3.1 Excel 批量导入（字段映射）
+
+| 项 | 说明 |
+|------|------|
+| **Excel 解析** | `openpyxl>=3.1.0`（纯 Python，无 C 扩展，~5MB） |
+| **导入流程** | 上传文件 → `POST /api/import/preview` 解析表头+前5行 → 前端展示字段映射界面 → `POST /api/import/confirm` 确认映射批量入库 |
+| **智能列名匹配** | 中英文列名自动匹配（姓名/name、金额/amount、事由/reason、收送/type 等） |
+| **CSV 兼容** | 原 CSV 导入路由保留，Excel 导入支持 .csv/.xlsx/.xls 三格式统一入口 |
+
+#### 10.3.2 OCR 图片智能识别
+
+| 项 | 说明 |
+|------|------|
+| **OCR 引擎** | 复用 AI 服务（OpenAI 兼容 Vision API），`ai_service.py` 新增 `recognize_gift_image()` 函数 |
+| **调用流程** | 上传图片 → `POST /api/ocr/recognize` → AI Vision 返回结构化 JSON → 用户编辑勾选 → `POST /api/ocr/batch-add` 批量入库 |
+| **兜底方案** | 未配置 AI 或 AI 不支持 Vision 时显示「需配置支持图片识别的 AI 服务」提示 |
+| **安全限制** | 单张图片 ≤ 5MB，支持 jpg/png/webp |
+
+### 10.4 人情簿打印与海报导出（功能四）
+
+#### 10.4.1 A4 打印人情簿
+
+| 项 | 说明 |
+|------|------|
+| **方案** | 纯 CSS `@media print`，浏览器原生打印对话框支持「另存为 PDF」 |
+| **模板** | `templates/print_giftbook.html`（独立全页面，不继承 base.html） |
+| **路由** | `GET /export/print-giftbook` |
+| **排版** | A4 纵向，每页 20 行，深红 #8B0000 主色调，楷体/宋体字体栈 |
+
+#### 10.4.2 PDF 对账单
+
+| 项 | 说明 |
+|------|------|
+| **PDF 引擎** | `reportlab>=4.0.0`（纯 Python，~4MB），`pdf_generator.py` 独立模块 |
+| **路由** | `GET /export/pdf-statement` → 返回 PDF 文件下载 |
+| **内容** | 封面页 → 汇总页（收/送/净额统计表）→ 明细页（全量记录分页表格） |
+| **中文字体** | 三级兜底：NotoSansCJK → SimSun → MSYH → reportlab CID STSong-Light |
+
+#### 10.4.3 手机分享长图海报
+
+| 项 | 说明 |
+|------|------|
+| **方案** | `html2canvas 1.4.1` 本地化（~200KB），客户端渲染 PNG |
+| **模板** | `templates/poster_template.html`（375px 手机宽度，暖色中式风格） |
+| **数据 API** | `GET /api/poster/data` → JSON（summary + top5 + reasons） |
+| **内容** | 顶部标题 → 收送汇总卡片 → TOP5 亲友排行 → 事由分布进度条 → 品牌水印 |
+
+### 10.5 V10.11 文件变更清单
+
+| 操作 | 文件 | 涉及功能 |
+|------|------|---------|
+| 新增 | `templates/dashboard.html` | 1 |
+| 新增 | `templates/family.html` | 2 |
+| 新增 | `templates/print_giftbook.html` | 4 |
+| 新增 | `templates/poster_template.html` | 4 |
+| 新增 | `pdf_generator.py` | 4 |
+| 新增 | `static/vendor/echarts/5.5.0/echarts.min.js` | 1 |
+| 新增 | `static/vendor/html2canvas/1.4.1/html2canvas.min.js` | 4 |
+| 修改 | `models.py` | 2（FamilyGroup/FamilyMember 模型 + ALL_MENUS 扩展） |
+| 修改 | `app.py` | 2（迁移SQL + _SCHEMA_VERSION 1018）+ 1/2（菜单权限） |
+| 修改 | `routes_ext.py` | 1/2/3/4（全部新路由 + 权限映射） |
+| 修改 | `ai_service.py` | 3（OCR 识别函数） |
+| 修改 | `templates/base.html` | 1/2（导航栏新增菜单项） |
+| 修改 | `templates/index.html` | 3（导入弹窗+OCR弹窗）+ 4（打印/导出按钮） |
+| 修改 | `requirements.txt` | 3/4（openpyxl + reportlab） |
+
+---
+
+### 10.6 V10.11.1 导入导出格式统一 + 页面布局优化 + 海报二维码 + 看板趋势选择器
+
+#### 10.6.1 导入导出格式统一
+
+| 功能点 | 改动 |
+|------|------|
+| 礼金记录导出（`export_csv`） | 新增 `format=xlsx` 参数，openpyxl 生成 .xlsx（自动列宽）；CSV 保持不变 |
+| 宴席台账导出（`banquet_export_excel`） | 修复名不副实：默认输出真实 .xlsx，新增 `format=csv` 选项 |
+| 导入模版下载（`download_import_template`） | 新增 `format=xlsx` 参数，Excel 模版（openpyxl） |
+| base.html 用户菜单 | 「导出数据(CSV)」→ 拆分为「导出数据(CSV)」+「导出数据(Excel)」 |
+| 宴席详情按钮 | 从单个链接升级为下拉按钮组（Excel / CSV 双选项） |
+
+#### 10.6.2 礼金账本按钮区重构
+
+- **合并导入入口**：原「批量导入(CSV)」+「Excel导入」两个按钮合并为统一「导入」下拉菜单（Excel/CSV 字段映射导入 + CSV 快速导入 + 模版下载 + 拍照识别）
+- **合并导出入口**：原「导出CSV」按钮组 + 「打印/导出」下拉合并为统一「导出」下拉菜单（全部/筛选/勾选 × CSV/Excel + 打印人情簿 + PDF对账单 + 长图海报）
+- **高危操作移位**：「清空所有数据」从最左侧移至最右侧，样式改为 `btn-outline-danger`（暗色边框）
+- **按钮排列**：`[新增礼金记录] [导入 ▼] [导出 ▼] [拍照识别] [清空数据]`
+
+#### 10.6.3 导航栏防换行
+
+- CSS 新增 `.navbar-nav .nav-link { white-space: nowrap; font-size: 0.875rem; padding: 0.6rem; }` + `.navbar-nav .nav-item { flex-shrink: 0; }`
+- 消除菜单项文字被拆为两行的问题
+
+#### 10.6.4 海报二维码自定义
+
+- `SystemSetting` 新增 `poster_qr_url` 配置项
+- 管理员可在「系统管理 > 海报二维码设置」中配置注册 URL
+- `poster_template.html` 从静态占位文字升级为真实二维码（qrcode-generator 1.4.4 本地化 `static/vendor/qrcode/1.0.0/`）
+- `/api/poster/data` 返回新增 `qr_url` 字段
+- 新增 `/api/admin/poster-qr-url` GET/POST 路由
+
+#### 10.6.5 数据分析看板趋势日期选择器
+
+- 月度模式：新增月份范围选择器（`<input type="month">` 起始~结束）
+- 年度模式：新增年份范围选择器（数字输入框 起始~结束）
+- `/api/dashboard/stats` 新增 `start_month/end_month/start_year/end_year` 可选参数
+- 趋势图上方独立日期选择器卡片，含查询/重置按钮
+
+---
+
+### 10.7 V10.11.2 新增菜单同步权限控制与Webhook推送矩阵
+
+#### 10.7.1 菜单权限控制体系补齐
+
+| 位置 | 改动 |
+|------|------|
+| `app.py` `admin_batch_user_permissions` ALL_MENUS | 补齐 `'dashboard'`/`'family'`（修复批量配置时静默清零 bug） |
+| `app.py` `admin_update_user_permissions` ALL_MENUS + MENU_NAMES | 补齐两项 + 中文名映射（修复单用户保存时清零 bug） |
+| `routes_ext.py` `TICKET_MENU_OPTIONS` | 补齐 `('dashboard','数据分析')`/`('family','家庭记账')`（工单渠道可申请） |
+| `routes_ext.py` `menu_map` | 补充 `api_family_invitable_users`/`api_family_my_perspective_users`/`export_*`/`poster_*` 权限映射 |
+| `admin_users.html` 单用户弹窗 | 新增「数据分析」（0~1 级）+「家庭记账」（0~3 级）复选框+下拉 |
+| `admin_users.html` 批量配置弹窗 | 同步新增两项 |
+
+#### 10.7.2 Webhook 推送矩阵补齐
+
+| 位置 | 改动 |
+|------|------|
+| `webhook_utils.py` `PAGE_NAMES` | 新增 `'dashboard':'数据分析'`/`'family':'家庭记账'` |
+| `webhook_utils.py` `PAGE_EVENT_MATRIX` | 新增 `'family': ['create','delete','status_change','security']` |
+| `routes_ext.py` `api_family_create` | 补充 `trigger_webhook_event('create', ..., page_key='family')` |
+| `routes_ext.py` `api_family_invite` | 补充 `trigger_webhook_event('status_change', ..., page_key='family')` |
+| `routes_ext.py` `api_family_dissolve` | 补充 `trigger_webhook_event('delete', ..., page_key='family')` |
+
+> `dashboard` 为只读看板，无写入操作，不加入 PAGE_EVENT_MATRIX。
+
+---
+
+### 10.8 V10.11.3 OCR/测试配置 404 修复（Agnes 模型接入指引）
+
+#### 问题根因
+
+用户将图像生成模型的完整端点当 Base URL 填入（`https://apihub.agnes-ai.com/v1/images/generations`），OpenAI SDK 的 chat 接口自动追加 `/chat/completions` 拼出不存在的路径 → 404 `Invalid URL`，且旧错误归类将 404 一律报为“模型名称不存在”，误导排查方向；同时 `agnes-image-2.5-flash` 是图像生成模型（画图），不支持看图识字（OCR）。
+
+#### 修复内容
+
+| 位置 | 改动 |
+|------|------|
+| `ai_service.py` `normalize_base_url()` | 新增：循环剥除误填的完整端点后缀（/chat/completions、/images/generations、/images/edits、/completions、/messages、/responses、/embeddings）及尾斜杠 |
+| `ai_service.py` `_call_openai` / `test_ai_config` / `recognize_gift_image` | 三处创建 OpenAI client 均接入 base_url 清洗 |
+| `ai_service.py` `test_ai_config` 错误归类 | 404+`Invalid URL` 改报“Base URL 疑似误填完整接口地址”；图像生成模型附专属提示 |
+| `ai_service.py` `_is_image_gen_model()` | 新增：检测 agnes-image-*/DALL-E/Flux 等画图模型，OCR 失败时引导改用图像理解文本模型 |
+| `ai_service.py` `recognize_gift_image` 失败信息 | 透出最后 3 条真实错误 + 模型类型/URL 格式针对性引导 |
+
+#### Agnes 官方接入参数（OCR/对话正确配置）
+
+| 项 | 正确值 | 说明 |
+|---|---|---|
+| 模型名称 | `agnes-2.5-flash` | 官方明确支持图像理解（截图分析/视觉问答/结构化提取），上下文 512K |
+| Base URL | `https://apihub.agnes-ai.com/v1` | 根地址，SDK 自动追加 /chat/completions |
+| 不可用 | `agnes-image-2.5-flash` | 图像生成模型（文生图/图生图，端点 /v1/images/generations），只能画图不能看图 |
+
+---
+
+### 10.9 V10.11.4 实时天气预报（Open-Meteo 数据源）
+
+#### 功能设计
+
+| 项 | 说明 |
+|---|---|
+| 数据源 | Open-Meteo（Geocoding + Forecast API），免费、无需 API Key、无需代理 |
+| 服务封装 | `weather_service.py`：`geocode_city()` 城市名→经纬度/时区；`fetch_forecast()` 实时+3 日预报（daily 必带 timezone）；`query_weather()` 组合主入口；`WeatherError` 统一异常（中文 message + 建议 HTTP 状态码）；`weather_code_cn()` WMO 码中文映射（未知码兜底） |
+| 路由 | `routes_weather.py`：`GET /weather` 页面（login_required）；`GET /api/weather/query?city=` JSON API（login_required，city 非空/≤30 字校验） |
+| 前端 | `templates/weather.html`：城市搜索框 + 实时天气卡片（温度/体感/湿度/天气状况/风速）+ 3 天预报卡片（最高最低温/降水概率/天气状况+图标），fetch 携带 CSRF 头，深浅色双主题自适应 |
+| 入口 | `base.html` 导航栏新增「天气」菜单（所有登录用户可见，不占用菜单权限体系） |
+| 跨域 | 服务端 requests 调用，无 CORS 问题（Open-Meteo 本身亦支持 CORS） |
+
+#### API 调用要点（严格遵循官方约束）
+
+| 接口 | 请求 | 说明 |
+|---|---|---|
+| 地理编码 | `GET https://geocoding-api.open-meteo.com/v1/search?name={城市}&count=1&language=zh&format=json` | 取 `results[0]` 的 `latitude`/`longitude`/`timezone` |
+| 天气预报 | `GET https://api.open-meteo.com/v1/forecast` + `current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m` + `daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` + `timezone=auto` + `forecast_days=3` | **请求 daily 时必须携带 timezone**（优先地理编码返回值，缺省回落 `auto`），否则接口报错 |
+| 错误格式 | `{"error": true, "reason": "..."}` | 服务层检测后透传 reason 为中文提示 |
+
+#### WMO weather_code → 中文映射（weather_service.py 内置）
+
+`0 晴 / 1 基本晴朗 / 2 局部多云 / 3 阴天 / 4 阴天 / 45 雾 / 48 冻雾 / 51·53·55 毛毛雨 / 56·57 冻毛毛雨 / 61 小雨 / 63 中雨 / 65 大雨 / 66·67 冻雨 / 71 小雪 / 73 中雪 / 75 大雪 / 77 米雪 / 80·81·82 阵雨 / 85·86 阵雪 / 95 雷阵雨 / 96 雷暴伴小冰雹 / 99 雷暴伴大冰雹`；未知码兜底「未知天气(N)」。
+
+#### 错误处理矩阵
+
+| 场景 | 返回 |
+|---|---|
+| 城市名为空 / 超长 | 400「请输入城市名称」/「城市名称过长」 |
+| 地理编码无结果 | 404「未找到该城市，请检查城市名称是否正确」 |
+| Open-Meteo 返回 error | 透传 `reason`（502） |
+| 网络超时 / 连接失败 | 503「…服务超时/暂时不可用，请稍后重试」 |
+| 未知异常 | 500「服务器内部错误」，日志记录不泄漏堆栈 |
+
+#### 文件变更清单
+
+| 文件 | 变更 |
+|---|---|
+| `weather_service.py` | 新增（约 260 行） |
+| `routes_weather.py` | 新增（约 45 行） |
+| `templates/weather.html` | 新增（约 210 行） |
+| `app.py` | 末尾注册 `register_weather_routes(app)` |
+| `templates/base.html` | 导航栏新增「天气」入口 |
+| `README.md` | 公告 + 功能章节同步 |
+
+#### 验证结论（浏览器实测）
+
+| 场景 | 结果 |
+|---|---|
+| 默认查询「北京」 | 实时天气 + 3 天预报完整展示 ✅ |
+| 查询「上海」 | 正常，weather_code 中文映射正确（毛毛雨/局部多云） ✅ |
+| 查询不存在城市 | 提示「未找到该城市，请检查城市名称是否正确」 ✅ |
+| 空输入 | 提示「请输入城市名称」 ✅ |
+| 黑夜模式 | 页面样式自适应，无回归 ✅ |
+| 未登录访问 | 重定向登录页（login_required 生效） ✅ |
+
+---
+
 ## 附录：文档元数据
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V10.10.29 |
-| 生成日期 | 2026-10-01（V1.7 修订，代码基线 V10.10.29） |
+| 文档版本 | V10.11.4 |
+| 生成日期 | 2026-10-09（V10.11.4 修订，实时天气预报接入 Open-Meteo；承接 V10.11.3 OCR/测试配置 404 修复与 Agnes 模型接入指引） |
 | 审计基线 | 代码 commit main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建）） |
 | 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |

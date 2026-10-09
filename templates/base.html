@@ -106,6 +106,10 @@
             .btn-sm { font-size: 0.75rem; padding: 0.2rem 0.4rem; }
             h2, h3, h4 { font-size: 1.25rem; }
         }
+        /* V10.11.1 导航栏防换行优化：菜单项紧凑排列，文字不拆行 */
+        .navbar-nav .nav-link { white-space: nowrap; font-size: 0.875rem; padding-left: 0.6rem; padding-right: 0.6rem; }
+        .navbar-nav .nav-item { flex-shrink: 0; }
+        @media (min-width: 992px) { .navbar-nav .nav-link { font-size: 0.9rem; } }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
@@ -124,6 +128,16 @@
                     {% if current_user.is_admin or current_user.can_access_menu('ledger') %}
                     <li class="nav-item">
                         <a class="nav-link active" href="{{ url_for('index') }}"><i class="fa-solid fa-list me-1"></i>礼金账本</a>
+                    </li>
+                    {% endif %}
+                    {% if current_user.is_admin or current_user.can_access_menu('dashboard') %}
+                    <li class="nav-item">
+                        <a class="nav-link text-primary" href="{{ url_for('dashboard_view') }}"><i class="fa-solid fa-chart-line me-1"></i>数据分析</a>
+                    </li>
+                    {% endif %}
+                    {% if current_user.is_admin or current_user.can_access_menu('family') %}
+                    <li class="nav-item">
+                        <a class="nav-link text-warning" href="{{ url_for('family_view') }}"><i class="fa-solid fa-people-roof me-1"></i>家庭记账</a>
                     </li>
                     {% endif %}
                     {% if current_user.is_admin or current_user.can_access_menu('banquets') %}
@@ -151,6 +165,11 @@
                         <a class="nav-link text-success" href="{{ url_for('ai_assistant_page') }}"><i class="fa-solid fa-robot me-1"></i>AI 助手</a>
                     </li>
                     {% endif %}
+                    {% if current_user.is_authenticated %}
+                    <li class="nav-item">
+                        <a class="nav-link text-info" href="{{ url_for('weather_page') }}"><i class="fa-solid fa-cloud-sun me-1"></i>天气</a>
+                    </li>
+                    {% endif %}
                     {% if not current_user.is_admin and current_user.can_use_backup() %}
                     <li class="nav-item">
                         <a class="nav-link text-info" href="{{ url_for('admin_backups') }}"><i class="fa-solid fa-cloud-arrow-up me-1"></i>备份</a>
@@ -170,6 +189,8 @@
                             <li><a class="dropdown-item" href="{{ url_for('admin_broadcasts') }}"><i class="fa-solid fa-bullhorn me-2"></i>系统广播发布</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin_webhooks') }}"><i class="fa-solid fa-satellite-dish me-2"></i>Webhook 通知</a></li>
                             <li><a class="dropdown-item" href="{{ url_for('admin_backups') }}"><i class="fa-solid fa-cloud-arrow-up me-2"></i>WebDAV 备份</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#posterQrSettingModal"><i class="fa-solid fa-image me-2"></i>海报二维码设置</a></li>
                         </ul>
                     </li>
                     {% endif %}
@@ -205,7 +226,8 @@
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end shadow">
                             <li><a class="dropdown-item" href="{{ url_for('profile_security') }}"><i class="fa-solid fa-shield-halved me-2 text-warning"></i>个人安全设置</a></li>
-                            <li><a class="dropdown-item" href="{{ url_for('export_csv') }}"><i class="fa-solid fa-file-csv me-2 text-success"></i>导出数据(CSV)</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('export_csv', format='csv') }}"><i class="fa-solid fa-file-csv me-2 text-success"></i>导出数据 (CSV)</a></li>
+                            <li><a class="dropdown-item" href="{{ url_for('export_csv', format='xlsx') }}"><i class="fa-solid fa-file-excel me-2 text-success"></i>导出数据 (Excel)</a></li>
                             <li><hr class="dropdown-divider"></li>
                             <li><a class="dropdown-item text-danger" href="{{ url_for('logout') }}"><i class="fa-solid fa-right-from-bracket me-2"></i>退出登录</a></li>
                         </ul>
@@ -507,6 +529,58 @@
             </div>
         </div>
     </div>
+
+    {% if current_user.is_authenticated and current_user.is_admin %}
+    <!-- V10.11.1 海报二维码设置 Modal -->
+    <div class="modal fade" id="posterQrSettingModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="fa-solid fa-image me-2"></i>海报二维码设置</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">二维码指向 URL（注册页面地址）</label>
+                        <input type="url" class="form-control" id="posterQrUrlInput" placeholder="例如：https://your-domain.com/register">
+                        <div class="form-text small text-muted">设置后，长图海报底部二维码将指向此地址。留空则默认使用当前站点注册页面。</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary" onclick="savePosterQrUrl()"><i class="fa-solid fa-check me-1"></i>保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+    function savePosterQrUrl() {
+        var url = document.getElementById('posterQrUrlInput').value.trim();
+        var csrfToken = document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '{{ csrf_token }}';
+        fetch('/api/admin/poster-qr-url', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken, 'X-Requested-With': 'XMLHttpRequest' },
+            body: JSON.stringify({ qr_url: url })
+        })
+        .then(function(res) { return res.json(); })
+        .then(function(data) {
+            if (data.code === 200) { alert('保存成功'); bootstrap.Modal.getInstance(document.getElementById('posterQrSettingModal')).hide(); }
+            else { alert(data.message || '保存失败'); }
+        });
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+        var qrModal = document.getElementById('posterQrSettingModal');
+        if (qrModal) {
+            qrModal.addEventListener('shown.bs.modal', function() {
+                fetch('/api/admin/poster-qr-url', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function(res) { return res.json(); })
+                .then(function(data) { if (data.code === 200) document.getElementById('posterQrUrlInput').value = data.qr_url || ''; });
+            });
+        }
+    });
+    </script>
+    {% endif %}
+
     {% block extra_js %}{% endblock %}
     {% block scripts %}{% endblock %}
 </body>
