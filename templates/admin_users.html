@@ -163,16 +163,17 @@
       </div>
     </div>
     <div class="table-responsive">
-      <table class="table table-sm table-hover align-middle mb-0">
+      <!-- V10.11.7 列宽拖拽 -->
+      <table class="table table-sm table-hover align-middle mb-0" data-resizable="admin_invite_tokens">
         <thead class="table-light">
           <tr>
-            <th style="width: 40px;" class="text-center">#</th>
-            <th>邀请注册链接</th>
-            <th>创建时间</th>
-            <th>到期时间</th>
-            <th>使用次数</th>
-            <th>状态</th>
-            <th class="text-end">操作</th>
+            <th class="text-center" data-col="checkbox" data-col-min="36" data-col-max="60">#</th>
+            <th data-col="link" data-col-min="220">邀请注册链接</th>
+            <th data-col="created">创建时间</th>
+            <th data-col="expires">到期时间</th>
+            <th data-col="uses">使用次数</th>
+            <th data-col="status">状态</th>
+            <th class="text-end" data-col="actions" data-col-min="100">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -235,22 +236,23 @@
   </div>
   <div class="card-body p-0">
     <div class="table-responsive">
-      <table class="table table-hover align-middle mb-0">
+      <!-- V10.11.7 列宽拖拽 -->
+      <table class="table table-hover align-middle mb-0" data-resizable="admin_users_list">
         <thead class="table-light">
           <tr>
-            <th style="width: 40px;" class="ps-3 text-center">
+            <th class="ps-3 text-center" data-col="checkbox" data-col-min="36" data-col-max="60">
               <input class="form-check-input" type="checkbox" id="selectAllUsers" style="cursor: pointer;" title="全选/取消全选普通用户">
             </th>
-            <th class="ps-2">ID</th>
-            <th>用户名</th>
-            <th>角色身份</th>
-            <th>跨用户数据权限</th>
-            <th>账号状态</th>
-            <th>登录风控</th>
-            <th>密保风控</th>
-            <th>密保问题</th>
-            <th>注册时间</th>
-            <th class="text-end pe-4">操作选项</th>
+            <th class="ps-2" data-col="id" data-col-min="50">ID</th>
+            <th data-col="username">用户名</th>
+            <th data-col="role">角色身份</th>
+            <th data-col="perms">跨用户数据权限</th>
+            <th data-col="status">账号状态</th>
+            <th data-col="login_risk">登录风控</th>
+            <th data-col="qa_risk">密保风控</th>
+            <th data-col="question">密保问题</th>
+            <th data-col="created">注册时间</th>
+            <th class="text-end pe-4" data-col="actions" data-col-min="150">操作选项</th>
           </tr>
         </thead>
         <tbody>

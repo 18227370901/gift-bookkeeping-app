@@ -114,7 +114,7 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.11.6</span>
+    <span><strong>版本</strong>：V10.11.7</span>
     <span><strong>生成日期</strong>：2026-10-01</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
@@ -1219,13 +1219,55 @@ graph LR
 <p><strong>文件变更</strong>：<code>app.py</code>（回填 + ALL_MENUS + edit_record）、<code>models.py</code>（ALL_MENUS ×3）、<code>routes_ext.py</code>（menu_map/menu_names/TICKET_MENU_OPTIONS）、<code>templates/base.html</code>、<code>templates/admin_users.html</code>、<code>templates/index.html</code>、<code>webhook_utils.py</code>、<code>README.md</code>。</p>
 </div>
 
+<!-- ==================== 第 10 部分：V10.11.7 列宽拖拽 + 天气改版 ==================== -->
+<div class="section" id="s10d">
+<h1>第 10 部分补充：V10.11.7 表格列宽手动调整 + 天气页面改版</h1>
+
+<h2>10.9 表格列宽拖拽（全平台 21 张主业务表）</h2>
+<table>
+<tr><th>层</th><th>实现</th></tr>
+<tr><td>启用机制</td><td><code>table[data-resizable=表ID]</code> + <code>th[data-col=列key]</code>；全局脚本 <code>static/js/table-resizer.js</code>（零依赖原生 JS，base.html 全局引入）</td></tr>
+<tr><td>固化宽度</td><td>首次进入将 auto 布局自然宽度固化为显式像素 + 切 <code>table-layout: fixed</code>，拖拽实时生效；总宽超容器出横向滚动条不压列</td></tr>
+<tr><td>分隔条</td><td>th 右缘 8px 命中区（hover 高亮 + col-resize 光标，双主题 CSS 变量适配）</td></tr>
+<tr><td>约束</td><td>默认 min 60px / max 480px，单列 <code>data-col-min/max</code> 覆盖（checkbox 36、操作列 110+）</td></tr>
+<tr><td>双击自适应</td><td>同帧切 auto 布局测最大内容宽 +16px 余量再切回（无闪烁）</td></tr>
+<tr><td>持久化</td><td>localStorage 键 <code>gift_colw_{用户ID}_{表ID}</code> 按「用户+表格」隔离，加载自动恢复；容器右上角自动注入「重置列宽」按钮</td></tr>
+<tr><td>防误选/触摸</td><td>拖动 body 加 <code>colw-resizing</code> → user-select:none；Pointer Events 统一；<768px 自动降级禁用；截断单元格补 title 悬停提示</td></tr>
+</table>
+
+<h2>10.10 天气页面改版（15 天 + 级联 + 首页式布局）</h2>
+<table>
+<tr><th>层</th><th>实现</th></tr>
+<tr><td>15 天预报</td><td><code>forecast_days</code> 参数化（默认 15，1~16）；<code>/api/weather/query</code> 增 <code>days</code> 参数</td></tr>
+<tr><td>指标扩充</td><td>实时增气压/云量/风向（角度→中文方位）/阵风；每日增日出/日落/紫外线/累计降水</td></tr>
+<tr><td>级联数据</td><td><code>static/js/china-regions.js</code>（144KB）：阿里云 DataV GeoAtlas 34 省/476 市/2875 区县 + 行政中心坐标，本地内置</td></tr>
+<tr><td>坐标直查</td><td>GeoNames 中文库缺中国区县级地名（「双流区」0 候选）；级联选中后 <code>query_weather_by_coords(lat,lon,label)</code> 按内置坐标直查（中国范围校验），零错配</td></tr>
+<tr><td>文本兼容</td><td>保留城市名自由输入（Geocoding）+ 可选 province/city2 消歧（多候选 admin 匹配打分 + 404 去后缀降级）</td></tr>
+<tr><td>首页式布局</td><td>大卡片（大温度数字 + 2×4 指标网格文字不截断）→ 15 天温度趋势双折线图（本地化 ECharts 5.5.0 深浅主题）→ 15 天卡片网格（每行 5 个，今天高亮）</td></tr>
+<tr><td>记忆恢复</td><td>localStorage 记住上次查询方式与地区（级联或城市名），进入页面自动恢复，首次默认北京</td></tr>
+<tr><td>网络策略修复</td><td><code>_http_get</code> 禁代理直连优先 + 系统代理兑底；修复用户机器开梯子且代理不稳时持续超时</td></tr>
+</table>
+
+<h2>10.11 验证结论</h2>
+<table>
+<tr><th>场景</th><th>结果</th></tr>
+<tr><td>礼金账本 14 列初始化 + 真实鼠标拖拽 80→210px</td><td>✅</td></tr>
+<tr><td>刷新恢复 + 重置按钮 + min 钓制 60px + 双击自适应</td><td>✅</td></tr>
+<tr><td>总宽超出出横向滚动不压列 + 抽查 5 页 resizer 全就绪</td><td>✅</td></tr>
+<tr><td>天气默认北京 15 天 + 级联四川→成都→双流定位准</td><td>✅</td></tr>
+<tr><td>刷新级联记忆恢复 + 黑夜模式视觉 + 指标无截断</td><td>✅</td></tr>
+</table>
+
+<p><strong>文件变更</strong>：<code>static/js/table-resizer.js</code>、<code>static/js/china-regions.js</code>（新增）；<code>base.html</code>（样式+用户ID+脚本）、14 模板 21 表标记；<code>weather_service.py</code>、<code>routes_weather.py</code>、<code>weather.html</code>；<code>README.md</code>。</p>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.6</td></tr>
-<tr><td>生成日期</td><td>2026-10-09（V10.11.6 修订，天气权限管控 + Webhook 推送矩阵 + 登记时间自定义；承接 V10.11.5 AI 配置模型列表）</td></tr>
+<tr><td>文档版本</td><td>V10.11.7</td></tr>
+<tr><td>生成日期</td><td>2026-10-09（V10.11.7 修订，表格列宽手动调整 + 天气页面改版；承接 V10.11.6 天气权限管控）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
