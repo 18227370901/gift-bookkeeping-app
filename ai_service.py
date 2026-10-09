@@ -34,6 +34,45 @@ from web_search import needs_search, search_and_summarize
 from gift_utils import cn2num as _cn2num
 
 
+# ==================== V10.11.8 网络策略：禁代理直连优先 + 系统代理兑底 ====================
+# 与 weather_service._http_get 同款双路径。
+# 背景：用户机器常开系统级代理（环境变量 HTTP_PROXY/HTTPS_PROXY 指向本机代理端口），
+#       代理出口节点故障时 requests/httpx 默认走代理会持续超时，
+#       表现为「获取模型列表超时」「配置测试 Connection error (26333ms)」等误导性报错，
+#       而 AI 网关国内直连通常可达；反之仅代理可达的境外网关由兑底路径覆盖。
+
+AI_HTTP_TIMEOUT = (5, 20)  # 连接 5s / 读取 20s
+
+
+def _ai_http_get(url, headers=None):
+    """AI 网关 GET（requests 版）：① 禁代理直连；② 失败回落系统代理重试一次"""
+    try:
+        return requests.get(url, headers=headers, timeout=AI_HTTP_TIMEOUT,
+                             proxies={'http': None, 'https': None})
+    except (requests.Timeout, requests.RequestException):
+        pass
+    # 回落：系统代理/环境变量（默认 trust_env 行为）
+    return requests.get(url, headers=headers, timeout=AI_HTTP_TIMEOUT)
+
+
+def _chat_with_fallback(client_kwargs, create_kwargs):
+    """OpenAI SDK 调用双路径：① 禁代理直连（httpx trust_env=False）；② 连接类异常回落系统代理重试一次
+    仅连接层错误（APIConnectionError 及其子类 APITimeoutError）回落，
+    鉴权/限流/模型不存在等业务错误不重试（避免无意义双倍消耗额度）。
+    client_kwargs: {'api_key':..., 'base_url':...}；create_kwargs: model/messages/max_tokens/timeout 等
+    """
+    import httpx
+    import openai as _openai_mod
+    # 路径①：禁代理直连
+    client = OpenAI(http_client=httpx.Client(trust_env=False), **client_kwargs)
+    try:
+        return client.chat.completions.create(**create_kwargs)
+    except _openai_mod.APIConnectionError:
+        # 直连网络层失败（含超时）→ 路径②：回落系统代理（httpx 默认 trust_env=True）
+        client = OpenAI(**client_kwargs)
+        return client.chat.completions.create(**create_kwargs)
+
+
 # ==================== System Prompt ====================
 
 GENERAL_CHAT_PROMPT = """你是一个乐于助人的智能助手，名字叫"礼小宝"。
@@ -191,18 +230,17 @@ def _call_openai(prompt, api_key, base_url, model):
         if base_url:
             # V10.11.3：清洗 Base URL，剥除误填的完整端点后缀
             client_kwargs['base_url'] = normalize_base_url(base_url)
-        client = OpenAI(**client_kwargs)
 
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
+        resp = _chat_with_fallback(client_kwargs, {
+            'model': model,
+            'messages': [
                 {"role": "system", "content": "你是一个乐于助人的智能助手，名叫礼小宝。"},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=2000,
-            temperature=0.7,
-            timeout=30
-        )
+            'max_tokens': 2000,
+            'temperature': 0.7,
+            'timeout': 30
+        })
         content = resp.choices[0].message.content.strip()
         if content:
             return True, content, ''
@@ -236,19 +274,19 @@ def test_ai_config(api_key, base_url, model):
         if base_url:
             # V10.11.3：清洗 Base URL，剥除误填的完整端点后缀
             client_kwargs['base_url'] = normalize_base_url(base_url)
-        client = OpenAI(**client_kwargs)
 
         # 发送极简测试消息，max_tokens 限制为 20 以快速返回
-        resp = client.chat.completions.create(
-            model=model,
-            messages=[
+        # V10.11.8：双路径网络策略（禁代理直连优先+代理兑底），修复系统代理故障时误报「无法连接」
+        resp = _chat_with_fallback(client_kwargs, {
+            'model': model,
+            'messages': [
                 {"role": "system", "content": "你是一个测试助手，请简短回复。"},
                 {"role": "user", "content": "请回复'测试成功'四个字"}
             ],
-            max_tokens=20,
-            temperature=0,
-            timeout=15  # 测试用较短超时，快速反馈
-        )
+            'max_tokens': 20,
+            'temperature': 0,
+            'timeout': 15  # 测试用较短超时，快速反馈
+        })
         content = resp.choices[0].message.content.strip()
         latency_ms = int((time.time() - start_time) * 1000)
 
@@ -320,11 +358,8 @@ def fetch_model_list(api_key, base_url):
     models_url = base.rstrip('/') + '/models'
 
     try:
-        resp = requests.get(
-            models_url,
-            headers={'Authorization': 'Bearer ' + api_key},
-            timeout=(5, 15)  # 连接 5s / 读取 15s
-        )
+        # V10.11.8：双路径网络策略（禁代理直连优先+代理兑底），修复系统代理故障时误报超时
+        resp = _ai_http_get(models_url, headers={'Authorization': 'Bearer ' + api_key})
     except requests.Timeout:
         return {'success': False, 'models': [], 'message': '请求模型列表超时，请检查 Base URL 与网络', 'detail': 'timeout'}
     except requests.RequestException as e:
@@ -719,12 +754,14 @@ def recognize_gift_image(image_base64, user=None):
                 # V3.2.1：显式设置超时（大图 + 慢网关场景；SDK 默认虽为 600s，
                 # 但部分网关/网络环境更早断连，明确超时便于错误信息定位）
                 # V10.11.3：Base URL 清洗——剥除误填的完整端点后缀
-                client = OpenAI(api_key=api_key,
-                                base_url=normalize_base_url(base_url) if base_url else None,
-                                timeout=120)
-                response = client.chat.completions.create(
-                    model=target_model,
-                    messages=[{
+                # V10.11.8：双路径网络策略（禁代理直连优先+代理兑底）
+                _ocr_client_kwargs = {
+                    'api_key': api_key,
+                    'base_url': normalize_base_url(base_url) if base_url else None,
+                }
+                response = _chat_with_fallback(_ocr_client_kwargs, {
+                    'model': target_model,
+                    'messages': [{
                         "role": "user",
                         "content": [
                             {"type": "text", "text": ocr_prompt},
@@ -733,9 +770,10 @@ def recognize_gift_image(image_base64, user=None):
                             }}
                         ]
                     }],
-                    max_tokens=4000,
-                    temperature=0.1
-                )
+                    'max_tokens': 4000,
+                    'temperature': 0.1,
+                    'timeout': 120
+                })
                 content = response.choices[0].message.content.strip()
 
                 # 尝试从返回内容中提取 JSON 数组

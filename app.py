@@ -667,7 +667,8 @@ def num2cn_filter(num):
 
 # V10.10.16: 数据库结构版本标记，用于幂等快速跳过迁移流程
 # V10.10.17: 支持 PostgreSQL（用 schema_version 表替代 PRAGMA user_version）
-_SCHEMA_VERSION = 1018
+# V10.11.8: 新增 alert_push_configs / alert_push_grants 两张告警推送表
+_SCHEMA_VERSION = 1019
 
 def _is_db_schema_current():
     """检查数据库结构版本是否已标记为当前版本（SQLite 用 PRAGMA user_version，PG 用 schema_version 表）"""
@@ -969,6 +970,34 @@ def init_database():
                 role VARCHAR(20) DEFAULT 'member',
                 nickname VARCHAR(64),
                 joined_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+        ])
+
+        # --- V10.11.8 新增：告警消息推送（管理员菜单权限 ↔ WebDAV 告警配置联调） ---
+        migration_sqls.extend([
+            # 告警推送配置表（单行全局）
+            """CREATE TABLE IF NOT EXISTS alert_push_configs (
+                id INTEGER PRIMARY KEY,
+                enabled BOOLEAN DEFAULT 0,
+                weather_alert_on BOOLEAN DEFAULT 0,
+                interface_error_on BOOLEAN DEFAULT 0,
+                data_integrity_on BOOLEAN DEFAULT 0,
+                task_failed_on BOOLEAN DEFAULT 0,
+                silence_minutes INTEGER DEFAULT 30,
+                merge_push BOOLEAN DEFAULT 1,
+                alert_cities VARCHAR(200) DEFAULT '北京',
+                last_push_at TEXT DEFAULT '{}',
+                last_inspect_time DATETIME,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )""",
+            # 告警操作授权表（按用户，复用「定时任务授权」模式）
+            """CREATE TABLE IF NOT EXISTS alert_push_grants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+                can_edit BOOLEAN DEFAULT 0,
+                can_test BOOLEAN DEFAULT 0,
+                can_view_log BOOLEAN DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )""",
         ])
 
@@ -3394,6 +3423,13 @@ register_ai_routes(app, log_action=log_action)
 # 注册天气查询路由（Open-Meteo 数据源）
 from routes_weather import register_weather_routes
 register_weather_routes(app)
+
+# V10.11.8 注册告警推送路由（配置/测试/日志/授权）并启动后台巡检守护线程
+from routes_alert import register_alert_routes
+from alert_service import start_alert_inspector
+register_alert_routes(app)
+start_alert_inspector(app)
+print('[Init] 告警巡检守护线程已启动（30 分钟一轮，总开关/授权由巡检时实时判定）')
 
 
 if __name__ == '__main__':

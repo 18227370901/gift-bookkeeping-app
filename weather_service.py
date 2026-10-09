@@ -7,11 +7,14 @@
   3. WMO weather_code → 中文描述映射
   4. 统一错误处理（网络失败 / API 返回 error / 城市未找到）
   5. V10.11.7 级联选择支持：省/市/区县 → 候选城市智能匹配
+  6. V10.11.8 新增：空气质量（Air Quality API，失败降级不影响主查询）
 
 API 参考：
   - 地理编码: GET https://geocoding-api.open-meteo.com/v1/search?name={城市}&count=10&language=zh&format=json
   - 天气预报: GET https://api.open-meteo.com/v1/forecast
               ?latitude=&longitude=&current=...&daily=...&timezone=auto&forecast_days=15
+  - 空气质量: GET https://air-quality-api.open-meteo.com/v1/air-quality
+              ?latitude=&longitude=&current=pm10,pm2_5,us_aqi&timezone=auto
   Open-Meteo 错误返回格式: {"error": true, "reason": "..."}
 """
 import requests
@@ -19,6 +22,10 @@ import requests
 # ===================== 常量 =====================
 GEOCODING_URL = 'https://geocoding-api.open-meteo.com/v1/search'
 FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
+# V10.11.8 空气质量接口（免费无密钥；不可达时降级为 None，不影响主查询）
+AIR_QUALITY_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality'
+# V10.11.8 空气质量接口（免费无密钥；不可达时降级为 None，不影响主查询）
+AIR_QUALITY_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality'
 # 连接超时 5 秒 / 读取超时 8 秒，避免天气服务异常拖慢页面（实际网络策略见 _http_get）
 TIMEOUT = (5, 8)
 # 城市名长度上限（前端与后端双重校验）
@@ -325,7 +332,35 @@ def fetch_forecast(latitude, longitude, timezone='auto', days=DEFAULT_FORECAST_D
     return data
 
 
-def _build_result(city, data):
+def fetch_air_quality(latitude, longitude):
+    """
+    查询空气质量（Air Quality API，V10.11.8 新增）
+    返回: {'pm25': float|None, 'pm10': float|None, 'us_aqi': float|None}
+    任何异常一律返回 None（空气质量为增强信息，失败不影响天气主查询）
+    """
+    params = {
+        'latitude': latitude,
+        'longitude': longitude,
+        'current': 'pm10,pm2_5,us_aqi',
+        'timezone': 'auto',
+    }
+    try:
+        resp = _http_get(AIR_QUALITY_URL, params)
+        data = resp.json()
+        if data.get('error'):
+            return None
+        cur = data.get('current') or {}
+        return {
+            'pm25': cur.get('pm2_5'),
+            'pm10': cur.get('pm10'),
+            'us_aqi': cur.get('us_aqi'),
+        }
+    except Exception:
+        # 网络失败 / JSON 解析失败：静默降级
+        return None
+
+
+def _build_result(city, data, air_quality=None):
     """把 Open-Meteo forecast 原始 JSON 组装为前端结构化结果（V10.11.7 扩充指标）"""
     current = data.get('current') or {}
     daily = data.get('daily') or {}
@@ -377,6 +412,8 @@ def _build_result(city, data):
             'time': current.get('time'),
         },
         'daily': daily_list,
+        # V10.11.8 空气质量（增强信息，接口不可达时为 None，前端降级不渲染）
+        'air_quality': air_quality,
     }
 
 
@@ -390,7 +427,9 @@ def query_weather(city_name, province=None, district_city=None, days=DEFAULT_FOR
     city = geocode_city(city_name, province=province, district_city=district_city)
     # 2. 查询实时 + 每日预报（必须传 timezone）
     data = fetch_forecast(city['latitude'], city['longitude'], city['timezone'], days=days)
-    return _build_result(city, data)
+    # 3. 空气质量（失败降级 None，不阻断主查询）
+    air = fetch_air_quality(city['latitude'], city['longitude'])
+    return _build_result(city, data, air_quality=air)
 
 
 def query_weather_by_coords(latitude, longitude, days=DEFAULT_FORECAST_DAYS, label=''):
@@ -422,4 +461,6 @@ def query_weather_by_coords(latitude, longitude, days=DEFAULT_FORECAST_DAYS, lab
         'admin2': '',
     }
     data = fetch_forecast(lat, lon, 'auto', days=days)
-    return _build_result(city, data)
+    # V10.11.8 空气质量（失败降级 None，不阻断主查询）
+    air = fetch_air_quality(lat, lon)
+    return _build_result(city, data, air_quality=air)

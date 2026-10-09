@@ -114,7 +114,7 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.11.7</span>
+    <span><strong>版本</strong>：V10.11.8</span>
     <span><strong>生成日期</strong>：2026-10-01</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
@@ -1261,13 +1261,78 @@ graph LR
 <p><strong>文件变更</strong>：<code>static/js/table-resizer.js</code>、<code>static/js/china-regions.js</code>（新增）；<code>base.html</code>（样式+用户ID+脚本）、14 模板 21 表标记；<code>weather_service.py</code>、<code>routes_weather.py</code>、<code>weather.html</code>；<code>README.md</code>。</p>
 </div>
 
+<!-- ==================== 第 10 部分补充：V10.11.8 天气增强 + 告警推送 ==================== -->
+<div class="section" id="s10e">
+<h1>第 10 部分补充：V10.11.8 天气页面全面增强 + 告警消息推送（权限联调）</h1>
+
+<h2>10.12 天气查询交互修复（4 项）</h2>
+<table>
+<tr><th>项</th><th>实现</th></tr>
+<tr><td>级联任意级查询</td><td>省级→省会坐标 / 市级→市中心坐标 / 县级→县坐标；<code>doCascadeQuery</code> 放开三级全选限制，label 按所选层级拼接去重</td></tr>
+<tr><td>懒加载逐级展开</td><td>初始仅显省下拉；选省后显市下拉、选市后显县下拉（<code>citySelectWrap/districtSelectWrap</code> 显隐控制）</td></tr>
+<tr><td>自由输入本地匹配</td><td><code>localMatchCity</code>：归一化去后缀 + 省/市/县三级匹配（与后端 <code>_norm_region</code> 同规则），更具体层级优先；命中走坐标模式（修复「成都市」在线解析 404），未命中回退 Geocoding（保留国外城市）</td></tr>
+<tr><td>双按钮冲突修复</td><td>按钮独立 loading（<code>btnPending</code> 计数，仅改被点按钮文案）；<code>reqSeq</code> 请求序号防竞态（旧响应丢弃）</td></tr>
+<tr><td>页面锁死修复</td><td>① 前端 <code>AbortController</code> 30s 超时（超时必恢复按钮）；② 记忆键追加用户 ID（<code>gift_weather_{uid}_*</code>，多账号不串扰）；③ 新增「重置记忆」按钮一键恢复默认</td></tr>
+</table>
+
+<h2>10.13 天数自定义 + 日历视图 + 多城对比 + 指数 + 空气质量</h2>
+<table>
+<tr><th>项</th><th>实现</th></tr>
+<tr><td>天数控件</td><td>分段按钮（7/15/16）+ 下拉（1~16）组合，切换即按上下文重查；localStorage 记忆；趋势图与列表随天数联动</td></tr>
+<tr><td>日历月视图</td><td>当月网格（周一起始）每日含图标/高低温/降水概率；预报范围外灰置「—」不可点；月份导航不可早于当前月；今日蓝高亮、选中绿描边</td></tr>
+<tr><td>日历周视图</td><td>今天起 7 天全要素行（天气/温度/降水概率/紫外线/降水总量/日出日落）</td></tr>
+<tr><td>点击联动</td><td>选中日期 → 详情面板（8 项指标）+ 趋势图绿色虚线标记线（markLine）+ 月/周视图同步高亮</td></tr>
+<tr><td>多城对比</td><td>省/市/县名添加（本地匹配、去重、上限 3）；主城 + 对比城最高温同图叠加（ECharts 多系列 + 图例）；单城失败跳过并提示；记忆持久化</td></tr>
+<tr><td>生活指数</td><td>穿衣（体感 6 档）/雨伞（降水概率 3 档）/防晒（紫外线 5 档）/洗车（雨雪码+概率）/出行（风速 3 档）/舒适度（温湿度）—— 6 项自研规则 2×3 卡片</td></tr>
+<tr><td>空气质量</td><td><code>fetch_air_quality</code>（Air Quality API <code>current=pm10,pm2_5,us_aqi</code>）失败静默降级；PM2.5 按中国 24h 标准分级（0-35 优 → >250 严重）配色徽章 + PM10</td></tr>
+</table>
+
+<h2>10.14 告警消息推送（管理员菜单权限 ↔ WebDAV 告警配置联调）</h2>
+<table>
+<tr><th>层</th><th>实现</th></tr>
+<tr><td>数据模型</td><td><code>alert_push_configs</code>（单行全局配置）+ <code>alert_push_grants</code>（按用户操作授权）；<code>_SCHEMA_VERSION</code> 1018 → <strong>1019</strong></td></tr>
+<tr><td>巡检线程</td><td><code>alert_service.start_alert_inspector</code>：daemon，首轮延迟 60s 后每 30 分钟一轮；每轮实时判定总开关 + 有效授权（无授权用户自动停用推送，配置保留不生效）</td></tr>
+<tr><td>触发条件（4 类）</td><td>天气预警（降温≥8℃/日降水概率≥70%/阵风≥50km/h/最低温≤0℃/最高温≥38℃自研规则）/ 接口异常（巡检时天气接口失败）/ 数据完整性（关键文件非空校验）/ 定时任务失败（扫 35 分钟窗口内 failed 执行记录，同任务去重）</td></tr>
+<tr><td>频控</td><td>同类型静默期内不重复推（持久化重启后有效）；同类型多条合并一条消息（日志分类准确）</td></tr>
+<tr><td>推送执行</td><td>复用 <code>trigger_webhook_event(force_channels=True)</code>：企微长连接/钉钉/飞书/pushplus/通用 URL 全支持；邮件本轮不含</td></tr>
+<tr><td>路由与门控</td><td><code>routes_alert.py</code> 8 个 API 全部操作级实时校验 + <code>menu_map</code> backups 菜单门控（无权限 URL 直访拦截）</td></tr>
+<tr><td>前端配置区</td><td><code>admin_backups.html</code> 新增「告警消息推送」卡片：配置区 + 立即巡检 + 测试推送（真实渠道即时反馈）+ 授权管理表（仅超管）+ 日志筛选（类型/结果/分页/CSV 导出）</td></tr>
+<tr><td>权限三态</td><td>无编辑→控件置灰+提示条；无测试→按钮隐藏；无日志→日志区隐藏；非超管→授权区隐藏（后端权限快照驱动，前端不硬编码）</td></tr>
+<tr><td>联调规则</td><td>操作中权限回收→403+前端提示跳首页；保存失败事务回滚保留原配置；权限全回收→巡检自动停用（无孤儿任务）；授权保存立即生效</td></tr>
+</table>
+
+<h2>10.15 AI 配置网络策略修复</h2>
+<table>
+<tr><th>项</th><th>实现</th></tr>
+<tr><td>问题现象</td><td>AI 配置页「获取模型列表」持续超时；「测试」约 26s 后报 Connection error（API 配置本身正确）</td></tr>
+<tr><td>根因</td><td><code>requests</code> 与 OpenAI SDK（httpx）默认 <code>trust_env</code> 自动走系统代理；代理进程存活但出口节点不通时，全部 AI 出网请求挂死在坏代理上直至超时（与 V10.11.7 天气修复前同款问题）</td></tr>
+<tr><td>双路径函数</td><td><code>_ai_http_get(url)</code>：requests 禁代理直连优先 + 系统代理兑底，超时 <code>AI_HTTP_TIMEOUT=(5, 20)</code>；<code>_chat_with_fallback</code>：SDK <code>httpx.Client(trust_env=False)</code> 直连优先，仅 <code>APIConnectionError</code>（连接类异常含超时）回落系统代理重试一次，鉴权/参数类错误不回落</td></tr>
+<tr><td>覆盖调用链</td><td><code>fetch_model_list</code>（模型列表）/ <code>test_ai_config</code>（配置测试，timeout=15）/ <code>_call_openai</code>（AI 对话，timeout=30）/ <code>recognize_gift_image</code>（OCR，timeout=120）全部 4 条</td></tr>
+<tr><td>验证</td><td>「获取模型列表」秒回 12 个 Agnes 模型；「测试」<code>agnes-3.0-flash</code> 5.1s 返回「测试成功」（修复前 26.3s Connection error）；个别模型返回空内容时提示「接口连通正常但返回内容为空，请检查模型名称」（属模型侧行为非网络问题）</td></tr>
+</table>
+
+<h2>10.16 验证结论（隔离副本库 55 项断言）</h2>
+<table>
+<tr><th>场景</th><th>结果</th></tr>
+<tr><td>6 文件语法编译 + schema 1019 迁移 + 两新表建表</td><td>✅</td></tr>
+<tr><td>16/7 天预报 + air_quality 真实返回（pm25=43.5）</td><td>✅</td></tr>
+<tr><td>告警配置/授权判定/回收失效/静默期/巡检跳过与开启/完整性/任务失败检测/城市解析</td><td>✅</td></tr>
+<tr><td>admin 全流程（配置保存/越界拒/测试无通道提示/手动巡检/日志/筛选/CSV/授权/回收）</td><td>✅</td></tr>
+<tr><td>普通用户 5 接口全部被拦截（menu_map 门控）</td><td>✅</td></tr>
+<tr><td>运行库隔离确认（仍 1018 无 alert 表）</td><td>✅</td></tr>
+<tr><td>AI 网络策略修复（模型列表 12 个秒回 + 配置测试 5.1s 成功）</td><td>✅</td></tr>
+</table>
+
+<p><strong>文件变更</strong>：<code>alert_service.py</code>、<code>routes_alert.py</code>（新增）；<code>models.py</code>（两模型）、<code>app.py</code>（schema 1019+迁移+路由+线程）、<code>routes_ext.py</code>（menu_map 8 endpoint）、<code>weather_service.py</code>（空气质量）、<code>ai_service.py</code>（<code>_ai_http_get</code>/<code>_chat_with_fallback</code> 双路径出网，改造 4 处调用点）、<code>templates/weather.html</code>（重写）、<code>templates/admin_backups.html</code>（告警卡片）；<code>README.md</code>。</p>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.7</td></tr>
-<tr><td>生成日期</td><td>2026-10-09（V10.11.7 修订，表格列宽手动调整 + 天气页面改版；承接 V10.11.6 天气权限管控）</td></tr>
+<tr><td>文档版本</td><td>V10.11.8</td></tr>
+<tr><td>生成日期</td><td>2026-10-09（V10.11.8 修订，天气页面全面增强 + 告警消息推送权限联调 + AI 配置网络策略修复；承接 V10.11.7 表格列宽与天气改版）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>

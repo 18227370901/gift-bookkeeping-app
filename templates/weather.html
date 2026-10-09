@@ -3,7 +3,7 @@
 
 {% block extra_css %}
 <style>
-    /* V10.11.7 天气页改版样式（参考主流天气站首页式布局） */
+    /* V10.11.7 天气页改版样式（参考主流天气站首页式布局）+ V10.11.8 增强 */
     .weather-hero-card {
         border-radius: 14px;
         background: linear-gradient(135deg, rgba(13, 110, 253, 0.08), rgba(13, 202, 240, 0.10));
@@ -42,8 +42,62 @@
         border-radius: 10px;
         padding: 0.75rem;
     }
-    #weatherTrendChart { width: 100%; height: 260px; }
+    #weatherTrendChart, #compareChart { width: 100%; height: 260px; }
     .region-select { min-width: 0; }
+
+    /* ===== V10.11.8 新增样式 ===== */
+    /* 生活指数 / 空气质量卡片 */
+    .life-item {
+        background: var(--app-card-bg);
+        border: 1px solid var(--app-border-soft);
+        border-radius: 10px;
+        padding: 0.7rem 0.9rem;
+        transition: background-color 0.25s ease, border-color 0.25s ease;
+    }
+    .life-item .life-name { font-size: 0.78rem; color: var(--app-text-muted, #6c757d); }
+    .life-item .life-level { font-size: 0.85rem; font-weight: 600; }
+    .life-item .life-advice { font-size: 0.72rem; color: var(--app-text-muted, #6c757d); line-height: 1.3; }
+    /* 日历视图 */
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+    .cal-week-header { text-align: center; font-size: 0.75rem; color: var(--app-text-muted, #6c757d); padding: 2px 0; }
+    .cal-cell {
+        min-height: 76px;
+        border: 1px solid var(--app-border-soft);
+        border-radius: 8px;
+        padding: 4px 6px;
+        background: var(--app-card-bg);
+        cursor: pointer;
+        transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .cal-cell:hover { transform: translateY(-1px); box-shadow: 0 0.25rem 0.5rem rgba(0,0,0,0.07); }
+    .cal-cell.empty { visibility: hidden; }
+    .cal-cell.nodata { opacity: 0.42; cursor: default; }
+    .cal-cell.nodata:hover { transform: none; box-shadow: none; }
+    .cal-cell.today { border-color: #0d6efd; box-shadow: 0 0 0 1px rgba(13, 110, 253, 0.25); }
+    .cal-cell.selected { border-color: #198754; box-shadow: 0 0 0 2px rgba(25, 135, 84, 0.3); }
+    .cal-cell .cal-date { font-size: 0.75rem; font-weight: 600; }
+    .cal-cell .cal-icon { font-size: 0.95rem; margin: 2px 0; }
+    .cal-cell .cal-temp { font-size: 0.7rem; line-height: 1.2; }
+    /* 周视图行 */
+    .cal-week-row {
+        display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+        border: 1px solid var(--app-border-soft); border-radius: 10px;
+        background: var(--app-card-bg); padding: 0.55rem 0.8rem; margin-bottom: 6px;
+    }
+    .cal-week-row.today { border-color: #0d6efd; box-shadow: 0 0 0 1px rgba(13, 110, 253, 0.25); }
+    .cal-week-row.selected { border-color: #198754; box-shadow: 0 0 0 2px rgba(25, 135, 84, 0.3); }
+    /* 对比城市标签 */
+    .compare-tag {
+        display: inline-flex; align-items: center; gap: 4px;
+        background: var(--app-card-bg); border: 1px solid var(--app-border-soft);
+        border-radius: 999px; padding: 2px 10px; font-size: 0.78rem; margin: 0 6px 6px 0;
+    }
+    .compare-tag .compare-del { cursor: pointer; color: #dc3545; }
+    /* 日历详情面板 */
+    .day-detail-panel {
+        border: 1px solid var(--app-border-soft); border-radius: 10px;
+        background: var(--app-card-bg); padding: 0.8rem 1rem;
+    }
 </style>
 {% endblock %}
 
@@ -52,31 +106,34 @@
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div>
             <i class="fa-solid fa-cloud-sun me-2 text-primary"></i>天气预报
-            <span class="small text-muted ms-2">15 天预报 ｜ 数据来源：Open-Meteo（免费接口，无需密钥）</span>
+            <span class="small text-muted ms-2">1~16 天预报（天数可自定义）｜ 数据来源：Open-Meteo（免费接口，无需密钥）</span>
         </div>
+        <button class="btn btn-outline-secondary btn-sm" type="button" id="resetMemoryBtn" title="清除本页记忆（地区/天数/视图/对比城市），恢复默认状态">
+            <i class="fa-solid fa-rotate-left me-1"></i>重置记忆
+        </button>
     </div>
     <div class="card-body">
-        <!-- V10.11.7 查询区：级联选择 + 自由输入 两种方式并存 -->
+        <!-- V10.11.8 查询区：级联（懒加载逐级显示，支持省/市/县任意一级查询）+ 自由输入（优先本地匹配） -->
         <div class="row g-2 mb-3">
             <div class="col-12">
                 <div class="d-flex align-items-center gap-1 mb-1">
                     <i class="fa-solid fa-sitemap text-primary small"></i>
                     <span class="fw-semibold small">行政区划级联查询</span>
-                    <span class="small text-muted">（中国 → 省 → 市 → 区县）</span>
+                    <span class="small text-muted">（选择省份 → 城市 → 区县逐级展开；任选一级即可查询）</span>
                 </div>
                 <div class="row g-2">
                     <div class="col-6 col-md-3 region-select">
                         <select class="form-select form-select-sm" id="provinceSelect" aria-label="选择省份"></select>
                     </div>
-                    <div class="col-6 col-md-3 region-select">
+                    <div class="col-6 col-md-3 region-select" id="citySelectWrap" style="display:none">
                         <select class="form-select form-select-sm" id="citySelect" aria-label="选择城市"></select>
                     </div>
-                    <div class="col-6 col-md-3 region-select">
+                    <div class="col-6 col-md-3 region-select" id="districtSelectWrap" style="display:none">
                         <select class="form-select form-select-sm" id="districtSelect" aria-label="选择区县"></select>
                     </div>
                     <div class="col-6 col-md-3">
                         <button class="btn btn-primary btn-sm w-100" type="button" id="cascadeBtn">
-                            <i class="fa-solid fa-cloud-sun me-1"></i>查询级联所选地区
+                            <i class="fa-solid fa-cloud-sun me-1"></i>查询所选地区
                         </button>
                     </div>
                 </div>
@@ -85,11 +142,11 @@
                 <div class="d-flex align-items-center gap-1 mb-1">
                     <i class="fa-solid fa-keyboard text-secondary small"></i>
                     <span class="fw-semibold small">城市名自由查询</span>
-                    <span class="small text-muted">（级联未覆盖时可手输，如：北京、成都）</span>
+                    <span class="small text-muted">（支持省/市/区县名，自动匹配本地行政区划库；未命中再走在线解析）</span>
                 </div>
                 <div class="input-group input-group-sm">
                     <span class="input-group-text"><i class="fa-solid fa-magnifying-glass"></i></span>
-                    <input type="text" class="form-control" id="cityInput" placeholder="输入城市名，如：北京" maxlength="30" autocomplete="off">
+                    <input type="text" class="form-control" id="cityInput" placeholder="输入城市名，如：北京、成都市、双流区" maxlength="30" autocomplete="off">
                     <button class="btn btn-outline-primary" type="button" id="searchBtn">
                         <i class="fa-solid fa-cloud-sun me-1"></i>查询天气
                     </button>
@@ -97,6 +154,33 @@
             </div>
             <div class="col-12">
                 <div id="queryStatus" class="small text-muted"></div>
+            </div>
+        </div>
+
+        <!-- V10.11.8 工具栏：天数自定义（分段 + 下拉）+ 视图切换（列表/日历）+ 日历子视图（月/周）+ 月份导航 -->
+        <div id="weatherToolbar" class="d-flex flex-wrap align-items-center gap-2 mb-3" style="display:none">
+            <span class="small text-muted fw-semibold"><i class="fa-solid fa-calendar-day me-1 text-primary"></i>预报天数</span>
+            <div class="btn-group btn-group-sm" role="group" aria-label="预报天数分段">
+                <button type="button" class="btn btn-outline-primary days-seg" data-days="7">7天</button>
+                <button type="button" class="btn btn-outline-primary days-seg" data-days="15">15天</button>
+                <button type="button" class="btn btn-outline-primary days-seg" data-days="16">16天</button>
+            </div>
+            <select class="form-select form-select-sm" id="daysSelect" aria-label="自定义预报天数" style="width:auto"></select>
+
+            <span class="border-start ms-1 me-1"></span>
+            <span class="small text-muted fw-semibold"><i class="fa-solid fa-table-cells me-1 text-primary"></i>展示视图</span>
+            <div class="btn-group btn-group-sm" role="group" aria-label="视图切换">
+                <button type="button" class="btn btn-outline-primary view-seg" data-view="list">列表</button>
+                <button type="button" class="btn btn-outline-primary view-seg" data-view="calendar">日历</button>
+            </div>
+            <div class="btn-group btn-group-sm" id="calModeGroup" role="group" style="display:none">
+                <button type="button" class="btn btn-outline-secondary cal-seg" data-cal="month">月视图</button>
+                <button type="button" class="btn btn-outline-secondary cal-seg" data-cal="week">周视图</button>
+            </div>
+            <div class="btn-group btn-group-sm" id="calNavGroup" style="display:none">
+                <button type="button" class="btn btn-outline-secondary" id="calPrev" title="上一月"><i class="fa-solid fa-chevron-left"></i></button>
+                <button type="button" class="btn btn-outline-secondary" id="calTitle" disabled style="min-width:110px"></button>
+                <button type="button" class="btn btn-outline-secondary" id="calNext" title="下一月"><i class="fa-solid fa-chevron-right"></i></button>
             </div>
         </div>
 
@@ -118,19 +202,49 @@
     var provinceSelect = document.getElementById('provinceSelect');
     var citySelect = document.getElementById('citySelect');
     var districtSelect = document.getElementById('districtSelect');
+    var citySelectWrap = document.getElementById('citySelectWrap');
+    var districtSelectWrap = document.getElementById('districtSelectWrap');
     var cascadeBtn = document.getElementById('cascadeBtn');
     var cityInput = document.getElementById('cityInput');
     var searchBtn = document.getElementById('searchBtn');
+    var resetMemoryBtn = document.getElementById('resetMemoryBtn');
     var queryStatus = document.getElementById('queryStatus');
     var weatherResult = document.getElementById('weatherResult');
+    var weatherToolbar = document.getElementById('weatherToolbar');
+    var daysSelect = document.getElementById('daysSelect');
+    var calModeGroup = document.getElementById('calModeGroup');
+    var calNavGroup = document.getElementById('calNavGroup');
+    var calTitle = document.getElementById('calTitle');
+    var calPrev = document.getElementById('calPrev');
+    var calNext = document.getElementById('calNext');
+    var daysSegs = Array.prototype.slice.call(document.querySelectorAll('.days-seg'));
+    var viewSegs = Array.prototype.slice.call(document.querySelectorAll('.view-seg'));
+    var calSegs = Array.prototype.slice.call(document.querySelectorAll('.cal-seg'));
 
-    // ===== 本地记忆键（V10.11.7：记住上次查询方式与地区） =====
-    var LS_MODE = 'gift_weather_mode';      // 'cascade' | 'text'
-    var LS_REGION = 'gift_weather_region';  // {p:省, c:市, d:区县}
-    var LS_CITY = 'gift_weather_city';      // 文本模式城市名
+    // ===== V10.11.8 用户级记忆键（同浏览器多账号记忆隔离，修复退出重进残留他人查询的问题） =====
+    var uid = String((document.body.getAttribute('data-user-id') || '0'));
+    function lsKey(k) { return 'gift_weather_' + uid + '_' + k; }
+    function lsSet(k, v) { try { localStorage.setItem(lsKey(k), v); } catch (e) {} }
+    function lsGet(k) { try { return localStorage.getItem(lsKey(k)); } catch (e) { return null; } }
+    function lsDel(k) { try { localStorage.removeItem(lsKey(k)); } catch (e) {} }
 
     var REGIONS = window.CHINA_REGIONS || [];
     var trendChart = null;
+    var compareChart = null;
+
+    // ===== V10.11.8 页面状态 =====
+    var queryContext = null;     // 当前查询上下文 {mode:'coords'|'city', lat, lon, label, city}
+    var cachedData = null;       // 最近一次成功查询的完整数据（视图/日历切换复用，不重复请求）
+    var currentDays = 15;         // 当前预报天数（1~16）
+    var viewMode = 'list';        // 列表 | 日历
+    var calMode = 'month';        // 月视图 | 周视图
+    var calAnchor = null;        // 日历锚点 {y, m}（0-11）
+    var selectedDate = null;     // 日历选中日期 '2026-10-09'
+    var compareCities = [];       // 对比城市 [{label, lat, lon}]，上限 3
+    var reqSeq = 0;               // 主查询请求序号（竞态保护：仅最新请求渲染）
+    var compareSeq = 0;           // 对比请求序号
+    var btnPending = { cascade: 0, text: 0 };  // 各按钮未完成请求计数（独立 loading，修复双按钮同闪「查询中」）
+    var FETCH_TIMEOUT_MS = 30000; // 前端超时（AbortController）：后端直连+代理兜底最坏 26s，30s 兜住并防按钮永久卡死
 
     // ===== 工具函数 =====
     function escapeHtml(str) {
@@ -186,7 +300,68 @@
 
     function setStatus(html) { queryStatus.innerHTML = html; }
 
-    // ===== 级联选择初始化 =====
+    // ===== V10.11.8 行政区划名称归一化（与后端 _norm_region 同规则，供本地匹配用） =====
+    function normName(s) {
+        if (!s) return '';
+        s = String(s).trim();
+        var sufs = ['特别行政区', '维吾尔自治区', '壮族自治区', '回族自治区', '自治区',
+                    '省辖县级行政区划', '自治区直辖县级行政区划', '自治州', '地区',
+                    '自治县', '自治旗', '林区', '矿区', '新区', '县级市',
+                    '市辖区', '省', '市', '区', '县', '盟', '旗'];
+        for (var i = 0; i < sufs.length; i++) {
+            if (s.endsWith(sufs[i]) && s.length > sufs[i].length) {
+                s = s.slice(0, -sufs[i].length);
+                break;
+            }
+        }
+        return s;
+    }
+
+    // ===== V10.11.8 Bug 修复：自由输入优先匹配本地行政区划库（如「成都市」→内置坐标直查，零错配零网络） =====
+    function localMatchCity(text) {
+        text = (text || '').trim();
+        if (!text) return null;
+        var norm = normName(text);
+        if (!norm) return null;
+        var hits = [];
+        // 省级匹配
+        REGIONS.forEach(function (p) {
+            if (p.n === text || normName(p.n) === norm) {
+                hits.push({ lat: p.g[1], lon: p.g[0], label: p.n, level: 'province' });
+            }
+        });
+        // 市级匹配（直辖市省市同名去重）
+        REGIONS.forEach(function (p) {
+            p.c.forEach(function (c) {
+                if (c.n === text || normName(c.n) === norm) {
+                    var label = (c.n !== p.n) ? (p.n + c.n) : c.n;
+                    hits.push({ lat: c.g[1], lon: c.g[0], label: label, level: 'city' });
+                }
+            });
+        });
+        // 区县级匹配
+        REGIONS.forEach(function (p) {
+            p.c.forEach(function (c) {
+                (c.c || []).forEach(function (d) {
+                    if (d.n === text || normName(d.n) === norm) {
+                        var parts = [p.n];
+                        if (c.n !== p.n) parts.push(c.n);
+                        parts.push(d.n);
+                        hits.push({ lat: d.g[1], lon: d.g[0], label: parts.join(''), level: 'district' });
+                    }
+                });
+            });
+        });
+        if (!hits.length) return null;
+        // 精确全名匹配优先；其次更具体的层级优先（区县 > 市 > 省）
+        var exact = hits.filter(function (h) { return h.label === text || h.label.replace(/省|市|区|县/g, '') === text; });
+        var pool = exact.length ? exact : hits;
+        var order = { district: 0, city: 1, province: 2 };
+        pool.sort(function (a, b) { return order[a.level] - order[b.level]; });
+        return pool[0];
+    }
+
+    // ===== 级联选择初始化（V10.11.8：懒加载逐级显示，修复三下拉常驻问题） =====
     function fillSelect(sel, items, placeholder) {
         sel.innerHTML = '';
         var opt = document.createElement('option');
@@ -203,6 +378,11 @@
 
     function initProvince() {
         fillSelect(provinceSelect, REGIONS, '-- 选择省份 --');
+        // 未选省：市/县下拉隐藏
+        citySelectWrap.style.display = 'none';
+        districtSelectWrap.style.display = 'none';
+        fillSelect(citySelect, [], '-- 选择城市 --');
+        fillSelect(districtSelect, [], '-- 选择区县 --');
     }
 
     function onProvinceChange() {
@@ -210,83 +390,137 @@
         citySelect.innerHTML = '';
         districtSelect.innerHTML = '';
         if (!p) {
-            fillSelect(citySelect, [], '-- 先选择省份 --');
-            fillSelect(districtSelect, [], '-- 先选择城市 --');
+            // 未选省份：市/县下拉隐藏（懒加载：选第一级才展示第二级）
+            citySelectWrap.style.display = 'none';
+            districtSelectWrap.style.display = 'none';
+            fillSelect(citySelect, [], '-- 选择城市 --');
+            fillSelect(districtSelect, [], '-- 选择区县 --');
             return;
         }
+        // 已选省份：展示市下拉（懒加载）
         fillSelect(citySelect, p.c, '-- 选择城市 --');
-        fillSelect(districtSelect, [], '-- 先选择城市 --');
+        citySelectWrap.style.display = '';
+        districtSelectWrap.style.display = 'none';
+        fillSelect(districtSelect, [], '-- 选择区县 --');
     }
 
     function onCityChange() {
         var p = REGIONS[Number(provinceSelect.value)];
         districtSelect.innerHTML = '';
-        if (!p) { fillSelect(districtSelect, [], '-- 先选择城市 --'); return; }
+        if (!p) {
+            districtSelectWrap.style.display = 'none';
+            return;
+        }
         var c = p.c[Number(citySelect.value)];
-        if (!c) { fillSelect(districtSelect, [], '-- 先选择城市 --'); return; }
-        fillSelect(districtSelect, c.c, '-- 选择区县 --');
+        if (!c) {
+            // 未选市：县下拉隐藏（懒加载：选第二级才展示第三级）
+            districtSelectWrap.style.display = 'none';
+            fillSelect(districtSelect, [], '-- 选择区县 --');
+            return;
+        }
+        fillSelect(districtSelect, c.c || [], '-- 选择区县 --');
+        districtSelectWrap.style.display = '';
     }
 
-    // ===== 级联查询（坐标直查：区划数据内置坐标，GeoNames 缺中国区县级地名） =====
+    // ===== V10.11.8 级联查询：支持省/市/县任意一级查询（修复必须选到县才能查的问题） =====
     function doCascadeQuery(auto) {
         var pIdx = provinceSelect.value;
-        var cIdx = citySelect.value;
-        var dIdx = districtSelect.value;
-        if (pIdx === '' || cIdx === '' || dIdx === '') {
-            if (!auto) { setStatus('<span class="text-danger"><i class="fa-solid fa-circle-exclamation me-1"></i>请依次选择省、市、区县</span>'); }
+        if (pIdx === '') {
+            if (!auto) {
+                setStatus('<span class="text-danger"><i class="fa-solid fa-circle-exclamation me-1"></i>请先选择省份（选省/市/县任意一级即可查询）</span>');
+            }
             return false;
         }
         var p = REGIONS[Number(pIdx)];
-        var c = p.c[Number(cIdx)];
-        var d = c.c[Number(dIdx)];
-        // 直辖市省市同名（北京市→北京市）时拼接去重
-        var labelParts = [];
-        labelParts.push(p.n);
-        if (c.n !== p.n) labelParts.push(c.n);
-        labelParts.push(d.n);
+        var cIdx = citySelect.value;
+        var dIdx = districtSelect.value;
+        var node, level, labelParts = [p.n];
+        if (dIdx !== '') {
+            var c = p.c[Number(cIdx)];
+            var d = c.c[Number(dIdx)];
+            node = d; level = 'district';
+            if (c.n !== p.n) labelParts.push(c.n);
+            labelParts.push(d.n);
+        } else if (cIdx !== '') {
+            var c2 = p.c[Number(cIdx)];
+            node = c2; level = 'city';
+            if (c2.n !== p.n) labelParts.push(c2.n);
+        } else {
+            node = p; level = 'province';
+        }
         var label = labelParts.join('');
-        // d.g = [lng, lat]（阿里云 DataV 坐标顺序）
-        var lng = d.g[0], lat = d.g[1];
 
-        // 记忆本次选择
-        try {
-            localStorage.setItem(LS_MODE, 'cascade');
-            localStorage.setItem(LS_REGION, JSON.stringify({ p: p.n, c: c.n, d: d.n }));
-        } catch (e) {}
+        // 记忆本次选择（用户级隔离）
+        var regionMem = { p: p.n, c: '', d: '' };
+        if (cIdx !== '') regionMem.c = p.c[Number(cIdx)].n;
+        if (dIdx !== '') regionMem.d = p.c[Number(cIdx)].c[Number(dIdx)].n;
+        lsSet('mode', 'cascade');
+        lsSet('region', JSON.stringify(regionMem));
 
+        queryContext = { mode: 'coords', lat: node.g[1], lon: node.g[0], label: label };
         setStatus('<i class="fa-solid fa-spinner fa-spin me-1"></i>正在查询「' + escapeHtml(label) + '」的天气…');
-        return fetchWeather('/api/weather/query?lat=' + encodeURIComponent(lat) +
-            '&lon=' + encodeURIComponent(lng) + '&label=' + encodeURIComponent(label) + '&days=15', label);
+        return execQuery('cascade', label);
     }
 
-    // ===== 文本查询 =====
+    // ===== 文本查询（V10.11.8：本地行政区划库优先匹配，未命中回退在线解析） =====
     function doTextQuery(city, auto) {
         city = (city || cityInput.value).trim();
         if (!city) {
             if (!auto) {
-                weatherResult.innerHTML = '<div class="alert alert-warning shadow-sm"><i class="fa-solid fa-circle-exclamation me-2"></i>请输入城市名称</div>';
+                setStatus('<span class="text-danger"><i class="fa-solid fa-circle-exclamation me-1"></i>请输入城市名称</span>');
                 cityInput.focus();
             }
             return false;
         }
-        // 记忆本次城市
-        try {
-            localStorage.setItem(LS_MODE, 'text');
-            localStorage.setItem(LS_CITY, city);
-        } catch (e) {}
+        lsSet('mode', 'text');
+        lsSet('city', city);
 
+        // 优先本地匹配（修复「成都市」等带行政后缀地名在线解析失败的问题）
+        var m = localMatchCity(city);
+        if (m) {
+            queryContext = { mode: 'coords', lat: m.lat, lon: m.lon, label: m.label };
+            setStatus('<i class="fa-solid fa-spinner fa-spin me-1"></i>已匹配「' + escapeHtml(m.label) + '」，正在查询天气…');
+            return execQuery('text', m.label);
+        }
+        // 本地未命中：走后端在线地理编码（保持国外城市/小地名能力）
+        queryContext = { mode: 'city', city: city };
         setStatus('<i class="fa-solid fa-spinner fa-spin me-1"></i>正在查询「' + escapeHtml(city) + '」的天气…');
-        return fetchWeather('/api/weather/query?city=' + encodeURIComponent(city) + '&days=15', city);
+        return execQuery('text', city);
     }
 
-    function fetchWeather(url, displayName) {
-        setButtonsDisabled(true);
-        return fetch(url, {
+    // 按当前上下文与天数组装查询（切天数/恢复记忆时复用）
+    function refreshQuery(statusMsg) {
+        if (!queryContext) return false;
+        if (statusMsg) setStatus('<i class="fa-solid fa-spinner fa-spin me-1"></i>' + escapeHtml(statusMsg));
+        else setStatus('<i class="fa-solid fa-spinner fa-spin me-1"></i>正在查询「' + escapeHtml(queryContext.label || queryContext.city || '') + '」的天气…');
+        return execQuery(null, queryContext.label || queryContext.city || '');
+    }
+
+    function buildQueryUrl() {
+        var base = '/api/weather/query?days=' + currentDays;
+        if (queryContext.mode === 'coords') {
+            return base + '&lat=' + encodeURIComponent(queryContext.lat) +
+                '&lon=' + encodeURIComponent(queryContext.lon) +
+                '&label=' + encodeURIComponent(queryContext.label);
+        }
+        return base + '&city=' + encodeURIComponent(queryContext.city);
+    }
+
+    // ===== 统一请求执行（V10.11.8：AbortController 超时 + 请求序号防竞态 + 按钮独立 loading） =====
+    function execQuery(btnKey, displayName) {
+        var mySeq = ++reqSeq;
+        var btn = btnKey === 'cascade' ? cascadeBtn : (btnKey === 'text' ? searchBtn : null);
+        if (btn && btnKey) {
+            btnPending[btnKey]++;
+            setBtnLoading(btn, true);
+        }
+        var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        var timer = controller ? setTimeout(function () { controller.abort(); }, FETCH_TIMEOUT_MS) : null;
+
+        return fetch(buildQueryUrl(), {
             method: 'GET',
-            headers: {
-                'X-Requested-With': 'XMLHttpRequest',
-                'X-CSRFToken': getCsrfToken()
-            }
+            headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': getCsrfToken() },
+            signal: controller ? controller.signal : undefined
         })
         .then(function (res) {
             return res.json().catch(function () {
@@ -294,36 +528,50 @@
             });
         })
         .then(function (data) {
+            if (mySeq !== reqSeq) return;  // 竞态保护：已有更新的请求，丢弃旧响应
             if (data.code === 200 && data.data) {
                 setStatus('<span class="text-success"><i class="fa-solid fa-circle-check me-1"></i>' + escapeHtml(displayName) + ' 查询成功</span>');
-                renderResult(data.data);
+                renderAll(data.data);
             } else {
                 weatherResult.innerHTML =
                     '<div class="alert alert-warning shadow-sm"><i class="fa-solid fa-circle-exclamation me-2"></i>' +
                     escapeHtml(data.message || '查询失败，请稍后重试') + '</div>';
             }
         })
-        .catch(function () {
+        .catch(function (err) {
+            if (mySeq !== reqSeq) return;
+            var isAbort = err && err.name === 'AbortError';
             weatherResult.innerHTML =
-                '<div class="alert alert-danger shadow-sm"><i class="fa-solid fa-circle-exclamation me-2"></i>网络请求失败，请稍后重试</div>';
+                '<div class="alert alert-danger shadow-sm"><i class="fa-solid fa-circle-exclamation me-2"></i>' +
+                (isAbort ? '查询超时，请稍后重试（可点击「重置记忆」恢复默认状态）' : '网络请求失败，请稍后重试') + '</div>';
         })
-        .finally(function () { setButtonsDisabled(false); });
+        .finally(function () {
+            if (timer) clearTimeout(timer);
+            if (btn && btnKey) {
+                btnPending[btnKey] = Math.max(0, btnPending[btnKey] - 1);
+                if (btnPending[btnKey] === 0) setBtnLoading(btn, false);
+            }
+        });
     }
 
-    function setButtonsDisabled(disabled) {
-        cascadeBtn.disabled = disabled;
-        searchBtn.disabled = disabled;
-        if (disabled) {
-            cascadeBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>查询中';
-            searchBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>查询中';
-        } else {
-            cascadeBtn.innerHTML = '<i class="fa-solid fa-cloud-sun me-1"></i>查询级联所选地区';
-            searchBtn.innerHTML = '<i class="fa-solid fa-cloud-sun me-1"></i>查询天气';
+    // 按钮独立 loading：仅操作被点击的按钮（修复「一个按钮查询、两个按钮同时显示查询中」的观感冲突）
+    function setBtnLoading(btn, loading) {
+        if (!btn) return;
+        if (btn === cascadeBtn) {
+            btn.disabled = loading;
+            btn.innerHTML = loading
+                ? '<i class="fa-solid fa-spinner fa-spin me-1"></i>查询中'
+                : '<i class="fa-solid fa-cloud-sun me-1"></i>查询所选地区';
+        } else if (btn === searchBtn) {
+            btn.disabled = loading;
+            btn.innerHTML = loading
+                ? '<i class="fa-solid fa-spinner fa-spin me-1"></i>查询中'
+                : '<i class="fa-solid fa-cloud-sun me-1"></i>查询天气';
         }
     }
 
-    // ===== 渲染：当前天气大卡片 =====
-    function renderHero(city, cur, firstDay) {
+    // ===== 渲染：当前天气大卡片（含 V10.11.8 空气质量徽章） =====
+    function renderHero(city, cur, firstDay, airQuality) {
         var cityName = [city.name].filter(Boolean).join('');
         var isCascadeLabel = cityName.length > 6; // 级联 label 为「省市区县」长串
         var heroName = isCascadeLabel ? city.name : ([city.name, city.admin1].filter(Boolean).join('，'));
@@ -341,6 +589,11 @@
         html += '          <div class="text-muted">' + escapeHtml(cur.weather_text || '未知') + '</div>';
         html += '        </div>';
         html += '      </div>';
+        // V10.11.8 空气质量徽章（接口不可达时降级不渲染）
+        var aqBadge = renderAirQualityBadge(airQuality);
+        if (aqBadge) {
+            html += '      <div class="mt-2">' + aqBadge + '</div>';
+        }
         html += '    </div>';
         html += '    <div class="col-md-6">';
         html += '      <div class="row g-2">';
@@ -360,6 +613,34 @@
         return html;
     }
 
+    // V10.11.8 空气质量徽章（PM2.5 按中国 24h 标准分级）
+    function pm25Level(v) {
+        if (v === null || v === undefined || v === '') return null;
+        v = Number(v);
+        if (isNaN(v)) return null;
+        if (v <= 35) return { t: '优', cls: 'text-success', bar: 'bg-success' };
+        if (v <= 75) return { t: '良', cls: 'text-warning', bar: 'bg-warning' };
+        if (v <= 115) return { t: '轻度污染', cls: 'text-warning-emphasis', bar: 'bg-warning' };
+        if (v <= 150) return { t: '中度污染', cls: 'text-danger', bar: 'bg-danger' };
+        if (v <= 250) return { t: '重度污染', cls: 'text-danger fw-bold', bar: 'bg-danger' };
+        return { t: '严重污染', cls: 'text-danger fw-bold', bar: 'bg-dark' };
+    }
+
+    function renderAirQualityBadge(aq) {
+        if (!aq) return '';
+        var lv = pm25Level(aq.pm25);
+        if (!lv) return '';
+        var html = '<span class="badge rounded-pill ' + lv.bar + ' me-1" title="空气质量等级">';
+        html += '<i class="fa-solid fa-leaf me-1"></i>空气 ' + lv.t;
+        html += '</span>';
+        html += '<span class="small text-muted">PM2.5 <b class="' + lv.cls + '">' + fmt(aq.pm25, '') + '</b> μg/m³';
+        if (aq.pm10 !== null && aq.pm10 !== undefined) {
+            html += ' ｜ PM10 ' + fmt(aq.pm10, '') + ' μg/m³';
+        }
+        html += '</span>';
+        return html;
+    }
+
     function metricItem(icon, iconClass, label, value) {
         return '<div class="col-6 col-md-6 col-lg-3"><div class="metric-item d-flex align-items-center gap-2">' +
             '<i class="fa-solid ' + icon + ' metric-item-icon ' + iconClass + '"></i>' +
@@ -367,7 +648,93 @@
             '<div class="metric-value fw-semibold">' + value + '</div></div></div></div>';
     }
 
-    // ===== 渲染：15 天预报卡片 =====
+    // ===== V10.11.8 生活指数（自研规则：基于实时与首日预报数据计算，6 项） =====
+    function lifeIndices(cur, day0) {
+        var items = [];
+        var apparent = cur.apparent_temperature;
+        var precip = day0 ? day0.precip_prob : null;
+        var uv = day0 ? day0.uv_index : null;
+        var wind = cur.wind_speed;
+        var humidity = cur.humidity;
+        var code = day0 ? day0.weather_code : null;
+
+        // 穿衣指数（按体感温度）
+        if (apparent !== null && apparent !== undefined) {
+            var a = Number(apparent);
+            var lv, adv;
+            if (a < 0) { lv = '严寒'; adv = '厚羽绒服、棉裤、帽子手套'; }
+            else if (a < 10) { lv = '寒冷'; adv = '羽绒服或厚外套'; }
+            else if (a < 18) { lv = '凉爽'; adv = '夹克、风衣、薄毛衣'; }
+            else if (a < 24) { lv = '舒适'; adv = '单衣、薄外套'; }
+            else if (a < 28) { lv = '炎热'; adv = '短衫、裙子、透气衣物'; }
+            else { lv = '酷热'; adv = '轻薄透气衣物，注意防暑补水'; }
+            items.push({ icon: 'fa-shirt', cls: 'text-primary', name: '穿衣', level: lv, advice: adv });
+        }
+        // 雨伞指数
+        if (precip !== null && precip !== undefined) {
+            var p = Number(precip);
+            if (p >= 70) items.push({ icon: 'fa-umbrella', cls: 'text-info', name: '雨伞', level: '建议带伞', advice: '今日降水概率高，出门带伞' });
+            else if (p >= 40) items.push({ icon: 'fa-umbrella', cls: 'text-info', name: '雨伞', level: '可能降雨', advice: '降水可能性中等，可备伞' });
+            else items.push({ icon: 'fa-umbrella', cls: 'text-success', name: '雨伞', level: '无需带伞', advice: '降水概率低' });
+        }
+        // 防晒指数
+        if (uv !== null && uv !== undefined) {
+            var u = Number(uv);
+            var uAdv;
+            if (u >= 8) uAdv = '防晒霜、遮阳帽、避开正午时段';
+            else if (u >= 6) uAdv = '外出建议做好防晒';
+            else if (u >= 3) uAdv = '可涂防晒霜';
+            else uAdv = '无需特别防晒';
+            items.push({ icon: 'fa-sun', cls: 'text-warning', name: '防晒', level: uvLevel(u), advice: uAdv });
+        }
+        // 洗车指数（雨雪天气码 + 降水概率）
+        if (precip !== null && precip !== undefined) {
+            var cNum = (code === null || code === undefined) ? null : Number(code);
+            var isRainSnow = (cNum !== null && !isNaN(cNum) &&
+                ((cNum >= 51 && cNum <= 67) || (cNum >= 71 && cNum <= 86) || cNum === 95 || cNum === 96 || cNum === 99));
+            var washBad = isRainSnow || Number(precip) >= 60;
+            if (washBad) items.push({ icon: 'fa-car', cls: 'text-secondary', name: '洗车', level: '不宜洗车', advice: '近期有雨雪，洗车易脏' });
+            else items.push({ icon: 'fa-car', cls: 'text-success', name: '洗车', level: '适宜洗车', advice: '天气较好，适合洗车' });
+        }
+        // 出行指数（风速）
+        if (wind !== null && wind !== undefined) {
+            var w = Number(wind);
+            var wLv, wAdv;
+            if (w >= 40) { wLv = '大风预警'; wAdv = '大风天气注意高空坠物，出行谨慎'; }
+            else if (w >= 25) { wLv = '风力较大'; wAdv = '骑行注意侧风'; }
+            else { wLv = '适宜出行'; wAdv = '天气对出行无明显影响'; }
+            items.push({ icon: 'fa-plane-departure', cls: 'text-success', name: '出行', level: wLv, advice: wAdv });
+        }
+        // 舒适度（体感温度 + 湿度）
+        if (humidity !== null && humidity !== undefined && apparent !== null && apparent !== undefined) {
+            var h = Number(humidity), a2 = Number(apparent);
+            var comfy = (a2 >= 18 && a2 <= 26 && h >= 40 && h <= 70);
+            if (comfy) items.push({ icon: 'fa-face-smile', cls: 'text-success', name: '舒适度', level: '舒适', advice: '温湿度适宜，体感舒适' });
+            else if (a2 > 28 || a2 < 10) items.push({ icon: 'fa-face-frown', cls: 'text-danger', name: '舒适度', level: '不舒适', advice: '温湿度偏离舒适区间，注意增减衣物或补水' });
+            else items.push({ icon: 'fa-face-meh', cls: 'text-warning', name: '舒适度', level: '一般', advice: '温湿度略偏离舒适区间' });
+        }
+        return items;
+    }
+
+    function renderLifeSection(cur, day0) {
+        var items = lifeIndices(cur, day0);
+        if (!items.length) return '';
+        var html = '<h6 class="text-muted mb-2 mt-3"><i class="fa-solid fa-list-check me-2"></i>生活指数</h6>';
+        html += '<div class="row g-2 mb-3">';
+        items.forEach(function (it) {
+            html += '<div class="col-6 col-md-4 col-lg-2">';
+            html += '  <div class="life-item text-center h-100">';
+            html += '    <i class="fa-solid ' + it.icon + ' ' + it.cls + ' mb-1"></i>';
+            html += '    <div class="life-name">' + escapeHtml(it.name) + '：<span class="life-level ' + it.cls + '">' + escapeHtml(it.level) + '</span></div>';
+            html += '    <div class="life-advice">' + escapeHtml(it.advice) + '</div>';
+            html += '  </div>';
+            html += '</div>';
+        });
+        html += '</div>';
+        return html;
+    }
+
+    // ===== 渲染：每日预报列表卡片 =====
     function renderDailyGrid(daily) {
         if (!daily || daily.length === 0) return '';
         var html = '';
@@ -395,18 +762,145 @@
         return html;
     }
 
-    // ===== 渲染：温度趋势图（复用本地化 ECharts，双主题适配） =====
-    function renderTrendChart(daily) {
+    // ===== V10.11.8 日历视图 =====
+    // daily 数组按日期建索引
+    function buildDailyMap(daily) {
+        var map = {};
+        (daily || []).forEach(function (d) { if (d.date) map[d.date] = d; });
+        return map;
+    }
+
+    function pad2(n) { return (n < 10 ? '0' : '') + n; }
+    function dateKey(y, m, d) { return y + '-' + pad2(m + 1) + '-' + pad2(d); }
+
+    // 「今天」= 预报第一天（与数据时区一致）
+    function todayKey() {
+        if (cachedData && cachedData.daily && cachedData.daily.length) return cachedData.daily[0].date;
+        var t = new Date();
+        return t.getFullYear() + '-' + pad2(t.getMonth() + 1) + '-' + pad2(t.getDate());
+    }
+
+    function renderCalendarHeader() {
+        var weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+        return '<div class="cal-grid mb-1">' + weekdays.map(function (w) {
+            return '<div class="cal-week-header">' + w + '</div>';
+        }).join('') + '</div>';
+    }
+
+    // 月视图：当月网格，预报范围外日期灰置显示「—」
+    function renderMonthCalendar() {
+        // V10.11.8 修复：锚点未初始化时（记忆恢复直接赋 viewMode 绕过 setView 的场景）以「今天」所在月兑底，避免 calAnchor.y 读 null 抛异常
+        if (!calAnchor) {
+            var tk = todayKey();
+            var tparts = String(tk).split('-').map(Number);
+            calAnchor = { y: tparts[0], m: tparts[1] - 1 };
+        }
+        var dailyMap = buildDailyMap(cachedData ? cachedData.daily : []);
+        var tKey = todayKey();
+        var y = calAnchor.y, m = calAnchor.m;
+        var firstDay = new Date(y, m, 1);
+        var startOffset = (firstDay.getDay() + 6) % 7;  // 周一起始
+        var daysInMonth = new Date(y, m + 1, 0).getDate();
+        calTitle.textContent = y + '年' + (m + 1) + '月';
+        // 月份导航：不允许早于「今天」所在月
+        var t = new Date();
+        calPrev.disabled = (y === t.getFullYear() && m === t.getMonth());
+
+        var cells = [];
+        var i;
+        for (i = 0; i < startOffset; i++) cells.push(null);
+        for (i = 1; i <= daysInMonth; i++) cells.push(i);
+        while (cells.length % 7 !== 0) cells.push(null);
+
+        var html = renderCalendarHeader() + '<div class="cal-grid">';
+        cells.forEach(function (d) {
+            if (d === null) { html += '<div class="cal-cell empty"></div>'; return; }
+            var key = dateKey(y, m, d);
+            var data = dailyMap[key];
+            var cls = 'cal-cell';
+            if (!data) cls += ' nodata';
+            if (key === tKey) cls += ' today';
+            if (key === selectedDate) cls += ' selected';
+            html += '<div class="' + cls + '" data-date="' + key + '">';
+            html += '  <div class="cal-date ' + (key === tKey ? 'text-primary' : '') + '">' + d + '</div>';
+            if (data) {
+                html += '  <div class="cal-icon"><i class="fa-solid ' + (data.icon || 'fa-cloud') + ' text-warning"></i></div>';
+                html += '  <div class="cal-temp"><span class="text-danger fw-bold">' + fmt(data.temp_max, '°') + '</span> <span class="text-primary fw-bold">' + fmt(data.temp_min, '°') + '</span></div>';
+                html += '  <div class="cal-temp text-muted"><i class="fa-solid fa-umbrella" style="font-size:.65rem"></i> ' + fmt(data.precip_prob, '%') + '</div>';
+            } else {
+                html += '  <div class="cal-icon text-muted">—</div>';
+                html += '  <div class="cal-temp text-muted">暂无数据</div>';
+            }
+            html += '</div>';
+        });
+        html += '</div>';
+        return html;
+    }
+
+    // 周视图：今天起 7 天（数据不足时按实际天数）
+    function renderWeekCalendar() {
+        var daily = (cachedData && cachedData.daily) || [];
+        var tKey = todayKey();
+        var html = '';
+        if (!daily.length) {
+            return '<div class="alert alert-light border">暂无预报数据</div>';
+        }
+        daily.slice(0, 7).forEach(function (d, i) {
+            var isToday = d.date === tKey;
+            var cls = 'cal-week-row' + (isToday ? ' today' : '') + (d.date === selectedDate ? ' selected' : '');
+            html += '<div class="' + cls + '" data-date="' + escapeHtml(d.date) + '" style="cursor:pointer">';
+            html += '  <div style="min-width:92px"><b class="' + (isToday ? 'text-primary' : '') + '">' + (isToday ? '今天' : escapeHtml(formatDate(d.date).split(' ')[1])) + '</b>';
+            html += '  <div class="small text-muted">' + escapeHtml(String(d.date).slice(5)) + '</div></div>';
+            html += '  <i class="fa-solid ' + (d.icon || 'fa-cloud') + ' fa-2x text-warning"></i>';
+            html += '  <div style="min-width:88px"><b>' + escapeHtml(d.weather_text || '未知') + '</b></div>';
+            html += '  <div style="min-width:80px"><span class="text-danger fw-bold">' + fmt(d.temp_max, '°') + '</span> / <span class="text-primary fw-bold">' + fmt(d.temp_min, '°') + '</span></div>';
+            html += '  <div style="min-width:70px" class="small text-muted"><i class="fa-solid fa-umbrella me-1"></i>' + fmt(d.precip_prob, '%') + '</div>';
+            html += '  <div style="min-width:70px" class="small text-muted"><i class="fa-solid fa-sun me-1 text-warning opacity-75"></i>' + uvLevel(d.uv_index) + '</div>';
+            html += '  <div style="min-width:96px" class="small text-muted"><i class="fa-solid fa-cloud-rain me-1"></i>' + fmt(d.precipitation, 'mm') + '</div>';
+            html += '  <div style="min-width:96px" class="small text-muted"><i class="fa-solid fa-clock me-1"></i>' + formatTime(d.sunrise) + ' ~ ' + formatTime(d.sunset) + '</div>';
+            html += '</div>';
+        });
+        return html;
+    }
+
+    // 选中日详情面板
+    function renderDayDetail() {
+        var area = document.getElementById('dayDetailArea');
+        if (!area) return;
+        if (!selectedDate) { area.innerHTML = ''; return; }
+        var dailyMap = buildDailyMap(cachedData ? cachedData.daily : []);
+        var d = dailyMap[selectedDate];
+        if (!d) { area.innerHTML = ''; return; }
+        var html = '<div class="day-detail-panel mb-3">';
+        html += '  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">';
+        html += '    <span class="fw-semibold"><i class="fa-solid fa-calendar-day me-2 text-primary"></i>' + escapeHtml(formatDate(selectedDate)) + ' 详情</span>';
+        html += '    <button type="button" class="btn-close" id="dayDetailClose" title="关闭详情"></button>';
+        html += '  </div>';
+        html += '  <div class="row g-2 mt-1">';
+        html += metricItem('fa-cloud-sun', 'text-warning', '天气', escapeHtml(d.weather_text || '未知'));
+        html += metricItem('fa-temperature-arrow-up', 'text-danger', '最高温', fmt(d.temp_max, '°C'));
+        html += metricItem('fa-temperature-arrow-down', 'text-primary', '最低温', fmt(d.temp_min, '°C'));
+        html += metricItem('fa-umbrella', 'text-info', '降水概率', fmt(d.precip_prob, '%'));
+        html += metricItem('fa-cloud-rain', 'text-info', '预计降水', fmt(d.precipitation, 'mm'));
+        html += metricItem('fa-sun', 'text-warning', '紫外线', uvLevel(d.uv_index));
+        html += metricItem('fa-sun', 'text-warning', '日出', formatTime(d.sunrise));
+        html += metricItem('fa-moon', 'text-primary', '日落', formatTime(d.sunset));
+        html += '  </div>';
+        html += '</div>';
+        area.innerHTML = html;
+    }
+
+    // ===== 渲染：温度趋势图（随天数联动 + V10.11.8 选中日标记线） =====
+    function renderTrendChartWrap(daily) {
         if (!daily || daily.length === 0 || !window.echarts) return '';
         var html = '';
         html += '<div class="weather-chart-wrap mb-3">';
         html += '  <div class="d-flex justify-content-between align-items-center px-2 pt-1">';
-        html += '    <span class="fw-semibold small text-muted"><i class="fa-solid fa-chart-line me-2 text-primary"></i>15 天温度趋势</span>';
+        html += '    <span class="fw-semibold small text-muted"><i class="fa-solid fa-chart-line me-2 text-primary"></i>' + daily.length + ' 天温度趋势</span>';
         html += '    <span class="small"><span class="text-danger fw-bold">● 最高温</span> <span class="ms-2 text-primary fw-bold">● 最低温</span></span>';
         html += '  </div>';
         html += '  <div id="weatherTrendChart"></div>';
         html += '</div>';
-        // 先返回 HTML，图形容器渲染后初始化（调用方在 innerHTML 赋值后再调 initChart）
         pendingDaily = daily;
         return html;
     }
@@ -425,14 +919,18 @@
         var maxs = daily.map(function (d) { return d.temp_max; });
         var mins = daily.map(function (d) { return d.temp_min; });
 
+        // V10.11.8 选中日标记线（日历选中联动趋势图）
+        var markLineData = [];
+        if (selectedDate) {
+            var mk = String(selectedDate).slice(5).replace('-', '/');
+            if (dates.indexOf(mk) >= 0) markLineData.push({ xAxis: mk });
+        }
+
         if (trendChart) { trendChart.dispose(); trendChart = null; }
         trendChart = echarts.init(el);
         trendChart.setOption({
             grid: { left: 40, right: 16, top: 20, bottom: 26 },
-            tooltip: {
-                trigger: 'axis',
-                valueFormatter: function (v) { return v + '°C'; }
-            },
+            tooltip: { trigger: 'axis', valueFormatter: function (v) { return v + '°C'; } },
             xAxis: {
                 type: 'category',
                 data: dates,
@@ -449,7 +947,13 @@
                     name: '最高温', type: 'line', data: maxs, smooth: true,
                     lineStyle: { color: '#e03131', width: 2 },
                     itemStyle: { color: '#e03131' },
-                    areaStyle: { color: 'rgba(224, 49, 49, 0.08)' }
+                    areaStyle: { color: 'rgba(224, 49, 49, 0.08)' },
+                    markLine: markLineData.length ? {
+                        symbol: 'none', silent: true,
+                        lineStyle: { color: '#198754', type: 'dashed', width: 1.5 },
+                        label: { show: false },
+                        data: markLineData
+                    } : undefined
                 },
                 {
                     name: '最低温', type: 'line', data: mins, smooth: true,
@@ -463,71 +967,422 @@
         // 容器尺寸变化自适应（列宽拖拽/窗口缩放场景）
         window.addEventListener('resize', function () {
             if (trendChart) trendChart.resize();
+            if (compareChart) compareChart.resize();
         });
     }
 
+    // ===== V10.11.8 多城市对比（上限 3 个对比城市，本地匹配添加） =====
+    function renderCompareSection() {
+        var html = '<div class="weather-chart-wrap mb-3" id="compareSection">';
+        html += '  <div class="d-flex justify-content-between align-items-center flex-wrap gap-1 px-2 pt-1">';
+        html += '    <span class="fw-semibold small text-muted"><i class="fa-solid fa-city me-2 text-primary"></i>多城市温度对比（最多 3 个对比城市）</span>';
+        html += '  </div>';
+        html += '  <div class="d-flex flex-wrap align-items-center gap-2 px-2 py-2">';
+        html += '    <div class="input-group input-group-sm" style="max-width:320px">';
+        html += '      <input type="text" class="form-control" id="compareInput" placeholder="输入省/市/区县名，如：上海" maxlength="30" autocomplete="off">';
+        html += '      <button class="btn btn-outline-primary" type="button" id="compareAddBtn"><i class="fa-solid fa-plus me-1"></i>添加</button>';
+        html += '    </div>';
+        html += '    <div id="compareTags" class="d-flex flex-wrap ms-1"></div>';
+        html += '  </div>';
+        html += '  <div id="compareChart"></div>';
+        html += '  <div id="compareStatus" class="small text-muted px-2 pb-1"></div>';
+        html += '</div>';
+        return html;
+    }
+
+    function renderCompareTags() {
+        var box = document.getElementById('compareTags');
+        if (!box) return;
+        var html = '';
+        compareCities.forEach(function (c, i) {
+            html += '<span class="compare-tag"><i class="fa-solid fa-location-dot text-danger me-1"></i>' + escapeHtml(c.label) +
+                '<span class="compare-del" data-cmp-idx="' + i + '" title="移除"><i class="fa-solid fa-xmark"></i></span></span>';
+        });
+        if (cachedData) {
+            var mainLabel = (queryContext && (queryContext.label || queryContext.city)) || '当前城市';
+            html += '<span class="compare-tag" style="border-style:dashed"><i class="fa-solid fa-star text-warning me-1"></i>' + escapeHtml(mainLabel) + '（主城市）</span>';
+        }
+        box.innerHTML = html;
+    }
+
+    function addCompareCity() {
+        var input = document.getElementById('compareInput');
+        var status = document.getElementById('compareStatus');
+        if (!input) return;
+        var name = (input.value || '').trim();
+        if (!name) {
+            if (status) status.textContent = '请输入要对比的城市名称';
+            return;
+        }
+        if (compareCities.length >= 3) {
+            if (status) status.textContent = '对比城市已达上限（3 个），请先移除再添加';
+            return;
+        }
+        var m = localMatchCity(name);
+        if (!m) {
+            if (status) status.innerHTML = '<span class="text-danger">未在行政区划库中匹配到「' + escapeHtml(name) + '」，对比城市暂仅支持国内省/市/区县</span>';
+            return;
+        }
+        var exists = compareCities.some(function (c) { return c.label === m.label; });
+        if (exists) {
+            if (status) status.textContent = '该城市已在对比列表中';
+            return;
+        }
+        compareCities.push({ label: m.label, lat: m.lat, lon: m.lon });
+        lsSet('compare', JSON.stringify(compareCities));
+        input.value = '';
+        if (status) status.textContent = '';
+        renderCompareTags();
+        fetchCompareData();
+    }
+
+    function removeCompareCity(idx) {
+        if (idx < 0 || idx >= compareCities.length) return;
+        compareCities.splice(idx, 1);
+        lsSet('compare', JSON.stringify(compareCities));
+        renderCompareTags();
+        if (!compareCities.length) {
+            if (compareChart) { compareChart.dispose(); compareChart = null; }
+            var chartEl = document.getElementById('compareChart');
+            if (chartEl) chartEl.innerHTML = '<div class="text-center text-muted py-3 small">添加对比城市后展示最高温对比曲线</div>';
+            var st = document.getElementById('compareStatus');
+            if (st) st.textContent = '';
+            return;
+        }
+        fetchCompareData();
+    }
+
+    // 并行拉取全部对比城市数据（坐标模式，与主查询同天数）
+    function fetchCompareData() {
+        if (!compareCities.length || !queryContext) { renderCompareTags(); return; }
+        renderCompareTags();
+        var status = document.getElementById('compareStatus');
+        if (status) status.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>正在获取对比城市数据…';
+        var mySeq = ++compareSeq;
+        var colorPool = ['#2f9e44', '#f08c00', '#e64980'];
+        var mainColor = '#e03131';
+        var results = [];
+        // 主城市数据直接用缓存
+        if (cachedData && cachedData.daily) {
+            results.push({ label: (queryContext.label || queryContext.city || '当前城市'), daily: cachedData.daily, color: mainColor, main: true });
+        }
+        var fetches = compareCities.map(function (c, i) {
+            var url = '/api/weather/query?days=' + currentDays +
+                '&lat=' + encodeURIComponent(c.lat) + '&lon=' + encodeURIComponent(c.lon) +
+                '&label=' + encodeURIComponent(c.label);
+            return fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest', 'X-CSRFToken': getCsrfToken() } })
+                .then(function (r) { return r.json().catch(function () { return { code: 500 }; }); })
+                .then(function (d) {
+                    if (d.code === 200 && d.data && d.data.daily) {
+                        results.push({ label: c.label, daily: d.data.daily, color: colorPool[i % colorPool.length], main: false });
+                    }
+                })
+                .catch(function () { /* 单城市失败跳过 */ });
+        });
+        Promise.allSettled ? Promise.allSettled(fetches).then(done) : Promise.all(fetches.map(function (p) { return p.catch(function () {}); })).then(done);
+
+        function done() {
+            if (mySeq !== compareSeq) return;  // 竞态保护
+            renderCompareChart(results, status);
+        }
+    }
+
+    function renderCompareChart(results, statusEl) {
+        var el = document.getElementById('compareChart');
+        if (!el) return;
+        if (!results.length) {
+            el.innerHTML = '<div class="text-center text-muted py-3 small">暂无对比数据</div>';
+            return;
+        }
+        var isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+        var axisColor = isDark ? '#9aa5b1' : '#6c757d';
+        var splitColor = isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+        // x 轴以主城市（或第一个结果）日期为准
+        var base = results[0].daily;
+        var dates = base.map(function (d) { return String(d.date || '').slice(5).replace('-', '/'); });
+        var series = results.map(function (r) {
+            var data = dates.map(function (dt) {
+                // 日期格式 mm/dd → 匹配各城市同日期数据
+                var found = null;
+                r.daily.forEach(function (d) {
+                    if (String(d.date || '').slice(5).replace('-', '/') === dt) found = d.temp_max;
+                });
+                return found;
+            });
+            return {
+                name: r.label, type: 'line', data: data, smooth: true,
+                lineStyle: { color: r.color, width: r.main ? 2.5 : 2 },
+                itemStyle: { color: r.color },
+                connectNulls: true
+            };
+        });
+        if (compareChart) { compareChart.dispose(); compareChart = null; }
+        compareChart = echarts.init(el);
+        compareChart.setOption({
+            grid: { left: 40, right: 16, top: 30, bottom: 26 },
+            legend: { top: 0, textStyle: { color: axisColor, fontSize: 11 } },
+            tooltip: { trigger: 'axis', valueFormatter: function (v) { return (v === null || v === undefined) ? '--' : v + '°C'; } },
+            xAxis: { type: 'category', data: dates, axisLine: { lineStyle: { color: axisColor } }, axisLabel: { color: axisColor, fontSize: 11 } },
+            yAxis: { type: 'value', axisLabel: { color: axisColor, formatter: '{value}°' }, splitLine: { lineStyle: { color: splitColor } } },
+            series: series
+        });
+        if (statusEl) {
+            var shown = results.length;
+            var missing = compareCities.length + 1 - shown;
+            statusEl.textContent = missing > 0
+                ? '已展示 ' + shown + ' 个城市（' + missing + ' 个城市获取失败已跳过）'
+                : '共对比 ' + shown + ' 个城市（最高温）';
+        }
+    }
+
     // ===== 渲染主入口 =====
-    function renderResult(data) {
+    function renderAll(data) {
+        cachedData = data;
+        selectedDate = null;
         var city = data.city || {};
         var cur = data.current || {};
         var daily = data.daily || [];
 
         var html = '';
-        html += renderHero(city, cur, daily[0]);
-        // 先总览趋势，再看每日明细（V10.11.7 布局：大卡片 → 趋势图 → 15 天卡片）
-        html += renderTrendChart(daily);
-        html += renderDailyGrid(daily);
+        html += renderHero(city, cur, daily[0], data.air_quality);
+        // V10.11.8 布局：大卡片（含空气质量）→ 生活指数 → 趋势图 → 视图区（列表/日历）→ 选中日详情 → 多城对比
+        html += renderLifeSection(cur, daily[0]);
+        html += renderTrendChartWrap(daily);
+        html += '<div id="weatherViewArea"></div>';
+        html += '<div id="dayDetailArea"></div>';
+        html += renderCompareSection();
 
         weatherResult.innerHTML = html;
+        weatherToolbar.style.display = '';
         initChartIfNeeded();
+        renderView();
+        fetchCompareData();
+    }
+
+    // 视图区渲染（列表/日历，基于缓存数据不重复请求）
+    function renderView() {
+        var area = document.getElementById('weatherViewArea');
+        if (!area || !cachedData) return;
+        var daily = cachedData.daily || [];
+        // 工具栏子控件显隐
+        var isCal = viewMode === 'calendar';
+        calModeGroup.style.display = isCal ? '' : 'none';
+        calNavGroup.style.display = (isCal && calMode === 'month') ? '' : 'none';
+        viewSegs.forEach(function (b) { b.classList.toggle('active', b.dataset.view === viewMode); });
+        calSegs.forEach(function (b) { b.classList.toggle('active', b.dataset.cal === calMode); });
+
+        if (viewMode === 'list') {
+            area.innerHTML = renderDailyGrid(daily);
+        } else if (calMode === 'month') {
+            area.innerHTML = renderMonthCalendar();
+        } else {
+            area.innerHTML = renderWeekCalendar();
+        }
+        renderDayDetail();
+    }
+
+    // ===== 天数控件 =====
+    function initDaysControls() {
+        var i;
+        for (i = 1; i <= 16; i++) {
+            var o = document.createElement('option');
+            o.value = String(i);
+            o.textContent = i + ' 天';
+            daysSelect.appendChild(o);
+        }
+    }
+
+    function setDays(n, via, quiet) {
+        n = parseInt(n, 10);
+        if (isNaN(n)) n = 15;
+        n = Math.max(1, Math.min(16, n));
+        currentDays = n;
+        daysSegs.forEach(function (b) { b.classList.toggle('active', Number(b.dataset.days) === n); });
+        daysSelect.value = String(n);
+        lsSet('days', String(n));
+        if (!quiet && queryContext) {
+            refreshQuery('切换为 ' + n + ' 天预报，正在重新查询…');
+        }
+    }
+
+    // ===== 视图控件 =====
+    function setView(mode) {
+        viewMode = mode;
+        lsSet('view', mode);
+        // 切到日历时若锚点为空，以「今天」所在月初始化
+        if (mode === 'calendar' && !calAnchor) {
+            var tKey = todayKey();
+            var parts = String(tKey).split('-').map(Number);
+            calAnchor = { y: parts[0], m: parts[1] - 1 };
+        }
+        renderView();
+    }
+
+    function setCalMode(mode) {
+        calMode = mode;
+        lsSet('cal', mode);
+        if (mode === 'month' && !calAnchor) {
+            var tKey = todayKey();
+            var parts = String(tKey).split('-').map(Number);
+            calAnchor = { y: parts[0], m: parts[1] - 1 };
+        }
+        renderView();
+    }
+
+    function shiftMonth(delta) {
+        if (!calAnchor) return;
+        var y = calAnchor.y, m = calAnchor.m + delta;
+        if (m < 0) { m = 11; y -= 1; }
+        if (m > 11) { m = 0; y += 1; }
+        calAnchor = { y: y, m: m };
+        renderView();
+    }
+
+    // ===== 重置记忆（V10.11.8：一键恢复默认，修复异常记忆导致页面不可用的问题） =====
+    function resetMemory() {
+        ['mode', 'region', 'city', 'days', 'view', 'cal', 'compare'].forEach(function (k) { lsDel(k); });
+        currentDays = 15;
+        viewMode = 'list';
+        calMode = 'month';
+        calAnchor = null;
+        selectedDate = null;
+        compareCities = [];
+        // 重置 UI
+        setDays(15, null, true);
+        provinceSelect.value = '';
+        onProvinceChange();
+        cityInput.value = '';
+        setStatus('<span class="text-info"><i class="fa-solid fa-circle-info me-1"></i>已清除本页记忆，恢复默认状态</span>');
+        // 默认查询北京
+        cityInput.value = '北京';
+        doTextQuery('北京', true);
     }
 
     // ===== 事件绑定 =====
     cascadeBtn.addEventListener('click', function () { doCascadeQuery(false); });
     searchBtn.addEventListener('click', function () { doTextQuery('', false); });
+    resetMemoryBtn.addEventListener('click', resetMemory);
     cityInput.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') { e.preventDefault(); doTextQuery('', false); }
     });
     provinceSelect.addEventListener('change', onProvinceChange);
     citySelect.addEventListener('change', onCityChange);
 
-    // ===== 页面初始化：恢复上次查询方式并自动查询（无记录默认北京） =====
-    initProvince();
+    daysSegs.forEach(function (b) {
+        b.addEventListener('click', function () { setDays(b.dataset.days, 'seg'); });
+    });
+    daysSelect.addEventListener('change', function () { setDays(daysSelect.value, 'select'); });
+    viewSegs.forEach(function (b) {
+        b.addEventListener('click', function () { setView(b.dataset.view); });
+    });
+    calSegs.forEach(function (b) {
+        b.addEventListener('click', function () { setCalMode(b.dataset.cal); });
+    });
+    calPrev.addEventListener('click', function () { shiftMonth(-1); });
+    calNext.addEventListener('click', function () { shiftMonth(1); });
 
-    var savedMode = null, savedRegion = null, savedCity = null;
+    // 结果区事件委托：日历/周视图日期点击（选中 + 详情 + 趋势图标记线）、对比城市操作
+    weatherResult.addEventListener('click', function (e) {
+        var del = e.target.closest('.compare-del');
+        if (del) {
+            removeCompareCity(Number(del.dataset.cmpIdx));
+            return;
+        }
+        var addBtn = e.target.closest('#compareAddBtn');
+        if (addBtn) { addCompareCity(); return; }
+        // 选中日详情关闭按钮
+        if (e.target.id === 'dayDetailClose') {
+            selectedDate = null;
+            renderView();
+            initChartIfNeeded();
+            // 趋势图去掉标记线需重画
+            if (cachedData && cachedData.daily) {
+                pendingDaily = cachedData.daily;
+                initChartIfNeeded();
+            }
+            return;
+        }
+        var cell = e.target.closest('.cal-cell[data-date], .cal-week-row[data-date]');
+        if (cell) {
+            var dKey = cell.getAttribute('data-date');
+            if (cell.classList.contains('nodata')) return;  // 无数据日期不可选
+            selectedDate = (selectedDate === dKey) ? null : dKey;
+            renderView();
+            // 趋势图标记线联动（重画）
+            if (cachedData && cachedData.daily) {
+                pendingDaily = cachedData.daily;
+                initChartIfNeeded();
+            }
+            return;
+        }
+    });
+    weatherResult.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && e.target.id === 'compareInput') {
+            e.preventDefault();
+            addCompareCity();
+        }
+    });
+
+    // ===== 页面初始化（V10.11.8：记忆为空或恢复失败时，均保证页面可用并默认北京） =====
+    initProvince();
+    initDaysControls();
+
+    // 恢复天数/视图偏好（静默，不触发查询）
+    var savedDays = parseInt(lsGet('days'), 10);
+    if (!isNaN(savedDays)) setDays(savedDays, null, true); else setDays(15, null, true);
+    var savedView = lsGet('view');
+    // V10.11.8 修复：恢复视图改用 setView()（内部会初始化日历锚点 calAnchor，避免直接赋 viewMode 导致月历渲染读 null 异常）
+    if (savedView === 'calendar' || savedView === 'list') setView(savedView);
+    var savedCal = lsGet('cal');
+    if (savedCal === 'week' || savedCal === 'month') calMode = savedCal;
+    // 恢复对比城市
     try {
-        savedMode = localStorage.getItem(LS_MODE);
-        savedRegion = JSON.parse(localStorage.getItem(LS_REGION) || 'null');
-        savedCity = localStorage.getItem(LS_CITY);
+        var savedCompare = JSON.parse(lsGet('compare') || '[]');
+        if (Array.isArray(savedCompare)) {
+            compareCities = savedCompare.filter(function (c) { return c && c.label && c.lat && c.lon; }).slice(0, 3);
+        }
+    } catch (e) { compareCities = []; }
+
+    // 恢复上次查询方式并自动查询（用户级记忆；失败时页面保持可用可重查）
+    var savedMode = lsGet('mode');
+    var savedRegion = null, savedCity = null;
+    try {
+        savedRegion = JSON.parse(lsGet('region') || 'null');
+        savedCity = lsGet('city');
     } catch (e) {}
 
-    var restored = false;
-    if (savedMode === 'cascade' && savedRegion && REGIONS.length) {
-        // 按名称匹配恢复级联选择（数据顺序变化也稳定）
+    if (savedMode === 'cascade' && savedRegion && savedRegion.p && REGIONS.length) {
+        // 按名称匹配恢复级联选择（数据顺序变化也稳定；省/市/县任一级恢复成功即可查询）
+        var restoredAny = false;
         REGIONS.forEach(function (p, pi) {
             if (p.n !== savedRegion.p) return;
             provinceSelect.value = String(pi);
             onProvinceChange();
-            p.c.forEach(function (c, ci) {
-                if (c.n !== savedRegion.c) return;
-                citySelect.value = String(ci);
-                onCityChange();
-                c.c.forEach(function (d, di) {
-                    if (d.n !== savedRegion.d) return;
-                    districtSelect.value = String(di);
+            if (savedRegion.c) {
+                p.c.forEach(function (c, ci) {
+                    if (c.n !== savedRegion.c) return;
+                    citySelect.value = String(ci);
+                    onCityChange();
+                    if (savedRegion.d) {
+                        (c.c || []).forEach(function (d, di) {
+                            if (d.n !== savedRegion.d) return;
+                            districtSelect.value = String(di);
+                        });
+                    }
                 });
-            });
+            }
+            restoredAny = true;
         });
-        if (provinceSelect.value !== '' && citySelect.value !== '' && districtSelect.value !== '') {
-            restored = true;
+        if (restoredAny && provinceSelect.value !== '') {
             doCascadeQuery(true);
+        } else {
+            cityInput.value = '北京';
+            doTextQuery('北京', true);
         }
     } else if (savedMode === 'text' && savedCity) {
         cityInput.value = savedCity;
-        restored = true;
         doTextQuery(savedCity, true);
-    }
-    if (!restored) {
+    } else {
         // 首次进入：默认北京
         cityInput.value = '北京';
         doTextQuery('北京', true);
