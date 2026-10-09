@@ -755,6 +755,25 @@ def _do_startup_sync():
         db.session.commit()
         print(f"[Init] 已同步更新管理员账号 [{admin.username}] 密码为最新配置并确保处于激活状态")
 
+    # V10.11.6: 天气菜单权限回填（幂等）
+    # 背景：V10.11.4 天气功能对所有登录用户开放；V10.11.6 纳入权限管控后，
+    # 为避免既有用户权限回退，把 weather 追加进现有非管理员用户的 allowed_menus。
+    # 仅追加、幂等；新注册用户默认无天气权限，需管理员授权或工单申请。
+    try:
+        _backfilled = 0
+        for _u in User.query.filter_by(is_admin=False).all():
+            _raw_menus = (getattr(_u, 'allowed_menus', '') or '').strip()
+            _menu_list = [m.strip() for m in _raw_menus.split(',') if m.strip()]
+            if 'weather' not in _menu_list:
+                _menu_list.append('weather')
+                _u.allowed_menus = ','.join(_menu_list)
+                _backfilled += 1
+        if _backfilled:
+            db.session.commit()
+            print(f"[Init] V10.11.6 已为 {_backfilled} 个普通用户回填「天气」菜单权限")
+    except Exception as _e:
+        print(f"[Init] V10.11.6 天气权限回填跳过: {_e}")
+
 def init_database():
     with app.app_context():
         # V10.10.16: 幂等快速跳过——已标记最新版本的库跳过完整迁移流程
@@ -1858,6 +1877,17 @@ def edit_record(record_id):
     record.event_reason = event_reason
     record.notes = notes
 
+    # V10.11.6：登记时间自定义（datetime-local 提交格式 YYYY-MM-DDTHH:MM）
+    created_at_str = request.form.get('created_at', '').strip()
+    if created_at_str:
+        try:
+            record.created_at = datetime.strptime(created_at_str, '%Y-%m-%dT%H:%M')
+        except (ValueError, TypeError):
+            if is_ajax:
+                return jsonify({'code': 400, 'message': '登记时间格式不正确，请重新选择！', 'field': 'created_at'}), 400
+            flash('登记时间格式不正确，请重新选择！', 'danger')
+            return redirect(url_for('index'))
+
     if record.record_type == 'receive':
         b_id_str = request.form.get('banquet_id', '').strip()
         if b_id_str and b_id_str.isdigit():
@@ -2611,7 +2641,7 @@ def admin_update_user_permissions(user_id):
     user.allowed_menus = ",".join(menus_list)
 
     # 2. 各菜单独立数据权限更新
-    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
+    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather']
     MENU_NAMES = {
         'ledger': '礼金账本',
         'dashboard': '数据分析',
@@ -2620,7 +2650,8 @@ def admin_update_user_permissions(user_id):
         'reconciliation': '人情对账',
         'reminders': '纪念日备忘',
         'recycle_bin': '回收站',
-        'backups': 'WebDAV备份'
+        'backups': 'WebDAV备份',
+        'weather': '天气'
     }
     PERM_LABELS = {
         0: '仅自身',

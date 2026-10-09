@@ -305,6 +305,7 @@
                                     data-amount="{{ record.amount }}"
                                     data-reason="{{ record.event_reason }}"
                                     data-banquet-id="{{ record.banquet_id or '' }}"
+                                    data-created="{{ record.created_at.strftime('%Y-%m-%dT%H:%M') if record.created_at else '' }}"
                                     data-notes="{{ record.notes or '' }}">
                                 <i class="fa-solid fa-pen-to-square"></i> 编辑
                             </button>
@@ -560,6 +561,12 @@
                         <div class="col-md-12">
                             <label class="form-label">备注说明</label>
                             <textarea class="form-control" name="notes" id="edit_notes" rows="2"></textarea>
+                        </div>
+                        <!-- V10.11.6 新增：登记时间可自定义（默认当前记录时间） -->
+                        <div class="col-md-6">
+                            <label class="form-label">登记时间</label>
+                            <input type="datetime-local" class="form-control" name="created_at" id="edit_created_at">
+                            <div class="form-text small text-muted">可自定义该笔记录的登记时间（留空则保持不变）</div>
                         </div>
                     </div>
                 </div>
@@ -965,6 +972,7 @@ if (editModal) {
         var reason = button.getAttribute('data-reason');
         var notes = button.getAttribute('data-notes');
         var type = button.getAttribute('data-type') || 'receive';
+        var created = button.getAttribute('data-created') || '';
 
         document.getElementById('editRecordForm').action = '/record/edit/' + id;
         document.getElementById('edit_name').value = name;
@@ -973,6 +981,8 @@ if (editModal) {
         document.getElementById('edit_phone').value = phone;
         document.getElementById('edit_amount').value = amount;
         document.getElementById('edit_notes').value = notes;
+        // V10.11.6：登记时间自定义（填充当前记录时间，留空=保持不变）
+        document.getElementById('edit_created_at').value = created;
 
         if (type === 'send' || type === 'give') {
             document.getElementById('edit_type_send').checked = true;

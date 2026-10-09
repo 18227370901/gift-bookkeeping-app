@@ -130,6 +130,11 @@
                         <a class="nav-link active" href="{{ url_for('index') }}"><i class="fa-solid fa-list me-1"></i>礼金账本</a>
                     </li>
                     {% endif %}
+                    {% if current_user.is_admin or current_user.can_access_menu('weather') %}
+                    <li class="nav-item">
+                        <a class="nav-link text-info" href="{{ url_for('weather_page') }}"><i class="fa-solid fa-cloud-sun me-1"></i>天气</a>
+                    </li>
+                    {% endif %}
                     {% if current_user.is_admin or current_user.can_access_menu('dashboard') %}
                     <li class="nav-item">
                         <a class="nav-link text-primary" href="{{ url_for('dashboard_view') }}"><i class="fa-solid fa-chart-line me-1"></i>数据分析</a>
@@ -163,11 +168,6 @@
                     {% if current_user.can_use_ai() %}
                     <li class="nav-item">
                         <a class="nav-link text-success" href="{{ url_for('ai_assistant_page') }}"><i class="fa-solid fa-robot me-1"></i>AI 助手</a>
-                    </li>
-                    {% endif %}
-                    {% if current_user.is_authenticated %}
-                    <li class="nav-item">
-                        <a class="nav-link text-info" href="{{ url_for('weather_page') }}"><i class="fa-solid fa-cloud-sun me-1"></i>天气</a>
                     </li>
                     {% endif %}
                     {% if not current_user.is_admin and current_user.can_use_backup() %}

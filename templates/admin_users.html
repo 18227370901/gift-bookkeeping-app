@@ -584,6 +584,23 @@
                                 </select>
                               </div>
                             </div>
+
+                            <!-- V10.11.6 新增：天气（只读工具菜单，0/1 级） -->
+                            <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
+                              <div class="form-check mb-0 d-flex align-items-center">
+                                <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="weather" id="menu_weather_{{ u.id }}" {% if u.can_access_menu('weather') %}checked{% endif %}>
+                                <label class="form-check-label fw-semibold small text-dark" for="menu_weather_{{ u.id }}">
+                                  <i class="fa-solid fa-cloud-sun text-info me-1"></i>天气
+                                </label>
+                              </div>
+                              <div style="min-width: 210px;">
+                                {% set p_weather = u.get_menu_perm('weather') %}
+                                <select class="form-select form-select-sm" name="menu_perm_weather">
+                                  <option value="0" {% if p_weather == 0 %}selected{% endif %}>无天气访问权限</option>
+                                  <option value="1" {% if p_weather == 1 %}selected{% endif %}>可查看实时天气</option>
+                                </select>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
@@ -1352,6 +1369,22 @@ function copyCredPassword() {
                     <option value="1">仅查看他人数据</option>
                     <option value="2">查看+修改他人数据</option>
                     <option value="3">查看+修改+删除他人数据</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- V10.11.6 新增：天气 -->
+              <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
+                <div class="form-check mb-0 d-flex align-items-center">
+                  <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="weather" id="batch_menu_weather">
+                  <label class="form-check-label fw-semibold small text-dark" for="batch_menu_weather">
+                    <i class="fa-solid fa-cloud-sun text-info me-1"></i>天气
+                  </label>
+                </div>
+                <div style="min-width: 210px;">
+                  <select class="form-select form-select-sm" name="menu_perm_weather">
+                    <option value="0" selected>无天气访问权限</option>
+                    <option value="1">可查看实时天气</option>
                   </select>
                 </div>
               </div>

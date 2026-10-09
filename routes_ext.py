@@ -960,6 +960,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             'export_pdf_statement': 'ledger',
             'poster_view': 'ledger',
             'api_poster_data': 'ledger',
+            'weather_page': 'weather',
+            'api_weather_query': 'weather',
         }
         required_menu = menu_map.get(endpoint)
         if required_menu and hasattr(current_user, 'can_access_menu'):
@@ -971,7 +973,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     'recycle_bin': '回收站',
                     'ledger': '礼金账本',
                     'dashboard': '数据分析',
-                    'family': '家庭记账'
+                    'family': '家庭记账',
+                    'weather': '天气'
                 }
                 m_name = menu_names.get(required_menu, '该功能')
                 if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -5146,6 +5149,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         ('ledger', '礼金账本'),
         ('dashboard', '数据分析'),
         ('family', '家庭记账'),
+        ('weather', '天气'),
         ('banquets', '专属宴席'),
         ('reconciliation', '人情对账'),
         ('reminders', '纪念日备忘'),
