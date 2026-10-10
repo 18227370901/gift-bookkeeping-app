@@ -114,7 +114,7 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.11.9</span>
+    <span><strong>版本</strong>：V10.11.10</span>
     <span><strong>生成日期</strong>：2026-10-01</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
@@ -1364,6 +1364,28 @@ graph LR
 </table>
 
 <p><strong>文件变更</strong>：<code>static/js/lunar_utils.js</code>（新增，万年历核心库）；<code>templates/weather.html</code>（日历视图万年历化）；<code>alert_service.py</code>（完整性清单补 <code>lunar_utils.js</code>）；<code>README.md</code>。</p>
+
+<h2>10.20 万年历独立模块 + 法定节假日班/休角标（V10.11.10）</h2>
+<table>
+<tr><th>模块</th><th>实现</th></tr>
+<tr><td>模块形态</td><td>天气页视图切换第三态「万年历」（列表/日历/万年历）；<strong>不依赖天气预报数据</strong>（未查询天气/查询失败均可独立使用，动态创建视图容器）；万年历视图隐藏天数控件、显示专属导航（年/月双下拉 + 翻月 + 回到今天）；视图偏好记忆恢复</td></tr>
+<tr><td>今日大卡</td><td>公历大字 1.9rem + 星期红 + <strong>今日班/休徽章</strong> + 农历全称 + 节气胶囊 + 节日徽章 + 「今日休息日/调休补班（名称）」说明行</td></tr>
+<tr><td>大月历网格</td><td>公历数字 1.3rem（周末浅红/今日蓝）+ 右上角<strong>班/休角标</strong>（休红底/班灰底白字，hover 显示名称）+ 农历/节日/节气小字（节日&gt;节气&gt;农历日红字）+ 今日红框红底</td></tr>
+<tr><td>点击详情</td><td>独立面板（与天气详情互不干扰）：农历全称大字 + 干支/生肖/节气/节日徽章 + 班/休状态与名称</td></tr>
+<tr><td>年月切换</td><td>年下拉 1900-2100 + 月下拉 1-12 + ‹ › 翻月 + 「今天」一键返回</td></tr>
+<tr><td>班/休数据源</td><td><strong>timor.tech 聚合接口</strong>（内容与国务院办公厅放假安排公报一致，免费无 Key 国内直连）；<code>holiday=true</code> 休 / <code>holiday=false</code> 调休补班；反爬适配：模拟浏览器 UA 规避 python-requests 默认 UA 403</td></tr>
+<tr><td>缓存与网络</td><td>双缓存（进程内存 + 磁盘 <code>data/holiday_cache.json</code>，发布后不变重启免拉取，失败不缓存便于重试）；双路径（禁代理直连优先 + 系统代理兑底，超时 5/8s）；降级：拉取失败返回空仅无角标，万年历主体不受影响；2007 年前无数据跳过</td></tr>
+<tr><td>接口与权限</td><td><code>GET /api/holiday/year/&lt;int:year&gt;</code>（登录 + weather 菜单权限，menu_map <code>api_holiday_year</code>）</td></tr>
+</table>
+
+<table>
+<tr><th>验证场景（11444 副本库）</th><th>结果</th></tr>
+<tr><td>2026 年班/休真实拉取（国庆中秋连休 + 调休补班，今日 10/10「国庆节后补班」今日卡/角标/详情三处正确）</td><td>✅</td></tr>
+<tr><td>万年历网格 31 格 + 9 角标（休7班2）+ 农历/节日/节气小字全对；点击 10/1 国庆详情（八月廿一 + 休徽章）</td><td>✅</td></tr>
+<tr><td>2027 年（安排未发布）降级无角标且万年历正常；回到今天正确；三视图互不干扰；console 0 错误</td><td>✅</td></tr>
+</table>
+
+<p><strong>文件变更</strong>：<code>holiday_service.py</code>（新增）；<code>routes_weather.py</code>（班/休接口）；<code>routes_ext.py</code>（menu_map）；<code>templates/weather.html</code>（万年历模块）；<code>.gitignore</code>（缓存忽略）。</p>
 </div>
 
 <!-- ==================== 附录 ==================== -->
@@ -1371,8 +1393,8 @@ graph LR
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.9</td></tr>
-<tr><td>生成日期</td><td>2026-10-10（V10.11.9 修订，日历视图万年历化；承接 V10.11.8 天气增强 + 告警推送 + AI 网络策略修复）</td></tr>
+<tr><td>文档版本</td><td>V10.11.10</td></tr>
+<tr><td>生成日期</td><td>2026-10-10（V10.11.9 万年历化 + V10.11.10 万年历独立模块与班/休角标；承接 V10.11.8 天气增强 + 告警推送 + AI 网络策略修复）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>

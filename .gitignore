@@ -23,6 +23,8 @@ dist/
 *.db.malformed_bak
 # 运行数据库（含真实用户数据与敏感配置，禁止追踪）
 data/gift_bookkeeping.db
+# 法定节假日班/休数据磁盘缓存（V10.11.10 万年历模块运行期生成，公开数据无需入库）
+data/holiday_cache.json
 # 用户上传附件（可能含私人文档，禁止追踪）
 data/attachments/
 .temp/
