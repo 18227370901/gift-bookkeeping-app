@@ -3,7 +3,7 @@
 
 {% block extra_css %}
 <style>
-    /* V10.11.7 天气页改版样式（参考主流天气站首页式布局）+ V10.11.8 增强 */
+    /* V10.11.7 天气页改版样式（参考主流天气站首页式布局）+ V10.11.8 增强 + V10.11.9 万年历 */
     .weather-hero-card {
         border-radius: 14px;
         background: linear-gradient(135deg, rgba(13, 110, 253, 0.08), rgba(13, 202, 240, 0.10));
@@ -60,8 +60,9 @@
     /* 日历视图 */
     .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
     .cal-week-header { text-align: center; font-size: 0.75rem; color: var(--app-text-muted, #6c757d); padding: 2px 0; }
+    .cal-week-header.weekend { color: #e03131; }
     .cal-cell {
-        min-height: 76px;
+        min-height: 78px;
         border: 1px solid var(--app-border-soft);
         border-radius: 8px;
         padding: 4px 6px;
@@ -71,13 +72,38 @@
     }
     .cal-cell:hover { transform: translateY(-1px); box-shadow: 0 0.25rem 0.5rem rgba(0,0,0,0.07); }
     .cal-cell.empty { visibility: hidden; }
-    .cal-cell.nodata { opacity: 0.42; cursor: default; }
-    .cal-cell.nodata:hover { transform: none; box-shadow: none; }
-    .cal-cell.today { border-color: #0d6efd; box-shadow: 0 0 0 1px rgba(13, 110, 253, 0.25); }
+    /* V10.11.9：范围外日期保留万年历信息可点击，仅弱化 */
+    .cal-cell.nodata { opacity: 0.62; }
+    .cal-cell.today { border-color: #e03131; box-shadow: 0 0 0 1px rgba(224, 49, 49, 0.35); }
     .cal-cell.selected { border-color: #198754; box-shadow: 0 0 0 2px rgba(25, 135, 84, 0.3); }
-    .cal-cell .cal-date { font-size: 0.75rem; font-weight: 600; }
+    /* V10.11.9 万年历三层格子：第一行 公历数字 + 农历/节日小字 */
+    .cal-cell .cal-top { display: flex; justify-content: space-between; align-items: baseline; gap: 4px; }
+    .cal-cell .cal-date { font-size: 0.9rem; font-weight: 700; line-height: 1.1; }
+    .cal-cell .cal-date.weekend { color: #e03131; }
+    .cal-cell .cal-date.today-num { color: #0d6efd; }
+    .cal-cell .cal-lunar { font-size: 0.62rem; color: var(--app-text-muted, #6c757d); line-height: 1.15; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .cal-cell .cal-lunar.festival, .cal-cell .cal-lunar.term { color: #e03131; font-weight: 600; }
     .cal-cell .cal-icon { font-size: 0.95rem; margin: 2px 0; }
     .cal-cell .cal-temp { font-size: 0.7rem; line-height: 1.2; }
+    /* V10.11.9 万年历今日头部卡（参考 rili.com.cn 万年历） */
+    .cal-today-card {
+        border: 1px solid var(--app-border-soft); border-radius: 10px;
+        background: linear-gradient(135deg, rgba(224,49,49,0.06), rgba(255,193,7,0.08));
+        background: var(--app-card-bg);
+        padding: 0.7rem 1rem;
+    }
+    .cal-today-card .cal-today-main { font-size: 1.35rem; font-weight: 700; }
+    .cal-today-card .cal-today-week { color: #e03131; font-size: 1rem; }
+    .cal-today-card .cal-today-sub { color: var(--app-text-muted, #6c757d); font-size: 0.85rem; }
+    .cal-term-chip {
+        display: inline-block; background: rgba(25, 135, 84, 0.12); color: #198754;
+        border-radius: 999px; padding: 1px 10px; font-size: 0.72rem; font-weight: 600;
+    }
+    .cal-fest-badge {
+        display: inline-block; background: rgba(224, 49, 49, 0.1); color: #e03131;
+        border-radius: 999px; padding: 1px 10px; font-size: 0.72rem; font-weight: 600;
+    }
+    .cal-detail-lunar { font-size: 0.82rem; }
     /* 周视图行 */
     .cal-week-row {
         display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -157,7 +183,7 @@
             </div>
         </div>
 
-        <!-- V10.11.8 工具栏：天数自定义（分段 + 下拉）+ 视图切换（列表/日历）+ 日历子视图（月/周）+ 月份导航 -->
+        <!-- V10.11.9 工具栏：天数自定义 + 视图切换 + 日历子视图（月/周）+ 月份导航（自由翻月）+ 回到今天 -->
         <div id="weatherToolbar" class="d-flex flex-wrap align-items-center gap-2 mb-3" style="display:none">
             <span class="small text-muted fw-semibold"><i class="fa-solid fa-calendar-day me-1 text-primary"></i>预报天数</span>
             <div class="btn-group btn-group-sm" role="group" aria-label="预报天数分段">
@@ -181,6 +207,7 @@
                 <button type="button" class="btn btn-outline-secondary" id="calPrev" title="上一月"><i class="fa-solid fa-chevron-left"></i></button>
                 <button type="button" class="btn btn-outline-secondary" id="calTitle" disabled style="min-width:110px"></button>
                 <button type="button" class="btn btn-outline-secondary" id="calNext" title="下一月"><i class="fa-solid fa-chevron-right"></i></button>
+                <button type="button" class="btn btn-outline-secondary" id="calToday" title="回到今天所在月"><i class="fa-solid fa-crosshairs me-1"></i>今天</button>
             </div>
         </div>
 
@@ -193,6 +220,7 @@
 {% block extra_js %}
 <!-- V10.11.7：行政区划数据（本地内置，含坐标）+ ECharts（趋势图，本地化） -->
 <script src="{{ url_for('static', filename='js/china-regions.js') }}"></script>
+<script src="{{ url_for('static', filename='js/lunar_utils.js') }}"></script>
 <script src="{{ url_for('static', filename='vendor/echarts/5.5.0/echarts.min.js') }}"></script>
 <script>
 (function () {
@@ -217,6 +245,7 @@
     var calTitle = document.getElementById('calTitle');
     var calPrev = document.getElementById('calPrev');
     var calNext = document.getElementById('calNext');
+    var calToday = document.getElementById('calToday');
     var daysSegs = Array.prototype.slice.call(document.querySelectorAll('.days-seg'));
     var viewSegs = Array.prototype.slice.call(document.querySelectorAll('.view-seg'));
     var calSegs = Array.prototype.slice.call(document.querySelectorAll('.cal-seg'));
@@ -782,12 +811,38 @@
 
     function renderCalendarHeader() {
         var weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
-        return '<div class="cal-grid mb-1">' + weekdays.map(function (w) {
-            return '<div class="cal-week-header">' + w + '</div>';
+        return '<div class="cal-grid mb-1">' + weekdays.map(function (w, i) {
+            // V10.11.9 万年历：周六/周日列头标红
+            var cls = 'cal-week-header' + (i >= 5 ? ' weekend' : '');
+            return '<div class="' + cls + '">' + w + '</div>';
         }).join('') + '</div>';
     }
 
-    // 月视图：当月网格，预报范围外日期灰置显示「—」
+    // V10.11.9 万年历今日头部卡（日历视图顶部：今天公历大字 + 星期 + 农历/干支/生肖/节气/节日）
+    function renderTodayCard() {
+        if (!window.LunarUtils) return '';
+        var tk = todayKey();
+        var parts = String(tk).split('-').map(Number);
+        var F = null;
+        try { F = LunarUtils.getFullInfo(parts[0], parts[1], parts[2]); } catch (e) { }
+        if (!F) return '';
+        var html = '<div class="cal-today-card mb-2">';
+        html += '  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">';
+        html += '    <div>';
+        html += '      <div class="cal-today-main">' + escapeHtml(F.gregText) + ' <span class="cal-today-week">' + escapeHtml(F.week) + '</span></div>';
+        html += '      <div class="cal-today-sub mt-1"><i class="fa-solid fa-moon text-warning me-1"></i>' + escapeHtml(F.lunarFull) + (F.term ? ' <span class="cal-term-chip ms-2">' + escapeHtml(F.term) + '</span>' : '') + '</div>';
+        html += '    </div>';
+        html += '    <div class="text-end">';
+        (F.festivals || []).forEach(function (f) {
+            html += '      <div class="cal-fest-badge mb-1"><i class="fa-solid fa-fireworks me-1"></i>' + escapeHtml(f) + '</div>';
+        });
+        html += '    </div>';
+        html += '  </div>';
+        html += '</div>';
+        return html;
+    }
+
+    // 月视图：V10.11.9 万年历化——每格三层（公历数字 + 农历/节日/节气小字 + 天气），自由翻月，范围外日期保留万年历信息可点击
     function renderMonthCalendar() {
         // V10.11.8 修复：锚点未初始化时（记忆恢复直接赋 viewMode 绕过 setView 的场景）以「今天」所在月兑底，避免 calAnchor.y 读 null 抛异常
         if (!calAnchor) {
@@ -802,9 +857,8 @@
         var startOffset = (firstDay.getDay() + 6) % 7;  // 周一起始
         var daysInMonth = new Date(y, m + 1, 0).getDate();
         calTitle.textContent = y + '年' + (m + 1) + '月';
-        // 月份导航：不允许早于「今天」所在月
-        var t = new Date();
-        calPrev.disabled = (y === t.getFullYear() && m === t.getMonth());
+        // V10.11.9 万年历自由翻月：取消「不可早于当前月」限制（1900-2100 范围内均可查看）
+        calPrev.disabled = false;
 
         var cells = [];
         var i;
@@ -821,15 +875,27 @@
             if (!data) cls += ' nodata';
             if (key === tKey) cls += ' today';
             if (key === selectedDate) cls += ' selected';
+            // V10.11.9 万年历：周末标红（周六日）
+            var wd = new Date(y, m, d).getDay();
+            var isWeekend = (wd === 0 || wd === 6);
+            // V10.11.9 万年历小字（优先级：节日 > 节气 > 农历日；初一显示月名）
+            var label = { text: '', type: 'none' };
+            if (window.LunarUtils) {
+                try { label = LunarUtils.getDayLabel(y, m + 1, d); } catch (e) { }
+            }
             html += '<div class="' + cls + '" data-date="' + key + '">';
-            html += '  <div class="cal-date ' + (key === tKey ? 'text-primary' : '') + '">' + d + '</div>';
+            html += '  <div class="cal-top">';
+            html += '    <span class="cal-date ' + (isWeekend ? 'weekend' : '') + (key === tKey ? ' today-num' : '') + '">' + d + '</span>';
+            html += '    <span class="cal-lunar ' + (label.type === 'festival' || label.type === 'term' ? label.type : '') + '" title="' + escapeHtml(label.text || '') + '">' + escapeHtml(label.text || '') + '</span>';
+            html += '  </div>';
             if (data) {
                 html += '  <div class="cal-icon"><i class="fa-solid ' + (data.icon || 'fa-cloud') + ' text-warning"></i></div>';
                 html += '  <div class="cal-temp"><span class="text-danger fw-bold">' + fmt(data.temp_max, '°') + '</span> <span class="text-primary fw-bold">' + fmt(data.temp_min, '°') + '</span></div>';
                 html += '  <div class="cal-temp text-muted"><i class="fa-solid fa-umbrella" style="font-size:.65rem"></i> ' + fmt(data.precip_prob, '%') + '</div>';
             } else {
-                html += '  <div class="cal-icon text-muted">—</div>';
-                html += '  <div class="cal-temp text-muted">暂无数据</div>';
+                // V10.11.9：范围外日期不再显示「—/暂无数据」，保留万年历信息可点击查看详情
+                html += '  <div class="cal-icon text-muted" style="opacity:.5"><i class="fa-regular fa-calendar"></i></div>';
+                html += '  <div class="cal-temp text-muted" style="font-size:.62rem">无预报</div>';
             }
             html += '</div>';
         });
@@ -837,7 +903,7 @@
         return html;
     }
 
-    // 周视图：今天起 7 天（数据不足时按实际天数）
+    // 周视图：今天起 7 天（数据不足时按实际天数）；V10.11.9 万年历化——行头补农历/节日小字
     function renderWeekCalendar() {
         var daily = (cachedData && cachedData.daily) || [];
         var tKey = todayKey();
@@ -848,9 +914,15 @@
         daily.slice(0, 7).forEach(function (d, i) {
             var isToday = d.date === tKey;
             var cls = 'cal-week-row' + (isToday ? ' today' : '') + (d.date === selectedDate ? ' selected' : '');
+            // V10.11.9 万年历：行头补农历/节日小字
+            var wl = String(d.date || '').split('-').map(Number);
+            var wlabel = { text: '', type: 'none' };
+            if (window.LunarUtils && wl.length === 3) {
+                try { wlabel = LunarUtils.getDayLabel(wl[0], wl[1], wl[2]); } catch (e) { }
+            }
             html += '<div class="' + cls + '" data-date="' + escapeHtml(d.date) + '" style="cursor:pointer">';
-            html += '  <div style="min-width:92px"><b class="' + (isToday ? 'text-primary' : '') + '">' + (isToday ? '今天' : escapeHtml(formatDate(d.date).split(' ')[1])) + '</b>';
-            html += '  <div class="small text-muted">' + escapeHtml(String(d.date).slice(5)) + '</div></div>';
+            html += '  <div style="min-width:120px"><b class="' + (isToday ? 'text-primary' : '') + '">' + (isToday ? '今天' : escapeHtml(formatDate(d.date).split(' ')[1])) + '</b>';
+            html += '  <div class="small text-muted">' + escapeHtml(String(d.date).slice(5)) + ' <span class="' + (wlabel.type === 'festival' || wlabel.type === 'term' ? 'cal-lunar ' + wlabel.type : '') + '">' + escapeHtml(wlabel.text || '') + '</span></div></div>';
             html += '  <i class="fa-solid ' + (d.icon || 'fa-cloud') + ' fa-2x text-warning"></i>';
             html += '  <div style="min-width:88px"><b>' + escapeHtml(d.weather_text || '未知') + '</b></div>';
             html += '  <div style="min-width:80px"><span class="text-danger fw-bold">' + fmt(d.temp_max, '°') + '</span> / <span class="text-primary fw-bold">' + fmt(d.temp_min, '°') + '</span></div>';
@@ -863,29 +935,48 @@
         return html;
     }
 
-    // 选中日详情面板
+    // 选中日详情面板：V10.11.9 万年历化——任意日期可查看（万年历信息 + 预报范围内天气 8 项指标）
     function renderDayDetail() {
         var area = document.getElementById('dayDetailArea');
         if (!area) return;
         if (!selectedDate) { area.innerHTML = ''; return; }
         var dailyMap = buildDailyMap(cachedData ? cachedData.daily : []);
         var d = dailyMap[selectedDate];
-        if (!d) { area.innerHTML = ''; return; }
+        var parts = String(selectedDate).split('-').map(Number);
+        var F = null;
+        if (window.LunarUtils && parts.length === 3) {
+            try { F = LunarUtils.getFullInfo(parts[0], parts[1], parts[2]); } catch (e) { }
+        }
         var html = '<div class="day-detail-panel mb-3">';
         html += '  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">';
         html += '    <span class="fw-semibold"><i class="fa-solid fa-calendar-day me-2 text-primary"></i>' + escapeHtml(formatDate(selectedDate)) + ' 详情</span>';
         html += '    <button type="button" class="btn-close" id="dayDetailClose" title="关闭详情"></button>';
         html += '  </div>';
-        html += '  <div class="row g-2 mt-1">';
-        html += metricItem('fa-cloud-sun', 'text-warning', '天气', escapeHtml(d.weather_text || '未知'));
-        html += metricItem('fa-temperature-arrow-up', 'text-danger', '最高温', fmt(d.temp_max, '°C'));
-        html += metricItem('fa-temperature-arrow-down', 'text-primary', '最低温', fmt(d.temp_min, '°C'));
-        html += metricItem('fa-umbrella', 'text-info', '降水概率', fmt(d.precip_prob, '%'));
-        html += metricItem('fa-cloud-rain', 'text-info', '预计降水', fmt(d.precipitation, 'mm'));
-        html += metricItem('fa-sun', 'text-warning', '紫外线', uvLevel(d.uv_index));
-        html += metricItem('fa-sun', 'text-warning', '日出', formatTime(d.sunrise));
-        html += metricItem('fa-moon', 'text-primary', '日落', formatTime(d.sunset));
-        html += '  </div>';
+        // V10.11.9 万年历信息条（农历全称/干支/生肖/节气/节日）
+        if (F) {
+            html += '  <div class="cal-detail-lunar mt-2">';
+            html += '    <span class="me-3"><i class="fa-solid fa-moon text-warning me-1"></i>' + escapeHtml(F.lunarFull) + '</span>';
+            if (F.term) html += '<span class="cal-term-chip me-2">' + escapeHtml(F.term) + '</span>';
+            (F.festivals || []).forEach(function (f) {
+                html += '<span class="cal-fest-badge me-2"><i class="fa-solid fa-fireworks me-1"></i>' + escapeHtml(f) + '</span>';
+            });
+            html += '  </div>';
+        }
+        if (d) {
+            html += '  <div class="row g-2 mt-1">';
+            html += metricItem('fa-cloud-sun', 'text-warning', '天气', escapeHtml(d.weather_text || '未知'));
+            html += metricItem('fa-temperature-arrow-up', 'text-danger', '最高温', fmt(d.temp_max, '°C'));
+            html += metricItem('fa-temperature-arrow-down', 'text-primary', '最低温', fmt(d.temp_min, '°C'));
+            html += metricItem('fa-umbrella', 'text-info', '降水概率', fmt(d.precip_prob, '%'));
+            html += metricItem('fa-cloud-rain', 'text-info', '预计降水', fmt(d.precipitation, 'mm'));
+            html += metricItem('fa-sun', 'text-warning', '紫外线', uvLevel(d.uv_index));
+            html += metricItem('fa-sun', 'text-warning', '日出', formatTime(d.sunrise));
+            html += metricItem('fa-moon', 'text-primary', '日落', formatTime(d.sunset));
+            html += '  </div>';
+        } else {
+            // V10.11.9：预报范围外日期仅显示万年历信息
+            html += '  <div class="small text-muted mt-2"><i class="fa-solid fa-circle-info me-1"></i>该日期超出预报范围（最多 16 天），仅显示万年历信息</div>';
+        }
         html += '</div>';
         area.innerHTML = html;
     }
@@ -1173,10 +1264,14 @@
 
         if (viewMode === 'list') {
             area.innerHTML = renderDailyGrid(daily);
-        } else if (calMode === 'month') {
-            area.innerHTML = renderMonthCalendar();
         } else {
-            area.innerHTML = renderWeekCalendar();
+            // V10.11.9 万年历：日历视图顶部固定今日信息卡（月/周子视图均显示）
+            var head = renderTodayCard();
+            if (calMode === 'month') {
+                area.innerHTML = head + renderMonthCalendar();
+            } else {
+                area.innerHTML = head + renderWeekCalendar();
+            }
         }
         renderDayDetail();
     }
@@ -1234,7 +1329,18 @@
         var y = calAnchor.y, m = calAnchor.m + delta;
         if (m < 0) { m = 11; y -= 1; }
         if (m > 11) { m = 0; y += 1; }
+        // V10.11.9 万年历支持范围：1900-2100（农历数据表硬边界）
+        if (y < 1900) { y = 1900; m = 0; }
+        if (y > 2100) { y = 2100; m = 11; }
         calAnchor = { y: y, m: m };
+        renderView();
+    }
+
+    // V10.11.9 万年历：回到今天所在月
+    function backToday() {
+        var tKey = todayKey();
+        var parts = String(tKey).split('-').map(Number);
+        calAnchor = { y: parts[0], m: parts[1] - 1 };
         renderView();
     }
 
@@ -1280,6 +1386,7 @@
     });
     calPrev.addEventListener('click', function () { shiftMonth(-1); });
     calNext.addEventListener('click', function () { shiftMonth(1); });
+    calToday.addEventListener('click', backToday);
 
     // 结果区事件委托：日历/周视图日期点击（选中 + 详情 + 趋势图标记线）、对比城市操作
     weatherResult.addEventListener('click', function (e) {
@@ -1305,10 +1412,10 @@
         var cell = e.target.closest('.cal-cell[data-date], .cal-week-row[data-date]');
         if (cell) {
             var dKey = cell.getAttribute('data-date');
-            if (cell.classList.contains('nodata')) return;  // 无数据日期不可选
+            // V10.11.9 万年历：所有日期可选（预报范围外仅显示万年历详情）
             selectedDate = (selectedDate === dKey) ? null : dKey;
             renderView();
-            // 趋势图标记线联动（重画）
+            // 趋势图标记线联动（重画；范围外日期自动无标记线）
             if (cachedData && cachedData.daily) {
                 pendingDaily = cachedData.daily;
                 initChartIfNeeded();

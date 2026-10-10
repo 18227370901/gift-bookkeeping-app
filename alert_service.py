@@ -44,6 +44,7 @@ MAX_ALERT_CITIES = 5
 # 数据完整性检查的关键文件清单（相对应用根目录；缺失或空文件即告警）
 INTEGRITY_FILES = [
     os.path.join('static', 'js', 'china-regions.js'),      # 行政区划数据（级联/本地匹配依赖）
+    os.path.join('static', 'js', 'lunar_utils.js'),        # V10.11.9 万年历核心库（农历/干支/节气/节日，sxtwl 权威数据）
     os.path.join('static', 'js', 'table-resizer.js'),      # 表格列宽调整
     os.path.join('static', 'vendor', 'echarts', '5.5.0', 'echarts.min.js'),  # 图表（本地化）
     os.path.join('templates', 'weather.html'),
