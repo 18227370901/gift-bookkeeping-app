@@ -114,7 +114,7 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.11.8</span>
+    <span><strong>版本</strong>：V10.11.9</span>
     <span><strong>生成日期</strong>：2026-10-01</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
@@ -1326,13 +1326,53 @@ graph LR
 <p><strong>文件变更</strong>：<code>alert_service.py</code>、<code>routes_alert.py</code>（新增）；<code>models.py</code>（两模型）、<code>app.py</code>（schema 1019+迁移+路由+线程）、<code>routes_ext.py</code>（menu_map 8 endpoint）、<code>weather_service.py</code>（空气质量）、<code>ai_service.py</code>（<code>_ai_http_get</code>/<code>_chat_with_fallback</code> 双路径出网，改造 4 处调用点）、<code>templates/weather.html</code>（重写）、<code>templates/admin_backups.html</code>（告警卡片）；<code>README.md</code>。</p>
 </div>
 
+<!-- ==================== 第 10 部分补充二：V10.11.9 万年历 ==================== -->
+<div class="section" id="s10f">
+<h1>第 10 部分补充二：V10.11.9 日历视图万年历化（参考 rili.com.cn）</h1>
+
+<h2>10.17 万年历核心数据库（lunar_utils.js）</h2>
+<table>
+<tr><th>项</th><th>实现</th></tr>
+<tr><td>农历表 <code>LUNAR_INFO</code></td><td>1900-2100 共 201 项位编码：<code>bit0-3</code>=闰月月份（0 无）、<code>bit4-15</code>=正月~腊月大小月（1=30 天，m 月位 <code>1&lt;&lt;(16-m)</code>）、<code>bit16</code>=闰月是否大月；定位算法：以 1900-01-31（正月初一）为锚逐年减 <code>lYearDays</code> 逐月减天数（闰月紧随同名正常月后）</td></tr>
+<tr><td>节气表 <code>TERM_DATA</code></td><td>base32 编码 201 年×24 字符（每字符=1 个节气日 1-31，序：小寒=0…冬至=23）；查表直取无近似公式误差</td></tr>
+<tr><td>数据权威性</td><td>两表均由寿星天文历（<strong>sxtwl</strong>，中国历法事实标准）程序化全量生成，同源解码 <strong>roundtrip 校验 73,414 天 0 不一致 + 4,824 节气点 0 不一致</strong>；权威锚点全命中（2026 春节 2/17 丙午马年、中秋 9/25、除夕 2/16 腊月廿九、2025 闰六月初一 7/25、清明 4/5、寒露 10/8、冬至 12/22）</td></tr>
+<tr><td>节日库</td><td>公历固定 15 项（元旦/劳动节/国庆节等）+ 公历浮动（母亲节 5 月第 2 个周日/父亲节 6 月第 3 个周日/感恩节 11 月第 4 个周四）+ 农历固定 10 项（春节/元宵/龙抬头/端午/七夕/中元/中秋/重阳/腊八等）+ <strong>除夕动态判断</strong>（次日正月初一即除夕，兼容腊月廿九/三十）；闰月当天不算农历节日</td></tr>
+<tr><td>干支/生肖</td><td>年干支 <code>(农历年-4)</code> 取模天干/地支（2026 丙午、2025 乙巳、2027 丁未），以农历年为界；生肖随年地支</td></tr>
+<tr><td>零依赖</td><td>全部本地计算无 CDN 无外网（与 china-regions.js 同引入方式）；显示优先级：<strong>节日 &gt; 节气 &gt; 农历日</strong>，初一显示月名（「九月」/闰月「闰六月」）</td></tr>
+</table>
+
+<h2>10.18 页面功能</h2>
+<table>
+<tr><th>模块</th><th>实现</th></tr>
+<tr><td>今日信息卡</td><td>日历视图顶部固定（月/周子视图均显示）：公历大字「2026年10月10日」+ 星期（红）+ 农历行「丙午年（马） 九月初一」+ 当日节气绿色胶囊 + 节日红色徽章；不随翻月变化</td></tr>
+<tr><td>月网格三层</td><td>第一行：公历数字（周六日浅红/今日蓝/今日格子红描边）+ 右侧万年历小字（节日/节气红字加粗）；下方天气层（预报内：图标/高低温/降水概率；范围外：保留万年历信息弱化「无预报」可点击，不再灰置「—」）</td></tr>
+<tr><td>万年历导航</td><td>取消「不可早于当前月」限制（<strong>1900-2100 自由翻月</strong>）；新增「今天」按钮一键回当前月</td></tr>
+<tr><td>详情面板万年历化</td><td>任意日期可点击：上半部万年历信息条（农历全称/干支/生肖/节气胶囊/节日徽章），下半部天气 8 项指标（预报内）或「超出预报范围，仅显示万年历信息」提示；趋势图标记线仅预报内联动</td></tr>
+<tr><td>周视图</td><td>每行日期下方补农历/节日小字（如「10-10 九月」）</td></tr>
+<tr><td>明确不做</td><td>调休「班/休」角标（需逐年维护国务院放假安排）；日干支（历史锚点不可靠）；2100 年后（数据表硬边界）</td></tr>
+</table>
+
+<h2>10.19 验证结论</h2>
+<table>
+<tr><th>场景</th><th>结果</th></tr>
+<tr><td>sxtwl 全量 roundtrip：73,414 天农历 + 4,824 节气点 + 16 项权威锚点</td><td>✅ 0 不一致</td></tr>
+<tr><td>今日卡（2026-10-10 星期六 丙午马年 九月初一）</td><td>✅</td></tr>
+<tr><td>格子抽查（10/1 国庆节红、10/8 寒露红、10/10 初一显「九月」、10/23 霜降红、周末标红、范围外弱化可点）</td><td>✅</td></tr>
+<tr><td>自由翻月至 2026-02（春节/除夕红字；今日卡不随翻月变化；回到今天）</td><td>✅</td></tr>
+<tr><td>范围外（春节）详情仅万年历信息+提示；范围内详情万年历+8 项指标</td><td>✅</td></tr>
+<tr><td>周视图 7 行农历小字（九月/初二~初七）</td><td>✅</td></tr>
+</table>
+
+<p><strong>文件变更</strong>：<code>static/js/lunar_utils.js</code>（新增，万年历核心库）；<code>templates/weather.html</code>（日历视图万年历化）；<code>alert_service.py</code>（完整性清单补 <code>lunar_utils.js</code>）；<code>README.md</code>。</p>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.8</td></tr>
-<tr><td>生成日期</td><td>2026-10-09（V10.11.8 修订，天气页面全面增强 + 告警消息推送权限联调 + AI 配置网络策略修复；承接 V10.11.7 表格列宽与天气改版）</td></tr>
+<tr><td>文档版本</td><td>V10.11.9</td></tr>
+<tr><td>生成日期</td><td>2026-10-10（V10.11.9 修订，日历视图万年历化；承接 V10.11.8 天气增强 + 告警推送 + AI 网络策略修复）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
