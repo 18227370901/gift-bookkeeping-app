@@ -204,6 +204,17 @@ function initCharts() {
     trendChart = echarts.init(document.getElementById('trendChart'));
     reasonChart = echarts.init(document.getElementById('reasonChart'));
     top10Chart = echarts.init(document.getElementById('top10Chart'));
+    
+    // V10.11.11 监听主题切换（dark / light），实时重绘 ECharts
+    var themeObserver = new MutationObserver(function(mutations) {
+        mutations.forEach(function(m) {
+            if (m.attributeName === 'data-bs-theme') {
+                if (typeof initCharts === 'function') initCharts();
+            }
+        });
+    });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bs-theme'] });
+
     window.addEventListener('resize', function() {
         if (trendChart) trendChart.resize();
         if (reasonChart) reasonChart.resize();

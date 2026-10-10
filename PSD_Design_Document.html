@@ -114,7 +114,7 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.11.10</span>
+    <span><strong>版本</strong>：V10.11.11</span>
     <span><strong>生成日期</strong>：2026-10-01</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
@@ -1388,13 +1388,25 @@ graph LR
 <p><strong>文件变更</strong>：<code>holiday_service.py</code>（新增）；<code>routes_weather.py</code>（班/休接口）；<code>routes_ext.py</code>（menu_map）；<code>templates/weather.html</code>（万年历模块）；<code>.gitignore</code>（缓存忽略）。</p>
 </div>
 
+<h2>10.21 全面优化修复与多模块联动体验加固（V10.11.11）</h2>
+<table>
+<tr><th>优化维度</th><th>具体实现与优化方案</th></tr>
+<tr><td>天气/万年历防抖动布局 (CLS=0)</td><td>省市区三级级联下拉由动态隐藏（<code>display:none</code>）升级为稳定四列栅格配合 <code>disabled</code> 状态受控切换，彻底消除选择过程中的 DOM 布局突跳</td></tr>
+<tr><td>万年历移动端 7 列紧凑适配</td><td>针对 <code>@media (max-width: 767.98px)</code> 精细化调整 7 列格子 min-height (62px)、边距 (3px)、公历/农历字号，杜绝小屏横向溢出与挤压</td></tr>
+<tr><td>宴席业务链路打通</td><td>万年历月视图与 40 天天气详情面板新增「在此日举办宴席」业务直达按钮，带日期参数跳转 <code>/banquets?action=new&date=YYYY-MM-DD</code></td></tr>
+<tr><td>节假日离线/弱网兜底</td><td><code>holiday_service.py</code> 内置 2024~2026 年国务院官方放假与调休补班字典（<code>BUILTIN_HOLIDAYS</code>），外网断开时零延迟无损降级并回写缓存</td></tr>
+<tr><td>数据看板暗黑模式联动</td><td><code>templates/dashboard.html</code> 引入 <code>MutationObserver</code> 监听 <code>data-bs-theme</code>，主题切换时自动重新渲染 ECharts 图表</td></tr>
+<tr><td>家庭协作模块安全与交互</td><td><code>templates/family.html</code> 全面实体转义防御 DOM XSS；解散家庭组操作由阻塞式 <code>confirm()</code> 升级为 Bootstrap 5 原生模态框</td></tr>
+<tr><td>文案与代码清理</td><td>修正礼金明细账簿页面错别字「大薄」→「账簿」；清理 <code>weather_service.py</code> 中重复声明的 <code>AIR_QUALITY_URL</code> 常量</td></tr>
+</table>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.10</td></tr>
-<tr><td>生成日期</td><td>2026-10-10（V10.11.9 万年历化 + V10.11.10 万年历独立模块与班/休角标；承接 V10.11.8 天气增强 + 告警推送 + AI 网络策略修复）</td></tr>
+<tr><td>文档版本</td><td>V10.11.11</td></tr>
+<tr><td>生成日期</td><td>2026-10-10（V10.11.9 万年历化 + V10.11.10 万年历独立模块与班/休角标 + V10.11.11 全面优化修复；承接 V10.11.8 天气增强 + 告警推送 + AI 网络策略修复）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>

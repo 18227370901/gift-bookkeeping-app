@@ -24,8 +24,6 @@ GEOCODING_URL = 'https://geocoding-api.open-meteo.com/v1/search'
 FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
 # V10.11.8 空气质量接口（免费无密钥；不可达时降级为 None，不影响主查询）
 AIR_QUALITY_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality'
-# V10.11.8 空气质量接口（免费无密钥；不可达时降级为 None，不影响主查询）
-AIR_QUALITY_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality'
 # 连接超时 5 秒 / 读取超时 8 秒，避免天气服务异常拖慢页面（实际网络策略见 _http_get）
 TIMEOUT = (5, 8)
 # 城市名长度上限（前端与后端双重校验）
