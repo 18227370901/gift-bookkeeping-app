@@ -9,13 +9,17 @@ holiday_service.py — 法定节假日班/休数据服务（V10.11.10 新增）
 缓存策略：
     1. 进程内存缓存（按年）
     2. 磁盘缓存 data/holiday_cache.json（进程重启免拉取；放假安排每年发布一次后不再变化，缓存长期有效）
-网络策略：禁代理直连优先 + 系统代理兜底（与 weather_service._http_get 同款双路径，
+       V10.11.13 滚动窗口：磁盘仅保留 [当前年-2, 当前年] 的年份键（如 2027 年时窗口为 2025-2027），
+       未来年份安排发布后自动拉取进入窗口；更早历史年份查时可拉但不长期留盘（低频查询可接受）
+    3. V10.11.13 失败冷却：拉取失败/该年安排未发布的 1 小时内不重复请求（防高频打接口）
+网络策略：禁代理直连优先 + 系统代理兑底（与 weather_service._http_get 同款双路径，
     规避系统代理进程存活但出口不通时请求挂死的问题）
 降级：拉取失败返回空字典（万年历主体功能不受影响，仅不显示班/休角标）
 """
 import json
 import os
 import threading
+import time
 
 import requests
 
@@ -50,6 +54,12 @@ _CACHE_FILE = os.path.join('data', 'holiday_cache.json')
 _mem_cache = {}
 _cache_lock = threading.Lock()
 
+# V10.11.13 失败冷却表：{year(int): 冷却截止时间戳}
+# 仅在内存/磁盘缓存均未命中且拉取无果（接口故障或该年安排未发布）时记录，
+# 冷却期内直接跳过网络拉取；拉取成功后永久缓存，不受冷却影响
+_FAIL_COOLDOWN_SECONDS = 3600  # 1 小时
+_fail_cooldown = {}
+
 
 def _load_disk_cache():
     """读取磁盘缓存（失败返回空字典，不抛异常）"""
@@ -62,14 +72,19 @@ def _load_disk_cache():
 
 
 def _save_disk_cache(year, holiday):
-    """写入磁盘缓存（尽力而为，失败不影响主流程）"""
+    """写入磁盘缓存（尽力而为，失败不影响主流程）
+    V10.11.13 滚动窗口：跨年自动滚动——只保留 [当前年-2, 当前年] 的年份键；
+    到 2027 年时窗口自动变为 2025-2027，既避免旧年份无限堆积，也保证未来年份
+    （官方安排发布后）始终能正常拉取进入缓存，彻底消除数据滞后。"""
     try:
         if not os.path.exists('data'):
             os.makedirs('data', exist_ok=True)
         data = _load_disk_cache()
         data[str(year)] = holiday
-        # 防止无限膨胀：只保留 2010~2100 范围内的年份键
-        keys = [k for k in data.keys() if k.isdigit() and 2010 <= int(k) <= 2100]
+        # 滚动窗口过滤（保留非数字键以防未来扩展；写入年不在窗口内时当次仍内存可用，磁盘不留）
+        _now = time.localtime()
+        cur_year = _now.tm_year
+        keys = [k for k in data.keys() if k.isdigit() and (cur_year - 2) <= int(k) <= cur_year]
         data = {k: v for k, v in data.items() if k in keys or not k.isdigit()}
         with open(_CACHE_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False)
@@ -148,13 +163,21 @@ def get_year_holidays(year):
     # 3. 拉取（国庆节等法定节假日数据 2007 年起才有；早年份直接返回空避免无效外网请求）
     if year < 2007:
         return {}
-    holiday = _fetch_from_timor(year)
-    # V10.11.11 离线/弱网兜底：若远程接口不可达，且命中内置年份字典，直接使用内置数据
+    # V10.11.13 失败冷却：上次拉取无果后 1 小时内不再发起网络请求
+    # （覆盖「该年安排尚未发布」与「接口故障」两类场景，防止用户反复刷新万年历时高频打接口）
+    if time.time() < _fail_cooldown.get(year, 0):
+        holiday = {}
+    else:
+        holiday = _fetch_from_timor(year)
+    # V10.11.11 离线/弱网兑底：若远程接口不可达，且命中内置年份字典，直接使用内置数据
     if not holiday and year in BUILTIN_HOLIDAYS:
         holiday = BUILTIN_HOLIDAYS[year]
-    # 只有拉到真实数据或内置数据才缓存
+    # 如果有真实数据或内置数据，则缓存（拉取成功后永久缓存，不受冷却影响）
     if holiday:
         with _cache_lock:
             _mem_cache[year] = holiday
         _save_disk_cache(year, holiday)
+    else:
+        # 拉取无果且无内置兑底 —— 记录 1 小时冷却
+        _fail_cooldown[year] = time.time() + _FAIL_COOLDOWN_SECONDS
     return holiday
