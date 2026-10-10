@@ -760,20 +760,56 @@ def _do_startup_sync():
     # 背景：V10.11.4 天气功能对所有登录用户开放；V10.11.6 纳入权限管控后，
     # 为避免既有用户权限回退，把 weather 追加进现有非管理员用户的 allowed_menus。
     # 仅追加、幂等；新注册用户默认无天气权限，需管理员授权或工单申请。
+    # V10.11.13 修复①（一次性标记）：回填改为仅首次启动执行（SystemSetting 键
+    #   weather_backfill_done）——此前每次重启都无条件追加，会在管理员显式收回
+    #   某用户天气权限后被启动逻辑悄悄恢复，权限形同虚设。
+    # V10.11.13 修复②（存量冲突清洗）：旧版保存过「勾选天气 + 0 级（无权限）」
+    #   的用户，allowed_menus 含 weather 而 menu_permissions.weather = 0（运行时
+    #   can_access_menu 只看 allowed_menus → 仍可访问）。每次启动幂等清洗：显式
+    #   设置过 weather=0 的用户剔除勾选；未设置过 weather 键的老用户不受影响。
+    # 顺序要求：回填在前、清洗在后（否则回填会把刚清洗掉的勾选加回来）。
     try:
-        _backfilled = 0
+        import json as _json
+
+        # ① 一次性回填：首次启动执行并写标记，此后重构/重启均跳过
+        _bf_flag = SystemSetting.query.filter_by(key='weather_backfill_done').first()
+        if not _bf_flag:
+            _backfilled = 0
+            for _u in User.query.filter_by(is_admin=False).all():
+                _raw_menus = (getattr(_u, 'allowed_menus', '') or '').strip()
+                _menu_list = [m.strip() for m in _raw_menus.split(',') if m.strip()]
+                if 'weather' not in _menu_list:
+                    _menu_list.append('weather')
+                    _u.allowed_menus = ','.join(_menu_list)
+                    _backfilled += 1
+            if _backfilled:
+                db.session.commit()
+                print(f"[Init] V10.11.6 已为 {_backfilled} 个普通用户回填「天气」菜单权限")
+            SystemSetting.set_val('weather_backfill_done', '1')
+            print("[Init] V10.11.13 天气权限回填已写入一次性标记（此后重启不再自动恢复权限）")
+
+        # ② 存量冲突清洗（幂等）：显式 weather=0 的用户剔除 allowed_menus 中的 weather
+        _cleaned = 0
         for _u in User.query.filter_by(is_admin=False).all():
-            _raw_menus = (getattr(_u, 'allowed_menus', '') or '').strip()
-            _menu_list = [m.strip() for m in _raw_menus.split(',') if m.strip()]
-            if 'weather' not in _menu_list:
-                _menu_list.append('weather')
+            try:
+                _perm_raw = (_u.menu_permissions or '').strip()
+                _perms = _json.loads(_perm_raw) if _perm_raw else {}
+            except Exception:
+                _perms = {}
+            if not isinstance(_perms, dict):
+                _perms = {}
+            _has_w = (getattr(_u, 'allowed_menus', '') or '').strip() != '' and \
+                'weather' in [m.strip() for m in _u.allowed_menus.split(',')]
+            if _has_w and _perms.get('weather') == 0:
+                _menu_list = [m.strip() for m in _u.allowed_menus.split(',')
+                              if m.strip() and m.strip() != 'weather']
                 _u.allowed_menus = ','.join(_menu_list)
-                _backfilled += 1
-        if _backfilled:
+                _cleaned += 1
+        if _cleaned:
             db.session.commit()
-            print(f"[Init] V10.11.6 已为 {_backfilled} 个普通用户回填「天气」菜单权限")
+            print(f"[Init] V10.11.13 已清洗 {_cleaned} 个用户的「天气勾选×0级」冲突权限数据")
     except Exception as _e:
-        print(f"[Init] V10.11.6 天气权限回填跳过: {_e}")
+        print(f"[Init] V10.11.13 天气权限回填/清洗跳过: {_e}")
 
 def init_database():
     with app.app_context():
@@ -2588,9 +2624,18 @@ def admin_batch_user_permissions():
         return redirect(url_for('admin_users'))
 
     menus_list = request.form.getlist('allowed_menus') or request.form.getlist('allowed_menus[]')
+    # V10.11.13 保存归一：天气权限级别为 0（无天气访问权限）时，从勾选列表中剔除 weather
+    # （修复「勾选天气 + 选 0 级 → 用户仍可访问天气页」的双轨语义冲突：运行时
+    #   can_access_menu('weather') 只看 allowed_menus，无视 menu_permissions 的 0 值）
+    _wperm_raw = request.form.get('menu_perm_weather')
+    if _wperm_raw is None:
+        _wperm_raw = request.form.get('menu_perms[weather]')
+    if _wperm_raw is not None and str(_wperm_raw).isdigit() and int(_wperm_raw) == 0:
+        menus_list = [m for m in menus_list if m != 'weather']
     allowed_menus_str = ",".join(menus_list)
 
-    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups']
+    # V10.11.13 补齐 weather（与单用户路由对齐——此前批量保存会整体丢弃天气权限数据）
+    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather']
     menu_perms = {}
     for m in ALL_MENUS:
         val = request.form.get(f'menu_perm_{m}')
@@ -2667,6 +2712,14 @@ def admin_update_user_permissions(user_id):
     if not menus_list:
         menus_raw = request.form.get('allowed_menus', '').strip()
         menus_list = [m.strip() for m in menus_raw.split(',') if m.strip()]
+    # V10.11.13 保存归一：天气权限级别为 0（无天气访问权限）时，从勾选列表中剔除 weather
+    # （与批量路由同款；修复「勾选天气 + 选 0 级 → 用户仍可访问」的双轨语义冲突，
+    #   保存后 allowed_menus 与级别语义立即一致，前端回显复选框也会自动变为未勾选）
+    _wperm_raw = request.form.get('menu_perm_weather')
+    if _wperm_raw is None:
+        _wperm_raw = request.form.get('menu_perms[weather]')
+    if _wperm_raw is not None and str(_wperm_raw).isdigit() and int(_wperm_raw) == 0:
+        menus_list = [m for m in menus_list if m != 'weather']
     user.allowed_menus = ",".join(menus_list)
 
     # 2. 各菜单独立数据权限更新

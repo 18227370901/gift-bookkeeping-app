@@ -1045,7 +1045,16 @@
         var html = '<div class="day-detail-panel mb-3">';
         html += '  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">';
         html += '    <span class="fw-semibold"><i class="fa-solid fa-calendar-day me-2 text-primary"></i>' + escapeHtml(formatDate(selectedDate)) + ' 详情</span>';
-        html += '    <button type="button" class="btn-close" id="dayDetailClose" title="关闭详情"></button>';
+        // V10.11.13 宴席业务直达：与万年历详情面板同款按钮（仅预报范围内日期显示——有天气参考意义）
+        if (d) {
+            html += '    <div class="d-flex align-items-center gap-2 ms-auto">';
+            html += '      <a href="/banquets?action=new&date=' + escapeHtml(selectedDate) + '" class="btn btn-sm btn-outline-primary"><i class="fa-solid fa-calendar-plus me-1"></i>在此日举办宴席</a>';
+            html += '      <button type="button" class="btn-close" id="dayDetailClose" title="关闭详情"></button>';
+            html += '    </div>';
+        } else {
+            // 预报范围外日期仅万年历信息，无举办天气参考，仅保留关闭按钮
+            html += '    <button type="button" class="btn-close" id="dayDetailClose" title="关闭详情"></button>';
+        }
         html += '  </div>';
         // V10.11.9 万年历信息条（农历全称/干支/生肖/节气/节日）
         if (F) {
@@ -1363,6 +1372,33 @@
             var ad = document.getElementById('almanacDetailArea');
             if (ad) ad.innerHTML = '';
             almanacSelected = null;
+        }
+        // V10.11.13 选中日与展示范围联动：选中日期不在当前视图/月/周范围内时自动清除，
+        // 统一覆盖四类场景：① 切换视图标签（日历→列表/万年历）② 翻月导航（上/下月）
+        // ③ 回到今天 ④ 月/周子视图切换（修复详情面板与趋势图标记线残留旧日期数据的误导）
+        var _prevSel = selectedDate;
+        if (!isCal) {
+            // 列表/万年历视图无日历选中概念，一律清除（万年历自有 almanacSelected 独立管理）
+            selectedDate = null;
+        } else if (calMode === 'week') {
+            // 周视图：仅保留「今天起 7 天」范围内的选中
+            var _weekKeys = ((cachedData && cachedData.daily) || []).slice(0, 7).map(function (d) { return d.date; });
+            if (_weekKeys.indexOf(selectedDate) < 0) selectedDate = null;
+        } else if (calAnchor && selectedDate) {
+            // 月视图：仅保留当前展示月内的选中
+            var _ym = calAnchor.y + '-' + (calAnchor.m < 9 ? '0' : '') + (calAnchor.m + 1);
+            if (String(selectedDate).slice(0, 7) !== _ym) selectedDate = null;
+        }
+        // 选中态被清除时同步清理详情面板 DOM 与趋势图（去除残留的绿色虚线标记线）
+        // 注：万年历分支 showAlmanacView 后提前 return，不会走到末尾的 renderDayDetail，
+        //     因此 DOM 清理必须在此处就地完成（否则详情面板残留旧日期内容）
+        if (_prevSel !== selectedDate) {
+            var _da = document.getElementById('dayDetailArea');
+            if (_da && !selectedDate) _da.innerHTML = '';
+            if (cachedData && cachedData.daily) {
+                pendingDaily = cachedData.daily;
+                initChartIfNeeded();
+            }
         }
         // V10.11.10：万年历为独立模块，不依赖天气预报数据（未查询天气也可使用）
         if (isAlm) {

@@ -1630,7 +1630,7 @@ graph LR
 |---|---|---|
 | **天气/万年历防抖动布局 (CLS=0)** | 将省市区三级级联下拉由动态隐藏（`display:none`）升级为稳定四列栅格配合 `disabled` 状态解构与控制，消除省份/城市选择时的 DOM 突变跳动 | `templates/weather.html` |
 | **万年历移动端 7 列紧凑适配** | 针对 `@media (max-width: 767.98px)` 精细化调整 7 列格子 min-height (62px)、边距 (3px)、公历字号 (0.78rem)、农历字号 (0.58rem)，避免小屏横向溢出 | `templates/weather.html` |
-| **宴席业务链路无缝打通** | 在万年历月视图详情面板与 40 天天气详情面板中新增「在此日举办宴席」直达按钮，带日期参数跳转 `/banquets?action=new&date=YYYY-MM-DD` | `templates/weather.html` |
+| **宴席业务链路无缝打通** | 在万年历月视图详情面板中新增「在此日举办宴席」直达按钮，带日期参数跳转 `/banquets?action=new&date=YYYY-MM-DD`；天气日历详情面板同款按钮与 banquets 页参数接收由 V10.11.13 补齐（预报天数上限实为 16 天，此前「40 天」表述有误） | `templates/weather.html` |
 | **节假日离线/弱网兜底字典** | `holiday_service.py` 内置 2024~2026 年国务院官方节假日与调休补班字典（`BUILTIN_HOLIDAYS`），timor.tech 接口不可达时零秒无缝降级并回写缓存 | `holiday_service.py` |
 | **数据分析看板暗黑模式联动** | 新增 `MutationObserver` 监听 `document.documentElement` 的 `data-bs-theme` 属性变化，主题切换时自动触发 ECharts 重新加载并适配色彩 | `templates/dashboard.html` |
 | **家庭协作模块 XSS 防御与安全** | 新增 `escapeHtml` 实体转义函数，对家庭组名称、描述、成员昵称及用户名全量转义；解散操作由 `confirm()` 升级为 Bootstrap 5 Danger 确认模态框 | `templates/family.html` |
@@ -1710,12 +1710,68 @@ graph LR
 | `templates/index.html` | `include '_home_banner.html'`（有账本权限用户登录落点） |
 | `templates/permission_tickets.html` | `include '_home_banner.html'`（无账本权限用户登录落点） |
 
+### 10.17 V10.11.13 五项缺陷修复：选中日范围联动 / 节假日滚动窗口 / 宴席直达补齐 / 权限归一 / 回填一次性化
+
+#### 问题 1+5：选中日与展示范围联动（详情面板残留）
+
+| 项 | 说明 |
+|---|---|
+| 现象 | 日历视图点选日期后切列表/万年历/翻月，详情面板与趋势图标记线残留旧日期数据 |
+| 根因 | `renderView()` 仅清万年历详情（almanacSelected），不清天气选中态（selectedDate/dayDetailArea）；`shiftMonth`/`backToday` 同样不清理 |
+| 修复 | `renderView()` 单点收敛范围校验：列表/万年历视图一律清除；月视图仅保留当前展示月内；周视图仅保留「今天起 7 天」内（月→周切换周内日期合理保留）；选中态变化时就地清空详情面板 DOM（万年历分支 `showAlmanacView` 提前 return 不经过末尾 renderDayDetail）+ 重绘趋势图 |
+| 万年历澄清 | 年/月双下拉链路实测正常（选 2027→网格 2027-10-01；再选 3 月→2027-03-01）；用户感知的「数据不变」实质是上述日历详情残留 |
+
+#### 问题 2：法定节假日滚动窗口 + 失败冷却
+
+| 项 | 说明 |
+|---|---|
+| 滚动窗口 | 磁盘缓存由固定 2010-2100 改为 `[当前年-2, 当前年]`（2027 年时自动变 2025-2027；官方安排发布后自动拉取入窗；更早历史年份查时可拉但不长期留盘） |
+| 失败冷却 | `_fail_cooldown = {year: 截止时间戳}`：拉取无果且无内置兜底的年份 1 小时内不再请求（实测 2027 第一次 2215ms 真实尝试 → 第二次 8ms 冷却命中） |
+| 保持 | 拉取成功永久缓存；BUILTIN_HOLIDAYS 内置 2024-2026 兜底不变；2027 官方安排发布后可手动补入 |
+
+#### 问题 3：宴席直达链路补齐（V10.11.11 声称两处实测一处 + 接收端缺失）
+
+| 项 | 说明 |
+|---|---|
+| 缺口 | ① 天气日详情面板（renderDayDetail）无宴席按钮；② `banquets.html` 无 URL 参数处理（跳转后弹窗不开、日期不填）；③ 文档「40 天」表述错误（预报上限 16 天） |
+| 修复 | ① renderDayDetail 补按钮（仅预报范围内显示）；② banquets DOMContentLoaded 读参：`action=new` 自动开弹窗 + `date` 三重校验（正则/真实日历日期/年份 1900-2100）后预填并高亮 2.5s + `history.replaceState` 清参防刷新重弹；③ 文档修正 |
+
+#### 问题 4：天气权限归一（三层根因叠加修复）
+
+| 层 | 根因 | 修复 |
+|---|---|---|
+| 保存语义 | 复选框（allowed_menus）勾选与下拉 0 级（menu_permissions.weather=0）冲突，运行时 `can_access_menu` 只看前者 | 单用户 + 批量两路由保存时归一：0 级自动剔除勾选（保存后 UI 回显自洽） |
+| 批量清单 | 批量路由 `ALL_MENUS` 漏 weather → JSON 整体丢键 | 补齐 weather |
+| 启动回填 | `_do_startup_sync` 每次重启无条件给所有普通用户加 weather → 管理员收回的权限被悄悄恢复 | 一次性标记（SystemSetting `weather_backfill_done`）；存量「勾选×0」脏数据启动幂等清洗（顺序：回填在前、清洗在后） |
+
+#### 验证结论（11444 副本库，17 场景全过）
+
+| 场景 | 结果 |
+|---|---|
+| 详情残留：切列表/切万年历（DOM 清）/翻月/翻回四场景 | ✅ |
+| 月→周切换周内日期合理保留；S8 万年历分支 DOM 就地清理 | ✅ |
+| 宴席跳转：万年历与天气详情双入口 → 弹窗自动开 + 日期预填 + URL 清理；范围外无按钮 | ✅ |
+| 节假日：2026 真实拉取（12ms 缓存命中）；磁盘窗口 [2024-2026]；2027 冷却 2215ms→8ms | ✅ |
+| 权限：单/批量保存归一（0 级剔除勾选 + JSON 含 weather 键）；1 级正常授权 | ✅ |
+| 权限：回填执行路径（删标记重启 → u5 获得勾选 + 标记重写）；存量清洗（u4 勾选×0 → 剔除） | ✅ |
+| 权限：重启保持（u4=0 级不被恢复、u5 保留）；u4 访问被拦（menu_map 多次验证）；横幅不受影响 | ✅ |
+| console 0 错误（仅历史 favicon 404 固有项） | ✅ |
+
+#### 文件变更清单（V10.11.13）
+
+| 文件 | 变更 |
+|---|---|
+| `templates/weather.html` | renderView 选中日范围联动 + 详情/趋势图清理；renderDayDetail 补宴席按钮（预报内显示） |
+| `templates/banquets.html` | URL 参数接收（action=new 开弹窗 + date 校验预填 + 清参） |
+| `holiday_service.py` | 磁盘滚动窗口 [当前年-2, 当前年] + 失败冷却 1 小时 |
+| `app.py` | 单/批量保存归一（menu_perm_weather=0 剔除勾选）；批量 ALL_MENUS 补 weather；启动回填一次性标记 + 存量脏数据幂等清洗 |
+
 ---
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V10.11.12 |
-| 生成日期 | 2026-10-10（V10.11.12 登录后背景横幅；承接 V10.11.9 万年历化 + V10.11.10 万年历独立模块与班/休角标 + V10.11.11 全面优化修复） |
+| 文档版本 | V10.11.13 |
+| 生成日期 | 2026-10-10（V10.11.13 五项缺陷修复；承接 V10.11.12 登录后背景横幅） |
 | 审计基线 | 代码 commit main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建）） |
 | 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |

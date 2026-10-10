@@ -348,6 +348,47 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // ===== V10.11.13 宴席直达跳转参数处理 =====
+    // 来源：天气页万年历详情面板 / 天气日历详情面板「在此日举办宴席」按钮
+    // 参数：action=new（自动打开创建弹窗）+ date=YYYY-MM-DD（预填举办日期）
+    try {
+        var _params = new URLSearchParams(window.location.search);
+        if (_params.get('action') === 'new') {
+            var _dateVal = (_params.get('date') || '').trim();
+            var _dateOk = false;
+            // 日期合法性校验：YYYY-MM-DD 格式 + 真实存在的日历日期 + 年份 1900-2100
+            var _m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(_dateVal);
+            if (_m) {
+                var _y = parseInt(_m[1], 10), _mo = parseInt(_m[2], 10), _d = parseInt(_m[3], 10);
+                var _dt = new Date(_y, _mo - 1, _d);
+                if (_y >= 1900 && _y <= 2100 && _dt.getFullYear() === _y &&
+                    (_dt.getMonth() + 1) === _mo && _dt.getDate() === _d) {
+                    _dateOk = true;
+                }
+            }
+            // 清理地址栏参数（避免刷新页面时弹窗反复弹出）
+            if (window.history && window.history.replaceState) {
+                window.history.replaceState(null, '', window.location.pathname);
+            }
+            var _dateInput = document.querySelector('#createBanquetModal input[name="event_date"]');
+            if (_dateInput && _dateOk) {
+                _dateInput.value = _dateVal;
+            }
+            var _createModalEl = document.getElementById('createBanquetModal');
+            if (_createModalEl && window.bootstrap && bootstrap.Modal) {
+                var _modal = new bootstrap.Modal(_createModalEl);
+                _modal.show();
+                if (_dateInput && _dateOk) {
+                    // 弹窗打开后高亮提示已带入选定日期
+                    _createModalEl.addEventListener('shown.bs.modal', function () {
+                        _dateInput.classList.add('border-primary');
+                        setTimeout(function () { _dateInput.classList.remove('border-primary'); }, 2500);
+                    }, { once: true });
+                }
+            }
+        }
+    } catch (e) { /* 参数异常不影响页面正常加载 */ }
+
     const searchInput = document.getElementById('banquetSearchInput');
     const typeFilter = document.getElementById('banquetTypeFilter');
     const profitFilter = document.getElementById('banquetProfitFilter');
