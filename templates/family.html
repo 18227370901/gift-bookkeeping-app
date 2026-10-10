@@ -62,6 +62,27 @@
     </div>
 </div>
 
+
+<!-- 解散家庭组 Modal (V10.11.11 优雅交互) -->
+<div class="modal fade" id="dissolveGroupModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title"><i class="fa-solid fa-triangle-exclamation me-2"></i>解散家庭组</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="dissolveGroupId">
+                <p class="mb-0">确定要解散家庭组「<strong id="dissolveGroupNameText" class="text-danger"></strong>」吗？此操作不可恢复，组内协作关系将被解除。</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger" onclick="confirmDissolveGroup()"><i class="fa-solid fa-trash me-1"></i>确认解散</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- 邀请成员 Modal -->
 <div class="modal fade" id="inviteMemberModal" tabindex="-1">
     <div class="modal-dialog">
@@ -108,6 +129,18 @@
 // 获取 CSRF Token
 var csrfToken = document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '{{ csrf_token }}';
 
+
+// ===== HTML实体转义（防御 DOM XSS） =====
+function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
 // ===== 加载我的家庭组列表 =====
 function loadMyGroups() {
     fetch('/api/family/my-groups', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
@@ -132,7 +165,7 @@ function loadMyGroups() {
                     var roleBadge = m.role === 'head' ? '<span class="badge bg-warning text-dark">家长</span>' :
                                     m.role === 'viewer' ? '<span class="badge bg-secondary">只读</span>' :
                                     '<span class="badge bg-info">成员</span>';
-                    membersHtml += '<span class="badge bg-light border text-dark p-2">' + roleBadge + ' ' + (m.nickname || m.username) + '</span>';
+                    membersHtml += '<span class="badge bg-light border text-dark p-2">' + roleBadge + ' ' + escapeHtml(m.nickname || m.username) + '</span>';
                 });
                 membersHtml += '</div>';
             }
@@ -140,10 +173,10 @@ function loadMyGroups() {
                 '<div class="card-body">' +
                 '<div class="d-flex justify-content-between align-items-center mb-2">' +
                 '<div><h5 class="fw-bold mb-0"><i class="fa-solid fa-people-roof text-warning me-2"></i>' + g.name + '</h5>' +
-                (g.description ? '<p class="text-muted small mb-0">' + g.description + '</p>' : '') + '</div>' +
+                (g.description ? '<p class="text-muted small mb-0">' + escapeHtml(g.description) + '</p>' : '') + '</div>' +
                 '<div class="d-flex gap-2">' +
                 (isOwner || {{ 'true' if current_user.is_admin else 'false' }} ? '<button class="btn btn-sm btn-outline-primary" onclick="openInviteModal(' + g.id + ')"><i class="fa-solid fa-user-plus me-1"></i>邀请成员</button>' : '') +
-                (isOwner ? '<button class="btn btn-sm btn-outline-danger" onclick="dissolveGroup(' + g.id + ', \'' + g.name.replace(/'/g, "\\'") + '\')"><i class="fa-solid fa-trash me-1"></i>解散</button>' : '') +
+                (isOwner ? '<button class="btn btn-sm btn-outline-danger" onclick="openDissolveModal(' + g.id + ', \'' + escapeHtml(g.name).replace(/'/g, "\\'") + '\')"><i class="fa-solid fa-trash me-1"></i>解散</button>' : '') +
                 '</div></div>' +
                 '<div class="text-muted small mb-1"><i class="fa-solid fa-users me-1"></i>成员 (' + (g.members ? g.members.length : 0) + '人)</div>' +
                 membersHtml +
@@ -221,7 +254,37 @@ function inviteMember() {
     });
 }
 
-// ===== 解散家庭组 =====
+
+// ===== 解散家庭组弹窗与提交 (V10.11.11) =====
+function openDissolveModal(groupId, groupName) {
+    document.getElementById('dissolveGroupId').value = groupId;
+    document.getElementById('dissolveGroupNameText').textContent = groupName;
+    new bootstrap.Modal(document.getElementById('dissolveGroupModal')).show();
+}
+
+function confirmDissolveGroup() {
+    var groupId = document.getElementById('dissolveGroupId').value;
+    fetch('/api/family/' + groupId + '/dissolve', {
+        method: 'DELETE',
+        headers: { 'X-CSRFToken': csrfToken, 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+        var modalEl = document.getElementById('dissolveGroupModal');
+        var modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) modal.hide();
+        if (data.code === 200) {
+            loadMyGroups();
+        } else {
+            alert(data.message || '解散失败');
+        }
+    })
+    .catch(function(err) {
+        alert('网络异常，解散失败');
+    });
+}
+
+// ===== 旧解散函数兼容 =====
 function dissolveGroup(groupId, groupName) {
     if (!confirm('确定要解散家庭组「' + groupName + '」吗？此操作不可恢复。')) return;
     fetch('/api/family/' + groupId + '/dissolve', {

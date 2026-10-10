@@ -35,6 +35,14 @@ HOLIDAY_HEADERS = {
 
 TIMOR_API = 'https://timor.tech/api/holiday/year/{}'
 
+# V10.11.11 内置法定节假日/调休离线兜底字典（2024~2026年，国务院办公厅官方发布）
+BUILTIN_HOLIDAYS = {
+    2024: {'01-01': {'holiday': True, 'name': '元旦'}, '02-10': {'holiday': True, 'name': '春节'}, '02-11': {'holiday': True, 'name': '春节'}, '02-12': {'holiday': True, 'name': '春节'}, '02-13': {'holiday': True, 'name': '春节'}, '02-14': {'holiday': True, 'name': '春节'}, '02-15': {'holiday': True, 'name': '春节'}, '02-16': {'holiday': True, 'name': '春节'}, '02-17': {'holiday': True, 'name': '春节'}, '02-04': {'holiday': False, 'name': '春节补班'}, '02-18': {'holiday': False, 'name': '春节补班'}, '04-04': {'holiday': True, 'name': '清明节'}, '04-05': {'holiday': True, 'name': '清明节'}, '04-06': {'holiday': True, 'name': '清明节'}, '04-07': {'holiday': False, 'name': '清明补班'}, '05-01': {'holiday': True, 'name': '劳动节'}, '05-02': {'holiday': True, 'name': '劳动节'}, '05-03': {'holiday': True, 'name': '劳动节'}, '05-04': {'holiday': True, 'name': '劳动节'}, '05-05': {'holiday': True, 'name': '劳动节'}, '04-28': {'holiday': False, 'name': '劳动节补班'}, '05-11': {'holiday': False, 'name': '劳动节补班'}, '06-10': {'holiday': True, 'name': '端午节'}, '09-15': {'holiday': True, 'name': '中秋节'}, '09-16': {'holiday': True, 'name': '中秋节'}, '09-17': {'holiday': True, 'name': '中秋节'}, '09-14': {'holiday': False, 'name': '中秋补班'}, '10-01': {'holiday': True, 'name': '国庆节'}, '10-02': {'holiday': True, 'name': '国庆节'}, '10-03': {'holiday': True, 'name': '国庆节'}, '10-04': {'holiday': True, 'name': '国庆节'}, '10-05': {'holiday': True, 'name': '国庆节'}, '10-06': {'holiday': True, 'name': '国庆节'}, '10-07': {'holiday': True, 'name': '国庆节'}, '09-29': {'holiday': False, 'name': '国庆补班'}, '10-12': {'holiday': False, 'name': '国庆补班'}},
+    2025: {'01-01': {'holiday': True, 'name': '元旦'}, '01-28': {'holiday': True, 'name': '春节'}, '01-29': {'holiday': True, 'name': '春节'}, '01-30': {'holiday': True, 'name': '春节'}, '01-31': {'holiday': True, 'name': '春节'}, '02-01': {'holiday': True, 'name': '春节'}, '02-02': {'holiday': True, 'name': '春节'}, '02-03': {'holiday': True, 'name': '春节'}, '02-04': {'holiday': True, 'name': '春节'}, '01-26': {'holiday': False, 'name': '春节补班'}, '02-08': {'holiday': False, 'name': '春节补班'}, '04-04': {'holiday': True, 'name': '清明节'}, '04-05': {'holiday': True, 'name': '清明节'}, '04-06': {'holiday': True, 'name': '清明节'}, '05-01': {'holiday': True, 'name': '劳动节'}, '05-02': {'holiday': True, 'name': '劳动节'}, '05-03': {'holiday': True, 'name': '劳动节'}, '05-04': {'holiday': True, 'name': '劳动节'}, '05-05': {'holiday': True, 'name': '劳动节'}, '04-27': {'holiday': False, 'name': '劳动节补班'}, '05-31': {'holiday': True, 'name': '端午节'}, '06-01': {'holiday': True, 'name': '端午节'}, '06-02': {'holiday': True, 'name': '端午节'}, '10-01': {'holiday': True, 'name': '国庆中秋'}, '10-02': {'holiday': True, 'name': '国庆中秋'}, '10-03': {'holiday': True, 'name': '国庆中秋'}, '10-04': {'holiday': True, 'name': '国庆中秋'}, '10-05': {'holiday': True, 'name': '国庆中秋'}, '10-06': {'holiday': True, 'name': '国庆中秋'}, '10-07': {'holiday': True, 'name': '国庆中秋'}, '10-08': {'holiday': True, 'name': '国庆中秋'}, '09-28': {'holiday': False, 'name': '国庆补班'}, '10-11': {'holiday': False, 'name': '国庆补班'}},
+    2026: {'01-01': {'holiday': True, 'name': '元旦'}, '01-02': {'holiday': True, 'name': '元旦'}, '01-03': {'holiday': True, 'name': '元旦'}, '01-04': {'holiday': False, 'name': '元旦补班'}, '02-15': {'holiday': True, 'name': '春节'}, '02-16': {'holiday': True, 'name': '春节'}, '02-17': {'holiday': True, 'name': '春节'}, '02-18': {'holiday': True, 'name': '春节'}, '02-19': {'holiday': True, 'name': '春节'}, '02-20': {'holiday': True, 'name': '春节'}, '02-21': {'holiday': True, 'name': '春节'}, '02-22': {'holiday': True, 'name': '春节'}, '02-14': {'holiday': False, 'name': '春节补班'}, '02-28': {'holiday': False, 'name': '春节补班'}, '04-04': {'holiday': True, 'name': '清明节'}, '04-05': {'holiday': True, 'name': '清明节'}, '04-06': {'holiday': True, 'name': '清明节'}, '05-01': {'holiday': True, 'name': '劳动节'}, '05-02': {'holiday': True, 'name': '劳动节'}, '05-03': {'holiday': True, 'name': '劳动节'}, '06-19': {'holiday': True, 'name': '端午节'}, '09-25': {'holiday': True, 'name': '中秋节'}, '10-01': {'holiday': True, 'name': '国庆节'}, '10-02': {'holiday': True, 'name': '国庆节'}, '10-03': {'holiday': True, 'name': '国庆节'}, '10-04': {'holiday': True, 'name': '国庆节'}, '10-05': {'holiday': True, 'name': '国庆节'}, '10-06': {'holiday': True, 'name': '国庆节'}, '10-07': {'holiday': True, 'name': '国庆节'}}
+}
+
+
 # 磁盘缓存路径（data/ 目录，与运行库同级的公开数据缓存）
 _CACHE_FILE = os.path.join('data', 'holiday_cache.json')
 
@@ -141,7 +149,10 @@ def get_year_holidays(year):
     if year < 2007:
         return {}
     holiday = _fetch_from_timor(year)
-    # 只有拉到真实数据才缓存（空结果不缓存，网络恢复后可重试）
+    # V10.11.11 离线/弱网兜底：若远程接口不可达，且命中内置年份字典，直接使用内置数据
+    if not holiday and year in BUILTIN_HOLIDAYS:
+        holiday = BUILTIN_HOLIDAYS[year]
+    # 只有拉到真实数据或内置数据才缓存
     if holiday:
         with _cache_lock:
             _mem_cache[year] = holiday

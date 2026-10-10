@@ -11,7 +11,7 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.11.10  
+> **版本**：V10.11.11  
 > **生成日期**：2026-10-09  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
@@ -1622,12 +1622,40 @@ graph LR
 | `templates/weather.html` | 万年历独立模块（页签/导航/今日大卡/大网格/班休角标/详情/事件） |
 | `.gitignore` | 补 `data/holiday_cache.json` 忽略 |
 
+### 10.15 V10.11.11 全面优化修复与多模块联动体验加固
+
+#### 核心优化项说明
+
+| 优化维度 | 具体实现与优化方案 | 关联文件/位置 |
+|---|---|---|
+| **天气/万年历防抖动布局 (CLS=0)** | 将省市区三级级联下拉由动态隐藏（`display:none`）升级为稳定四列栅格配合 `disabled` 状态解构与控制，消除省份/城市选择时的 DOM 突变跳动 | `templates/weather.html` |
+| **万年历移动端 7 列紧凑适配** | 针对 `@media (max-width: 767.98px)` 精细化调整 7 列格子 min-height (62px)、边距 (3px)、公历字号 (0.78rem)、农历字号 (0.58rem)，避免小屏横向溢出 | `templates/weather.html` |
+| **宴席业务链路无缝打通** | 在万年历月视图详情面板与 40 天天气详情面板中新增「在此日举办宴席」直达按钮，带日期参数跳转 `/banquets?action=new&date=YYYY-MM-DD` | `templates/weather.html` |
+| **节假日离线/弱网兜底字典** | `holiday_service.py` 内置 2024~2026 年国务院官方节假日与调休补班字典（`BUILTIN_HOLIDAYS`），timor.tech 接口不可达时零秒无缝降级并回写缓存 | `holiday_service.py` |
+| **数据分析看板暗黑模式联动** | 新增 `MutationObserver` 监听 `document.documentElement` 的 `data-bs-theme` 属性变化，主题切换时自动触发 ECharts 重新加载并适配色彩 | `templates/dashboard.html` |
+| **家庭协作模块 XSS 防御与安全** | 新增 `escapeHtml` 实体转义函数，对家庭组名称、描述、成员昵称及用户名全量转义；解散操作由 `confirm()` 升级为 Bootstrap 5 Danger 确认模态框 | `templates/family.html` |
+| **页面文案与用词规范化** | 修正礼金明细页（`templates/index.html`）等处错别字「礼金明细大薄」/「礼金收支明细大薄」为「礼金明细账簿」/「礼金收支明细账簿」 | `templates/index.html` |
+| **冗余代码精简** | 移除 `weather_service.py` 中重复声明的 `AIR_QUALITY_URL` 常量 | `weather_service.py` |
+
+#### 文件变更清单（V10.11.11）
+
+| 文件 | 变更 |
+|---|---|
+| `holiday_service.py` | 新增 2024~2026 国务院官方节假日与调休补班离线兜底字典，弱网自动兜底 |
+| `weather_service.py` | 移除重复声明常量 `AIR_QUALITY_URL` |
+| `templates/weather.html` | 消除下拉框 CLS 跳动、移动端 7 列网格紧凑适配、详情面板增加举办宴席业务链接 |
+| `templates/dashboard.html` | 增加暗黑模式 MutationObserver 监听，实时重绘 ECharts |
+| `templates/family.html` | 实体转义防御 DOM XSS、解散家庭组原生模态框替代原生 confirm |
+| `templates/index.html` | 修正「大薄」错别字为「账簿」 |
+| `PSD_Design_Document.md` / `.html` | 架构与设计决策文档更新至 V10.11.11 |
+| `README.md` | 用户与部署说明文档更新至 V10.11.11 |
+
 ---
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V10.11.10 |
-| 生成日期 | 2026-10-10（V10.11.9 万年历化 + V10.11.10 万年历独立模块与班/休角标；承接 V10.11.8 天气增强 + 告警推送 + AI 网络策略修复） |
+| 文档版本 | V10.11.11 |
+| 生成日期 | 2026-10-10（V10.11.9 万年历化 + V10.11.10 万年历独立模块与班/休角标 + V10.11.11 全面优化修复；承接 V10.11.8 天气增强 + 告警推送 + AI 网络策略修复） |
 | 审计基线 | 代码 commit main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建）） |
 | 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |
