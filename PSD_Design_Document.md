@@ -1650,12 +1650,72 @@ graph LR
 | `PSD_Design_Document.md` / `.html` | 架构与设计决策文档更新至 V10.11.11 |
 | `README.md` | 用户与部署说明文档更新至 V10.11.11 |
 
+### 10.16 V10.11.12 登录后背景横幅：时间/农历/节气节日班休/天气（城市三层分流）
+
+#### 需求与城市分流设计
+
+| 项 | 说明 |
+|---|---|
+| 需求 | 登录后背景图区域展示当前时间（走秒）、星期、农历、天气；天气城市与用户在天气页「城市名自由输入」查询保持一致 |
+| 核心难点 | 管理员的天气城市记忆存于其浏览器 localStorage（`gift_weather_{uid}_city`），其他用户浏览器无法读取 |
+| 解法 | **查询时顺手同步**：管理员每次在天气页自由输入查询成功时，`/api/weather/query` 文本模式服务端自动写入 `SystemSetting.admin_weather_city`（前端零改动）——无权限用户由 `/api/home/weather` 服务端读取共享 |
+
+#### 城市三层分流（`routes_weather.py::api_home_weather`，服务端判定）
+
+| 优先级 | 条件 | 城市来源 | source |
+|---|---|---|---|
+| ① | 有 weather 菜单权限 且 localStorage 记忆为「自由输入」模式且有城市 | 自己的城市（与天气页记忆一致） | `user` |
+| ② | 无权限 / 无记忆 / 级联模式（严格按需求回退管理员） | `SystemSetting.admin_weather_city`（管理员查询时自动同步） | `admin` |
+| ③ | 管理员从未查过 | **成都**（固定兜底，需求确认值） | `default` |
+
+#### 安全与性能设计
+
+| 项 | 说明 |
+|---|---|
+| 权限边界 | 无权限用户传入的任何 city 参数一律忽略（禁止借本接口绕过 weather 菜单权限查任意城市）；本接口仅需登录不挂 menu_map（横幅为公共信息） |
+| 班休徽章 | 服务端直读 `holiday_service.get_year_holidays` 后回传（不走 HTTP，避免前端调 `/api/holiday/year` 因 weather 权限门控产生 403） |
+| 缓存 | 模块级内存缓存 `_HOME_WEATHER_CACHE`（城市→（过期时间戳, 数据）），TTL 30 分钟；`days=2` 轻量查询（仅当前实况+今明高低温） |
+| 降级 | 天气拉取失败返回 `weather: null`，前端隐藏天气区，横幅时间/农历/徽章不受影响 |
+
+#### 前端块与接入点
+
+| 项 | 说明 |
+|---|---|
+| 独立块 | `templates/_home_banner.html`（自包含 HTML+CSS+JS，单源 include 复用） |
+| 接入点 | `index.html`（有账本权限用户的登录落点）+ `permission_tickets.html`（无账本权限用户被 `index()` 重定向的登录落点）——所有登录用户可见 |
+| 时间/农历 | 走秒 `setInterval` 1s（等宽数字不抖动）；农历全称/节气/节日本地 `LunarUtils.getFullInfo`（零请求，与万年历同源数据） |
+| 主题 | 白天红金渐变 `#b71c1c→#d32f2f→#f57c00` / 黑夜深红 `#4a0f0f→#7f1d1d→#9a3412`，`data-bs-theme` 切换；<768px 左右堆叠 |
+| 来源徽章 | 城市名旁小徽章：user=「我的城市」/ admin=「管理员城市」/ default=「默认」 |
+
+#### 验证结论（11444 副本库全场景矩阵）
+
+| 场景 | 结果 |
+|---|---|
+| a. 无记录兜底成都（default） | ✅ |
+| b. admin 自由输入「广州」→ SystemSetting 自动落库；清记忆后 `/api/home/weather` 返回广州/admin | ✅ |
+| c. 运行中新建无权限用户传「漠河」被服务端忽略 → 返回广州/admin；直访 `/api/weather/query` 被 menu_map 拦截重定向 | ✅ |
+| d. 有权限用户自由输入「上海」→ 横幅「上海 我的城市」，与天气页记忆一致 | ✅ |
+| e. 清 localStorage 记忆 → 回退管理员城市 | ✅ |
+| f. 清 SystemSetting → 兜底成都 | ✅ |
+| 走秒正常、农历与万年历同源、班休徽章（国庆节后补班）、双主题切换、console 0 错误、原页面功能无损 | ✅ |
+
+> 备注：既有用户 weather 权限的启动回填（`_do_startup_sync`，V10.11.6 机制）与本功能无关——权限体系语义不变，横幅接口仅消费权限判定结果。
+
+#### 文件变更清单（V10.11.12）
+
+| 文件 | 变更 |
+|---|---|
+| `routes_weather.py` | 新增 `/api/home/weather`（三层分流 + 30 分钟缓存 + 失败降级 + 班休徽章直读）；`api_weather_query` 文本模式成功后 admin 城市自动同步 `SystemSetting.set_val` |
+| `templates/_home_banner.html` | 新增：背景横幅独立块（HTML + CSS + JS 自包含） |
+| `templates/index.html` | `include '_home_banner.html'`（有账本权限用户登录落点） |
+| `templates/permission_tickets.html` | `include '_home_banner.html'`（无账本权限用户登录落点） |
+
 ---
 
 | 属性 | 值 |
 |------|-----|
-| 文档版本 | V10.11.11 |
-| 生成日期 | 2026-10-10（V10.11.9 万年历化 + V10.11.10 万年历独立模块与班/休角标 + V10.11.11 全面优化修复；承接 V10.11.8 天气增强 + 告警推送 + AI 网络策略修复） |
+| 文档版本 | V10.11.12 |
+| 生成日期 | 2026-10-10（V10.11.12 登录后背景横幅；承接 V10.11.9 万年历化 + V10.11.10 万年历独立模块与班/休角标 + V10.11.11 全面优化修复） |
 | 审计基线 | 代码 commit main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建）） |
 | 代码审计范围 | 10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore |
 | 文档审计范围 | README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除） |

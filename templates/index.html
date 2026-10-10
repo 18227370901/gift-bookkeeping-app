@@ -3,6 +3,9 @@
 {% block title %}礼金明细账簿 - 礼金人情记账系统{% endblock %}
 
 {% block content %}
+{# V10.11.12 首页背景横幅：时间/农历/节气节日班休/天气（登录用户可见，块定义见 _home_banner.html） #}
+{% include '_home_banner.html' %}
+
 {% if not current_user.is_admin and not current_user.can_access_menu('ledger') %}
 <!-- 无权限提示卡片 -->
 <div class="row justify-content-center mt-5">
