@@ -3,7 +3,7 @@
 
 {% block extra_css %}
 <style>
-    /* V10.11.7 天气页改版样式（参考主流天气站首页式布局）+ V10.11.8 增强 + V10.11.9 万年历 */
+    /* V10.11.7 天气页改版样式（参考主流天气站首页式布局）+ V10.11.8 增强 + V10.11.9 万年历 + V10.11.10 万年历独立模块 */
     .weather-hero-card {
         border-radius: 14px;
         background: linear-gradient(135deg, rgba(13, 110, 253, 0.08), rgba(13, 202, 240, 0.10));
@@ -104,6 +104,56 @@
         border-radius: 999px; padding: 1px 10px; font-size: 0.72rem; font-weight: 600;
     }
     .cal-detail-lunar { font-size: 0.82rem; }
+    /* ===== V10.11.10 万年历独立模块（参考 rili.com.cn）===== */
+    /* 万年历今日大卡（比日历视图的今日卡更醒目） */
+    .alm-today-card {
+        border: 1px solid var(--app-border-soft); border-radius: 12px;
+        background: var(--app-card-bg);
+        background-image: linear-gradient(135deg, rgba(224,49,49,0.05), rgba(255,193,7,0.07));
+        padding: 1rem 1.25rem; margin-bottom: 0.75rem;
+    }
+    .alm-today-card .alm-today-main { font-size: 1.9rem; font-weight: 700; line-height: 1.15; }
+    .alm-today-card .alm-today-week { color: #e03131; font-size: 1.15rem; font-weight: 600; }
+    .alm-today-card .alm-today-sub { color: var(--app-text-muted, #6c757d); font-size: 0.92rem; margin-top: 0.3rem; }
+    .alm-today-card .alm-fest-badge { margin-top: 0.45rem; }
+    /* 万年历网格（无天气层，格子更紧凑） */
+    .alm-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+    .alm-cell {
+        position: relative;
+        min-height: 64px;
+        border: 1px solid var(--app-border-soft);
+        border-radius: 8px;
+        padding: 5px 7px;
+        background: var(--app-card-bg);
+        cursor: pointer;
+        transition: transform 0.12s ease, box-shadow 0.12s ease;
+    }
+    .alm-cell:hover { transform: translateY(-1px); box-shadow: 0 0.25rem 0.5rem rgba(0,0,0,0.07); }
+    .alm-cell.empty { visibility: hidden; }
+    .alm-cell.today { border-color: #e03131; box-shadow: 0 0 0 1.5px rgba(224, 49, 49, 0.4); background: rgba(224, 49, 49, 0.04); }
+    .alm-cell.selected { border-color: #198754; box-shadow: 0 0 0 2px rgba(25, 135, 84, 0.32); }
+    .alm-cell .alm-num { font-size: 1.3rem; font-weight: 700; line-height: 1.1; }
+    .alm-cell .alm-num.weekend { color: #e03131; }
+    .alm-cell .alm-num.today-num { color: #0d6efd; }
+    .alm-cell .alm-lunar { font-size: 0.72rem; color: var(--app-text-muted, #6c757d); line-height: 1.25; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .alm-cell .alm-lunar.festival, .alm-cell .alm-lunar.term { color: #e03131; font-weight: 600; }
+    /* 班/休角标（右上角小徽章） */
+    .alm-badge {
+        position: absolute; top: 4px; right: 5px;
+        font-size: 0.62rem; font-weight: 700; line-height: 1;
+        border-radius: 4px; padding: 2px 5px;
+    }
+    .alm-badge.rest { background: #e03131; color: #fff; }
+    .alm-badge.work { background: #6c757d; color: #fff; }
+    /* 万年历列头（周六日红） */
+    .alm-week-header { text-align: center; font-size: 0.8rem; color: var(--app-text-muted, #6c757d); padding: 3px 0; }
+    .alm-week-header.weekend { color: #e03131; }
+    /* 万年历详情面板 */
+    .alm-detail-panel {
+        border: 1px solid var(--app-border-soft); border-radius: 10px;
+        background: var(--app-card-bg); padding: 0.9rem 1.1rem; margin-bottom: 0.75rem;
+    }
+    .alm-detail-nums { font-size: 1.6rem; font-weight: 700; }
     /* 周视图行 */
     .cal-week-row {
         display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -183,8 +233,9 @@
             </div>
         </div>
 
-        <!-- V10.11.9 工具栏：天数自定义 + 视图切换 + 日历子视图（月/周）+ 月份导航（自由翻月）+ 回到今天 -->
+        <!-- V10.11.10 工具栏：天数自定义（分段 + 下拉）+ 视图切换（列表/日历/万年历）+ 日历子视图 + 月份导航 + 万年历导航 -->
         <div id="weatherToolbar" class="d-flex flex-wrap align-items-center gap-2 mb-3" style="display:none">
+            <div id="daysGroup" class="d-flex align-items-center gap-2">
             <span class="small text-muted fw-semibold"><i class="fa-solid fa-calendar-day me-1 text-primary"></i>预报天数</span>
             <div class="btn-group btn-group-sm" role="group" aria-label="预报天数分段">
                 <button type="button" class="btn btn-outline-primary days-seg" data-days="7">7天</button>
@@ -192,12 +243,14 @@
                 <button type="button" class="btn btn-outline-primary days-seg" data-days="16">16天</button>
             </div>
             <select class="form-select form-select-sm" id="daysSelect" aria-label="自定义预报天数" style="width:auto"></select>
+            </div>
 
             <span class="border-start ms-1 me-1"></span>
             <span class="small text-muted fw-semibold"><i class="fa-solid fa-table-cells me-1 text-primary"></i>展示视图</span>
             <div class="btn-group btn-group-sm" role="group" aria-label="视图切换">
                 <button type="button" class="btn btn-outline-primary view-seg" data-view="list">列表</button>
                 <button type="button" class="btn btn-outline-primary view-seg" data-view="calendar">日历</button>
+                <button type="button" class="btn btn-outline-primary view-seg" data-view="almanac">万年历</button>
             </div>
             <div class="btn-group btn-group-sm" id="calModeGroup" role="group" style="display:none">
                 <button type="button" class="btn btn-outline-secondary cal-seg" data-cal="month">月视图</button>
@@ -209,10 +262,20 @@
                 <button type="button" class="btn btn-outline-secondary" id="calNext" title="下一月"><i class="fa-solid fa-chevron-right"></i></button>
                 <button type="button" class="btn btn-outline-secondary" id="calToday" title="回到今天所在月"><i class="fa-solid fa-crosshairs me-1"></i>今天</button>
             </div>
+            <!-- V10.11.10 万年历模块导航：年/月任意切换（1900-2100）+ 回到今天 -->
+            <div class="btn-group btn-group-sm align-items-center gap-1 flex-wrap" id="almanacNavGroup" style="display:none">
+                <button type="button" class="btn btn-outline-secondary" id="almPrev" title="上一月"><i class="fa-solid fa-chevron-left"></i></button>
+                <select class="form-select form-select-sm" id="almYearSelect" aria-label="年份" style="width:auto"></select>
+                <select class="form-select form-select-sm" id="almMonthSelect" aria-label="月份" style="width:auto"></select>
+                <button type="button" class="btn btn-outline-secondary" id="almNext" title="下一月"><i class="fa-solid fa-chevron-right"></i></button>
+                <button type="button" class="btn btn-outline-secondary" id="almToday" title="回到今天"><i class="fa-solid fa-crosshairs me-1"></i>今天</button>
+            </div>
         </div>
 
         <!-- 查询结果区域 -->
         <div id="weatherResult"></div>
+        <!-- V10.11.10 万年历详情面板（万年历视图点击日期后显示，独立于天气详情） -->
+        <div id="almanacDetailArea"></div>
     </div>
 </div>
 {% endblock %}
@@ -246,6 +309,13 @@
     var calPrev = document.getElementById('calPrev');
     var calNext = document.getElementById('calNext');
     var calToday = document.getElementById('calToday');
+    var daysGroup = document.getElementById('daysGroup');
+    var almanacNavGroup = document.getElementById('almanacNavGroup');
+    var almPrev = document.getElementById('almPrev');
+    var almNext = document.getElementById('almNext');
+    var almToday = document.getElementById('almToday');
+    var almYearSelect = document.getElementById('almYearSelect');
+    var almMonthSelect = document.getElementById('almMonthSelect');
     var daysSegs = Array.prototype.slice.call(document.querySelectorAll('.days-seg'));
     var viewSegs = Array.prototype.slice.call(document.querySelectorAll('.view-seg'));
     var calSegs = Array.prototype.slice.call(document.querySelectorAll('.cal-seg'));
@@ -265,10 +335,14 @@
     var queryContext = null;     // 当前查询上下文 {mode:'coords'|'city', lat, lon, label, city}
     var cachedData = null;       // 最近一次成功查询的完整数据（视图/日历切换复用，不重复请求）
     var currentDays = 15;         // 当前预报天数（1~16）
-    var viewMode = 'list';        // 列表 | 日历
+    var viewMode = 'list';        // 列表 | 日历 | 万年历（V10.11.10 新增 almanac）
     var calMode = 'month';        // 月视图 | 周视图
     var calAnchor = null;        // 日历锚点 {y, m}（0-11）
     var selectedDate = null;     // 日历选中日期 '2026-10-09'
+    // ===== V10.11.10 万年历独立模块状态 =====
+    var almanacAnchor = null;    // 万年历锚点 {y, m(0-11)}（独立于天气预报日历锚点）
+    var almanacSelected = null;   // 万年历选中日期 '2026-10-10'
+    var holidayCache = {};        // 班/休数据页面级缓存 {年: {"MM-DD": {holiday, name}}}
     var compareCities = [];       // 对比城市 [{label, lat, lon}]，上限 3
     var reqSeq = 0;               // 主查询请求序号（竞态保护：仅最新请求渲染）
     var compareSeq = 0;           // 对比请求序号
@@ -1253,14 +1327,29 @@
     // 视图区渲染（列表/日历，基于缓存数据不重复请求）
     function renderView() {
         var area = document.getElementById('weatherViewArea');
-        if (!area || !cachedData) return;
-        var daily = cachedData.daily || [];
-        // 工具栏子控件显隐
+        if (!area) return;
         var isCal = viewMode === 'calendar';
+        var isAlm = viewMode === 'almanac';
+        // 工具栏子控件显隐（V10.11.10：万年历视图隐藏天数控件，显示万年历导航）
+        daysGroup.style.display = isAlm ? 'none' : '';
         calModeGroup.style.display = isCal ? '' : 'none';
         calNavGroup.style.display = (isCal && calMode === 'month') ? '' : 'none';
+        almanacNavGroup.style.display = isAlm ? '' : 'none';
         viewSegs.forEach(function (b) { b.classList.toggle('active', b.dataset.view === viewMode); });
         calSegs.forEach(function (b) { b.classList.toggle('active', b.dataset.cal === calMode); });
+        // 非万年历视图时清空万年历详情面板
+        if (!isAlm) {
+            var ad = document.getElementById('almanacDetailArea');
+            if (ad) ad.innerHTML = '';
+            almanacSelected = null;
+        }
+        // V10.11.10：万年历为独立模块，不依赖天气预报数据（未查询天气也可使用）
+        if (isAlm) {
+            showAlmanacView();
+            return;
+        }
+        if (!cachedData) return;
+        var daily = cachedData.daily || [];
 
         if (viewMode === 'list') {
             area.innerHTML = renderDailyGrid(daily);
@@ -1310,6 +1399,14 @@
             var parts = String(tKey).split('-').map(Number);
             calAnchor = { y: parts[0], m: parts[1] - 1 };
         }
+        // V10.11.10：切到万年历时初始化锚点；若结果区尚未渲染（天气查询未成功/未发起），动态创建视图容器使万年历独立可用
+        if (mode === 'almanac') {
+            ensureAlmanacAnchor();
+            if (!document.getElementById('weatherViewArea')) {
+                weatherResult.innerHTML = '<div id="weatherViewArea"></div>';
+                weatherToolbar.style.display = '';
+            }
+        }
         renderView();
     }
 
@@ -1344,6 +1441,210 @@
         renderView();
     }
 
+    // ===== V10.11.10 万年历独立模块（参考 rili.com.cn：大月历 + 年月任意切换 + 班/休角标，不依赖天气数据） =====
+
+    // 年/月下拉初始化（1900-2100）
+    function initAlmanacControls() {
+        var y, i, o;
+        for (y = 1900; y <= 2100; y++) {
+            o = document.createElement('option');
+            o.value = String(y);
+            o.textContent = y + '年';
+            almYearSelect.appendChild(o);
+        }
+        for (i = 1; i <= 12; i++) {
+            o = document.createElement('option');
+            o.value = String(i);
+            o.textContent = i + '月';
+            almMonthSelect.appendChild(o);
+        }
+    }
+
+    // 万年历锚点初始化（默认「今天」所在月）
+    function ensureAlmanacAnchor() {
+        if (almanacAnchor) return;
+        var tk = todayKey();
+        var p = String(tk).split('-').map(Number);
+        almanacAnchor = { y: p[0], m: p[1] - 1 };
+    }
+
+    // 拉取某年班/休数据（页面级缓存；失败返回空字典降级——万年历主体不受影响仅不显示角标）
+    function fetchHolidayYear(y) {
+        if (holidayCache[y] !== undefined) return Promise.resolve(holidayCache[y]);
+        return fetch('/api/holiday/year/' + y).then(function (r) { return r.json(); }).then(function (d) {
+            var h = (d && d.data && d.data.holiday) ? d.data.holiday : {};
+            holidayCache[y] = h;
+            return h;
+        }).catch(function () {
+            holidayCache[y] = {};
+            return {};
+        });
+    }
+
+    // 万年历今日大卡（比日历视图今日卡更醒目；含今日班/休状态）
+    function renderAlmanacTodayCard() {
+        if (!window.LunarUtils) return '';
+        var tk = todayKey();
+        var p = String(tk).split('-').map(Number);
+        var F = null;
+        try { F = LunarUtils.getFullInfo(p[0], p[1], p[2]); } catch (e) { }
+        if (!F) return '';
+        var hm = pad2(p[1]) + '-' + pad2(p[2]);
+        var hToday = (holidayCache[p[0]] || {})[hm];
+        var html = '<div class="alm-today-card">';
+        html += '  <div class="alm-today-main">' + p[0] + '年' + p[1] + '月' + p[2] + '日 <span class="alm-today-week">' + escapeHtml(F.week) + '</span>';
+        if (hToday) {
+            html += hToday.holiday ? ' <span class="alm-badge rest" style="position:static;vertical-align:middle;font-size:.8rem">休</span>' : ' <span class="alm-badge work" style="position:static;vertical-align:middle;font-size:.8rem">班</span>';
+        }
+        html += '  </div>';
+        html += '  <div class="alm-today-sub"><i class="fa-solid fa-moon text-warning me-1"></i>' + escapeHtml(F.lunarFull) + (F.term ? ' <span class="cal-term-chip ms-2">' + escapeHtml(F.term) + '</span>' : '') + '</div>';
+        html += '  <div class="alm-fest-badge">';
+        (F.festivals || []).forEach(function (f) {
+            html += '<span class="cal-fest-badge me-2"><i class="fa-solid fa-fireworks me-1"></i>' + escapeHtml(f) + '</span>';
+        });
+        if (hToday) {
+            html += '<span class="cal-term-chip me-2">今日' + (hToday.holiday ? '休息日（' : '调休补班（') + escapeHtml(hToday.name || '') + '）</span>';
+        }
+        html += '  </div>';
+        html += '</div>';
+        return html;
+    }
+
+    // 万年历大月历网格（公历大数字 + 农历/节日/节气小字 + 班/休角标 + 周末红）
+    function renderAlmanacGrid(y, m, holidays) {
+        var weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+        var html = '<div class="alm-grid mb-1">' + weekdays.map(function (w, i) {
+            return '<div class="alm-week-header' + (i >= 5 ? ' weekend' : '') + '">' + w + '</div>';
+        }).join('') + '</div>';
+        var firstDay = new Date(y, m, 1);
+        var startOffset = (firstDay.getDay() + 6) % 7;  // 周一起始
+        var daysInMonth = new Date(y, m + 1, 0).getDate();
+        var tKey = todayKey();
+        var cells = [];
+        var i;
+        for (i = 0; i < startOffset; i++) cells.push(null);
+        for (i = 1; i <= daysInMonth; i++) cells.push(i);
+        while (cells.length % 7 !== 0) cells.push(null);
+
+        html += '<div class="alm-grid">';
+        cells.forEach(function (d) {
+            if (d === null) { html += '<div class="alm-cell empty"></div>'; return; }
+            var key = dateKey(y, m, d);
+            var wd = new Date(y, m, d).getDay();
+            var isWeekend = (wd === 0 || wd === 6);
+            var cls = 'alm-cell';
+            if (key === tKey) cls += ' today';
+            if (key === almanacSelected) cls += ' selected';
+            var label = { text: '', type: 'none' };
+            if (window.LunarUtils) {
+                try { label = LunarUtils.getDayLabel(y, m + 1, d); } catch (e) { }
+            }
+            // 班/休角标（holiday=true 休红 / holiday=false 班灰）
+            var h = (holidays || {})[key.slice(5)];
+            var badge = h
+                ? (h.holiday ? '<span class="alm-badge rest" title="' + escapeHtml(h.name || '法定假日') + '">休</span>'
+                    : '<span class="alm-badge work" title="' + escapeHtml(h.name || '调休补班') + '">班</span>')
+                : '';
+            html += '<div class="' + cls + '" data-alm="' + key + '">';
+            html += badge;
+            html += '  <div class="alm-num ' + (isWeekend ? 'weekend' : '') + (key === tKey ? ' today-num' : '') + '">' + d + '</div>';
+            html += '  <div class="alm-lunar ' + (label.type === 'festival' || label.type === 'term' ? label.type : '') + '" title="' + escapeHtml(label.text || '') + '">' + escapeHtml(label.text || '') + '</div>';
+            html += '</div>';
+        });
+        html += '</div>';
+        return html;
+    }
+
+    // 万年历详情面板（点击日期：农历全称/干支/生肖/节气/节日/班休）
+    function renderAlmanacDetail() {
+        var area = document.getElementById('almanacDetailArea');
+        if (!area) return;
+        if (!almanacSelected) { area.innerHTML = ''; return; }
+        var p = String(almanacSelected).split('-').map(Number);
+        var F = null;
+        if (window.LunarUtils) {
+            try { F = LunarUtils.getFullInfo(p[0], p[1], p[2]); } catch (e) { }
+        }
+        var h = (holidayCache[p[0]] || {})[pad2(p[1]) + '-' + pad2(p[2])];
+        var html = '<div class="alm-detail-panel">';
+        html += '  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">';
+        html += '    <span class="fw-semibold"><i class="fa-solid fa-calendar-day me-2 text-primary"></i>' + p[0] + '年' + p[1] + '月' + p[2] + '日' + (F ? ' ' + escapeHtml(F.week) : '') + '</span>';
+        html += '    <button type="button" class="btn-close" id="almDetailClose" title="关闭详情"></button>';
+        html += '  </div>';
+        if (F) {
+            html += '  <div class="alm-detail-nums mt-2">' + escapeHtml(F.lunarMD) + '</div>';
+            html += '  <div class="cal-detail-lunar mt-1">';
+            html += '    <span class="me-3"><i class="fa-solid fa-moon text-warning me-1"></i>' + escapeHtml(F.lunarFull) + '</span>';
+            if (F.term) html += '<span class="cal-term-chip me-2">' + escapeHtml(F.term) + '</span>';
+            (F.festivals || []).forEach(function (f) {
+                html += '<span class="cal-fest-badge me-2"><i class="fa-solid fa-fireworks me-1"></i>' + escapeHtml(f) + '</span>';
+            });
+            if (h) {
+                html += h.holiday
+                    ? '<span class="alm-badge rest" style="position:static">休</span>'
+                    : '<span class="alm-badge work" style="position:static">班</span>';
+                html += '<span class="ms-2 small text-muted">' + escapeHtml(h.name || '') + '</span>';
+            }
+            html += '  </div>';
+        }
+        html += '</div>';
+        area.innerHTML = html;
+    }
+
+    // 万年历视图渲染总控（同步渲染 + 异步拉取当年班休后自动刷新角标）
+    function showAlmanacView() {
+        ensureAlmanacAnchor();
+        var area = document.getElementById('weatherViewArea');
+        if (!area) {
+            weatherResult.innerHTML = '<div id="weatherViewArea"></div>';
+            weatherToolbar.style.display = '';
+            area = document.getElementById('weatherViewArea');
+        }
+        almYearSelect.value = String(almanacAnchor.y);
+        almMonthSelect.value = String(almanacAnchor.m + 1);
+        area.innerHTML = renderAlmanacTodayCard() + renderAlmanacGrid(almanacAnchor.y, almanacAnchor.m, holidayCache[almanacAnchor.y] || {});
+        renderAlmanacDetail();
+        // 首次查看该年时异步拉取班/休数据，拉到后自动重绘角标（仅当仍在万年历视图且年份未变）
+        var y = almanacAnchor.y;
+        if (holidayCache[y] === undefined) {
+            fetchHolidayYear(y).then(function () {
+                if (viewMode === 'almanac' && almanacAnchor && almanacAnchor.y === y) {
+                    document.getElementById('weatherViewArea').innerHTML = renderAlmanacTodayCard() + renderAlmanacGrid(y, almanacAnchor.m, holidayCache[y] || {});
+                    renderAlmanacDetail();
+                }
+            });
+        }
+    }
+
+    // 万年历月份/年份切换
+    function almShift(delta) {
+        ensureAlmanacAnchor();
+        var y = almanacAnchor.y, m = almanacAnchor.m + delta;
+        if (m < 0) { m = 11; y -= 1; }
+        if (m > 11) { m = 0; y += 1; }
+        if (y < 1900) { y = 1900; m = 0; }
+        if (y > 2100) { y = 2100; m = 11; }
+        almanacAnchor = { y: y, m: m };
+        almanacSelected = null;
+        showAlmanacView();
+    }
+
+    function almGoto(year, month) {
+        year = Math.max(1900, Math.min(2100, year));
+        month = Math.max(0, Math.min(11, month));
+        almanacAnchor = { y: year, m: month };
+        almanacSelected = null;
+        showAlmanacView();
+    }
+
+    function almBackToday() {
+        var tk = todayKey();
+        var p = String(tk).split('-').map(Number);
+        almanacAnchor = { y: p[0], m: p[1] - 1 };
+        almanacSelected = null;
+        showAlmanacView();
+    }
+
     // ===== 重置记忆（V10.11.8：一键恢复默认，修复异常记忆导致页面不可用的问题） =====
     function resetMemory() {
         ['mode', 'region', 'city', 'days', 'view', 'cal', 'compare'].forEach(function (k) { lsDel(k); });
@@ -1353,6 +1654,9 @@
         calAnchor = null;
         selectedDate = null;
         compareCities = [];
+        // V10.11.10：万年历状态同步复位（不持久化记忆，仅清内存状态）
+        almanacAnchor = null;
+        almanacSelected = null;
         // 重置 UI
         setDays(15, null, true);
         provinceSelect.value = '';
@@ -1387,6 +1691,18 @@
     calPrev.addEventListener('click', function () { shiftMonth(-1); });
     calNext.addEventListener('click', function () { shiftMonth(1); });
     calToday.addEventListener('click', backToday);
+    // V10.11.10 万年历模块导航事件
+    almPrev.addEventListener('click', function () { almShift(-1); });
+    almNext.addEventListener('click', function () { almShift(1); });
+    almToday.addEventListener('click', almBackToday);
+    almYearSelect.addEventListener('change', function () {
+        ensureAlmanacAnchor();
+        almGoto(Number(almYearSelect.value), almanacAnchor.m);
+    });
+    almMonthSelect.addEventListener('change', function () {
+        ensureAlmanacAnchor();
+        almGoto(almanacAnchor.y, Number(almMonthSelect.value) - 1);
+    });
 
     // 结果区事件委托：日历/周视图日期点击（选中 + 详情 + 趋势图标记线）、对比城市操作
     weatherResult.addEventListener('click', function (e) {
@@ -1407,6 +1723,20 @@
                 pendingDaily = cachedData.daily;
                 initChartIfNeeded();
             }
+            return;
+        }
+        // V10.11.10 万年历详情关闭按钮
+        if (e.target.id === 'almDetailClose') {
+            almanacSelected = null;
+            showAlmanacView();
+            return;
+        }
+        // V10.11.10 万年历格子点击（选中 → 详情；再点取消）
+        var almCell = e.target.closest('.alm-cell[data-alm]');
+        if (almCell) {
+            var aKey = almCell.getAttribute('data-alm');
+            almanacSelected = (almanacSelected === aKey) ? null : aKey;
+            showAlmanacView();
             return;
         }
         var cell = e.target.closest('.cal-cell[data-date], .cal-week-row[data-date]');
@@ -1433,13 +1763,15 @@
     // ===== 页面初始化（V10.11.8：记忆为空或恢复失败时，均保证页面可用并默认北京） =====
     initProvince();
     initDaysControls();
+    initAlmanacControls();   // V10.11.10 万年历年/月下拉
 
     // 恢复天数/视图偏好（静默，不触发查询）
     var savedDays = parseInt(lsGet('days'), 10);
     if (!isNaN(savedDays)) setDays(savedDays, null, true); else setDays(15, null, true);
     var savedView = lsGet('view');
     // V10.11.8 修复：恢复视图改用 setView()（内部会初始化日历锚点 calAnchor，避免直接赋 viewMode 导致月历渲染读 null 异常）
-    if (savedView === 'calendar' || savedView === 'list') setView(savedView);
+    // V10.11.10：万年历视图也可记忆恢复（setView 内部确保容器存在，未查询天气也可独立展示）
+    if (savedView === 'calendar' || savedView === 'list' || savedView === 'almanac') setView(savedView);
     var savedCal = lsGet('cal');
     if (savedCal === 'week' || savedCal === 'month') calMode = savedCal;
     // 恢复对比城市

@@ -962,6 +962,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             'api_poster_data': 'ledger',
             'weather_page': 'weather',
             'api_weather_query': 'weather',
+            # V10.11.10 万年历班/休接口：与天气查询同挂 weather 菜单门控
+            'api_holiday_year': 'weather',
             # V10.11.8 告警推送接口：挂 backups 菜单门控（无 WebDAV 备份菜单权限的用户直访这些 URL 会被拦截）
             'admin_alerts_config': 'backups',
             'admin_alerts_config_save': 'backups',
