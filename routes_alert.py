@@ -270,6 +270,12 @@ def register_alert_routes(app):
                 grant.can_edit = can_edit
                 grant.can_test = can_test
                 grant.can_view_log = can_view_log
+                # 自动打通 Webhook 菜单与授权标记，确保告警授权立即生效且不被 menu_map 拦截
+                target.webhook_authorized = True
+                _curr_menus = [m.strip() for m in (target.allowed_menus or '').split(',') if m.strip()]
+                if 'webhooks' not in _curr_menus:
+                    _curr_menus.append('webhooks')
+                    target.allowed_menus = ','.join(_curr_menus)
                 db.session.commit()
                 message = '用户 {0} 的告警操作授权已更新（保存后立即生效）'.format(target.username)
         except Exception as e:

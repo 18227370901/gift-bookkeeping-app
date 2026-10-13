@@ -210,6 +210,11 @@
                         <a class="nav-link text-info" href="{{ url_for('admin_backups') }}"><i class="fa-solid fa-cloud-arrow-up me-1"></i>备份</a>
                     </li>
                     {% endif %}
+                    {% if not current_user.is_admin and current_user.can_use_webhook() %}
+                    <li class="nav-item">
+                        <a class="nav-link text-primary" href="{{ url_for('admin_webhooks') }}"><i class="fa-solid fa-satellite-dish me-1"></i>Webhook通知</a>
+                    </li>
+                    {% endif %}
                     {% if current_user.is_admin %}
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle text-warning" href="#" id="adminDropdown" role="button" data-bs-toggle="dropdown">

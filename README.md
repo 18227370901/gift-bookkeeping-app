@@ -12,6 +12,21 @@ AIGC:
 # 人情礼金记账系统 (Gift Bookkeeping App)
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🌟 **V10.11.18 Webhook与系统告警全链路权限自洽 + 批量授权Bug修复 + 凭证安全脱敏与日志性能治理**：
+>   ① **Webhook 与系统告警权限全链路闭环自洽（彻底解决普通用户授权断裂）**：
+>     - **底层模型与迁移对齐**：`models.py` 的 `User` 模型正式补充 `webhook_authorized` 布尔字段并提供 `can_use_webhook()` 权限判断，`app.py` 新增启动自动迁移；同步 `ALL_MENUS` 数据权限字典与管理员菜单列表（全面收录 `webhooks`）；启动时自动幂等清洗存量普通用户 `allowed_menus` 中残留的 `backups` 死数据；
+>     - **权限配置界面双轨支持**：`templates/admin_users.html` 的单用户配置与批量配置区全面补充「Webhook通知」菜单勾选及「Webhook 与告警功能授权」复选框，彻底清除批量区已废弃的备份菜单选项；
+>     - **告警授权实时联动**：在 Webhook 页面通过 `AlertPushGrant` 为用户分配告警操作权限时，后台自动激活用户的 `webhook_authorized` 标记并追加 `webhooks` 菜单访问权，确保告警授权即时生效且绝不被底层路由中间件拦截。
+>   ② **批量配置备份授权漏存修复与工单申请流打通**：
+>     - **批量备份授权修复**：彻底修复 `admin_batch_user_permissions` 路由遗漏处理 `backup_authorized` 导致管理员批量勾选备份授权静默失效的 Bug；
+>     - **工单菜单项补齐**：`routes_ext.py` 的 `TICKET_MENU_OPTIONS` 增加 `('webhooks', 'Webhook通知')`，解决无权限用户直访被拦截重定向到权限申请页后「无 Webhook 模块可申请」的死循环痛点；
+>     - **侧边导航栏动态感知**：`templates/base.html` 顶部导航栏为非管理员但具备 Webhook 权限的用户动态渲染「Webhook通知」入口。
+>   ③ **Webhook 路由门控解耦与凭证安全脱敏保护**：
+>     - **写操作路由权限解耦**：彻底破除 6 个 Webhook 写操作路由（新增/编辑/启停/删除/测试/删日志）硬编码 `is_admin` 限制，重构为支持超管与普通授权用户的统一校验体系；
+>     - **推送渠道凭证前端脱敏**：`templates/admin_webhooks.html` 对普通用户输出的 `bot_secret` 与 `secret_token` 实施掩码脱敏（非超管输出 `******`）；编辑保存时识别掩码自动保留数据库真实密钥，杜绝普通用户审查源码窃取生产渠道密钥的严重隐患。
+>   ④ **日志表数据库索引增强与 N+1 查询风暴消除**：
+>     - **高频字段索引声明**：为 `WebhookLog` 的 `created_at`、`event_type`、`is_success`、`webhook_id` 以及 `ScheduledTaskExecutionLog` 的 `end_time`、`status` 字段建立索引，彻底解决高频分页与巡检查询退化为全表扫描的性能隐患；
+>     - **消除 N+1 关联查询**：Webhook 页面查询 500 条日志时采用 `db.joinedload(WebhookLog.operator)` 预加载，彻底消除模板循环渲染触发的数百次额外 SQL 查询；修正空日志行 `colspan=9` 对齐。
 > - 🌟 **V10.11.17 AI助手配置单卡片独立保存 + 表格列宽横向滚动防截断 + 天气与万年历全链路加固 + WebDAV模板修复**：
 >   ① **AI 助手配置多卡片独立保存与单卡片操作台**：
 >     - **单卡片增量保存协议**：扩展 /api/ai/config 端点，支持 { config_index: idx, config: single_cfg } 协议。每个 AI 模型供应商配置卡片底部增加独立的「保存」按钮，修改后可单独保存当前项，防止误改动或未完成编辑覆盖其他供应商配置；顶部保留「保存全部配置」满足批量持久化需求；

@@ -603,6 +603,25 @@
                                 </select>
                               </div>
                             </div>
+
+                            <!-- 9. Webhook通知 -->
+                            <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
+                              <div class="form-check mb-0 d-flex align-items-center">
+                                <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="webhooks" id="menu_webhooks_{{ u.id }}" {% if u.can_access_menu('webhooks') or u.webhook_authorized %}checked{% endif %}>
+                                <label class="form-check-label fw-semibold small text-dark" for="menu_webhooks_{{ u.id }}">
+                                  <i class="fa-solid fa-satellite-dish text-primary me-1"></i>Webhook通知
+                                </label>
+                              </div>
+                              <div style="min-width: 210px;">
+                                {% set p_webhooks = u.get_menu_perm('webhooks') %}
+                                <select class="form-select form-select-sm" name="menu_perm_webhooks">
+                                  <option value="0" {% if p_webhooks == 0 %}selected{% endif %}>仅管理自身数据</option>
+                                  <option value="1" {% if p_webhooks == 1 %}selected{% endif %}>自身全权 + 仅查看他人数据</option>
+                                  <option value="2" {% if p_webhooks == 2 %}selected{% endif %}>查看+修改他人数据</option>
+                                  <option value="3" {% if p_webhooks == 3 %}selected{% endif %}>查看+修改+删除他人数据</option>
+                                </select>
+                              </div>
+                            </div>
                           </div>
                         </div>
 
@@ -615,6 +634,19 @@
                             <input class="form-check-input" type="checkbox" name="backup_authorized" value="1" id="backup_auth_{{ u.id }}" {% if u.backup_authorized %}checked{% endif %}>
                             <label class="form-check-label small text-muted" for="backup_auth_{{ u.id }}">
                               授权该用户使用 WebDAV 备份与恢复功能
+                            </label>
+                          </div>
+                        </div>
+
+                        <!-- Webhook 与告警功能授权 -->
+                        <div class="mb-3">
+                          <label class="form-label fw-bold small text-dark mb-2">
+                            <i class="fa-solid fa-satellite-dish text-primary me-1"></i>Webhook 与告警功能授权：
+                          </label>
+                          <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="webhook_authorized" value="1" id="webhook_auth_{{ u.id }}" {% if u.webhook_authorized %}checked{% endif %}>
+                            <label class="form-check-label small text-muted" for="webhook_auth_{{ u.id }}">
+                              授权该用户访问 Webhook 渠道与系统告警推送功能
                             </label>
                           </div>
                           <!-- V6: 备份数据权限级别 -->
@@ -1391,16 +1423,16 @@ function copyCredPassword() {
                 </div>
               </div>
 
-              <!-- 6. WebDAV备份 -->
+              <!-- 9. Webhook通知 -->
               <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
                 <div class="form-check mb-0 d-flex align-items-center">
-                  <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="backups" id="batch_menu_backups">
-                  <label class="form-check-label fw-semibold small text-dark" for="batch_menu_backups">
-                    <i class="fa-solid fa-cloud-arrow-up text-warning me-1"></i>WebDAV备份
+                  <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="webhooks" id="batch_menu_webhooks">
+                  <label class="form-check-label fw-semibold small text-dark" for="batch_menu_webhooks">
+                    <i class="fa-solid fa-satellite-dish text-primary me-1"></i>Webhook通知
                   </label>
                 </div>
                 <div style="min-width: 210px;">
-                  <select class="form-select form-select-sm" name="menu_perm_backups">
+                  <select class="form-select form-select-sm" name="menu_perm_webhooks">
                     <option value="0" selected>仅管理自身数据</option>
                     <option value="1">仅查看他人数据</option>
                     <option value="2">查看+修改他人数据</option>
@@ -1433,6 +1465,19 @@ function copyCredPassword() {
               <input class="form-check-input" type="checkbox" name="scheduled_task_authorized" value="1" id="batch_task_auth">
               <label class="form-check-label small text-muted" for="batch_task_auth">
                 勾选后批量授权选中用户使用定时备份任务功能
+              </label>
+            </div>
+          </div>
+
+          <!-- 批量 Webhook 功能授权 -->
+          <div class="mb-3">
+            <label class="form-label fw-bold small text-dark mb-2">
+              <i class="fa-solid fa-satellite-dish text-primary me-1"></i>Webhook 与告警功能授权：
+            </label>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="webhook_authorized" value="1" id="batch_webhook_auth">
+              <label class="form-check-label small text-muted" for="batch_webhook_auth">
+                勾选后批量授权选中用户访问 Webhook 通知与系统告警推送功能
               </label>
             </div>
           </div>

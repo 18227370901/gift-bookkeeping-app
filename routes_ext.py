@@ -987,7 +987,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     'ledger': '礼金账本',
                     'dashboard': '数据分析',
                     'family': '家庭记账',
-                    'weather': '天气',
+                    'weather': '天气'
+,
                     'webhooks': 'Webhook通知',
                     'admin_webhooks': 'Webhook通知',
                     'backups': 'WebDAV备份'
@@ -3362,12 +3363,24 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_webhooks():
         """管理员 Webhook 与长连接机器人配置及推送日志"""
-        if not current_user.is_admin and not (hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))):
+        def _can_manage_webhooks():
+            if getattr(current_user, 'is_admin', False):
+                return True
+            if bool(getattr(current_user, 'webhook_authorized', False)):
+                return True
+            if hasattr(current_user, 'can_access_menu') and (
+                current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks')
+            ):
+                return True
+            return False
+
+        if not _can_manage_webhooks():
             flash('权限不足', 'danger')
             return redirect(url_for('index'))
 
         webhooks = WebhookConfig.query.order_by(WebhookConfig.created_at.desc()).all()
-        logs = WebhookLog.query.order_by(WebhookLog.created_at.desc()).limit(500).all()
+        # V10.11.18 性能优化：joinedload 消除 500 条日志模板渲染时的 N+1 数据库查询
+        logs = WebhookLog.query.options(db.joinedload(WebhookLog.operator)).order_by(WebhookLog.created_at.desc()).limit(500).all()
         # V10.1: 注入矩阵数据到模板
         from webhook_utils import PAGE_NAMES as _PAGE_NAMES, EVENT_COLUMNS as _EVENT_COLUMNS, PAGE_EVENT_MATRIX as _PAGE_EVENT_MATRIX, DEFAULT_MESSAGE_TEMPLATES as _DEFAULT_TEMPLATES
         return render_template('admin_webhooks.html', webhooks=webhooks, logs=logs,
@@ -3380,7 +3393,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_create_webhook():
         """添加 Webhook 或企业微信长连接机器人"""
-        if not current_user.is_admin:
+        def _can_manage():
+            return getattr(current_user, 'is_admin', False) or bool(getattr(current_user, 'webhook_authorized', False)) or (
+                hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))
+            )
+        if not _can_manage():
             # V3: 兼容 AJAX 和传统 form 提交
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.is_json:
                 return jsonify({'success': False, 'message': '权限不足'}), 403
@@ -3499,7 +3516,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_edit_webhook(webhook_id):
         """编辑 Webhook 或企业微信长连接机器人配置"""
-        if not current_user.is_admin:
+        def _can_manage():
+            return getattr(current_user, 'is_admin', False) or bool(getattr(current_user, 'webhook_authorized', False)) or (
+                hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))
+            )
+        if not _can_manage():
             if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.is_json:
                 return jsonify({'success': False, 'message': '权限不足'}), 403
             flash('权限不足', 'danger')
@@ -3540,13 +3561,15 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             # 用户清空目标会话输入框保存即真正清空，等待企微群内 @机器人 由后台守护线程自动捕获绑定
             url = f"wecom://bot/{bot_id}?chatid={chatid}" if chatid else f"wecom://bot/{bot_id}"
             hook.bot_id = bot_id
-            hook.bot_secret = bot_secret
+            if bot_secret and not bot_secret.startswith('******'):
+                hook.bot_secret = bot_secret
             hook.secret_token = None
         else:
             if not url:
                 flash('标准 Webhook 模式的目标 URL 不能为空！', 'warning')
                 return redirect(url_for('admin_webhooks'))
-            hook.secret_token = secret
+            if secret and not secret.startswith('******'):
+                hook.secret_token = secret
             hook.bot_id = None
             hook.bot_secret = None
 
@@ -3590,7 +3613,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_toggle_webhook(webhook_id):
         """切换 Webhook 激活状态"""
-        if not current_user.is_admin:
+        def _can_manage():
+            return getattr(current_user, 'is_admin', False) or bool(getattr(current_user, 'webhook_authorized', False)) or (
+                hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))
+            )
+        if not _can_manage():
             return jsonify({'success': False, 'message': '权限不足'}), 403
         hook = db.session.get(WebhookConfig, webhook_id)
         if not hook:
@@ -3617,7 +3644,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_delete_webhook(webhook_id):
         """删除 Webhook 配置"""
-        if not current_user.is_admin:
+        def _can_manage():
+            return getattr(current_user, 'is_admin', False) or bool(getattr(current_user, 'webhook_authorized', False)) or (
+                hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))
+            )
+        if not _can_manage():
             flash('权限不足', 'danger')
             return redirect(url_for('index'))
         hook = db.session.get(WebhookConfig, webhook_id)
@@ -3644,7 +3675,12 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_test_webhook(webhook_id):
         """测试 Webhook 或长连接机器人发送"""
-        if not current_user.is_admin:
+        from alert_service import has_alert_permission
+        def _can_test():
+            return getattr(current_user, 'is_admin', False) or bool(getattr(current_user, 'webhook_authorized', False)) or has_alert_permission(current_user, 'test') or (
+                hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))
+            )
+        if not _can_test():
             return jsonify({'success': False, 'message': '权限不足'}), 403
         hook = db.session.get(WebhookConfig, webhook_id)
         if not hook:
@@ -3678,7 +3714,12 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_delete_webhook_log(log_id):
         """删除单条 Webhook 推送日志"""
-        if not current_user.is_admin:
+        from alert_service import has_alert_permission
+        def _can_del_log():
+            return getattr(current_user, 'is_admin', False) or bool(getattr(current_user, 'webhook_authorized', False)) or has_alert_permission(current_user, 'view_log') or (
+                hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))
+            )
+        if not _can_del_log():
             return jsonify({'code': 403, 'message': '权限不足'}), 403
         log_item = db.session.get(WebhookLog, log_id)
         if not log_item:
@@ -3702,7 +3743,12 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_batch_delete_webhook_logs():
         """批量删除 Webhook 推送日志"""
-        if not current_user.is_admin:
+        from alert_service import has_alert_permission
+        def _can_del_logs():
+            return getattr(current_user, 'is_admin', False) or bool(getattr(current_user, 'webhook_authorized', False)) or has_alert_permission(current_user, 'view_log') or (
+                hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))
+            )
+        if not _can_del_logs():
             return jsonify({'code': 403, 'message': '权限不足'}), 403
         data = request.get_json(silent=True) or {}
         ids = data.get('log_ids') or []
@@ -5170,6 +5216,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         ('reconciliation', '人情对账'),
         ('reminders', '纪念日备忘'),
         ('recycle_bin', '回收站'),
+        ('webhooks', 'Webhook通知'),
     ]
 
     @app.route('/permission_tickets')

@@ -810,8 +810,19 @@ def _do_startup_sync():
         if _cleaned:
             db.session.commit()
             print(f"[Init] V10.11.13 已清洗 {_cleaned} 个用户的「天气勾选×0级」冲突权限数据")
+        # 存量死数据清洗：剔除普通用户 allowed_menus 中的 backups 废弃键
+        _backups_cleaned = 0
+        for _u in User.query.filter(User.is_admin == False).all():
+            _menus = [m.strip() for m in (_u.allowed_menus or '').split(',') if m.strip()]
+            if 'backups' in _menus:
+                _menus = [m for m in _menus if m != 'backups']
+                _u.allowed_menus = ','.join(_menus)
+                _backups_cleaned += 1
+        if _backups_cleaned:
+            db.session.commit()
+            print(f"[Init] 已清洗 {_backups_cleaned} 个普通用户的存量 backups 废弃菜单键")
     except Exception as _e:
-        print(f"[Init] V10.11.13 天气权限回填/清洗跳过: {_e}")
+        print(f"[Init] 天气与菜单权限回填/清洗跳过: {_e}")
 
 def init_database():
     with app.app_context():
@@ -909,6 +920,7 @@ def init_database():
             "ALTER TABLE webhook_configs ADD COLUMN message_templates TEXT DEFAULT '{}'",
             # --- 备份加密与授权字段 ---
             "ALTER TABLE users ADD COLUMN backup_authorized BOOLEAN DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN webhook_authorized BOOLEAN DEFAULT 0",
             "ALTER TABLE users ADD COLUMN scheduled_task_authorized BOOLEAN DEFAULT 0",
             "ALTER TABLE backup_configs ADD COLUMN backup_encrypt_password VARCHAR(512)",
             # --- 新模型建表 ---
@@ -1129,7 +1141,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'app': 'gift_bookkeeping_app',
-        'version': 'V10.11.15'
+        'version': 'V10.11.18'
     }), 200
 
 @app.route('/')
@@ -2646,8 +2658,8 @@ def admin_batch_user_permissions():
         menus_list = [m for m in menus_list if m != 'weather']
     allowed_menus_str = ",".join(menus_list)
 
-    # V10.11.13 补齐 weather（与单用户路由对齐——此前批量保存会整体丢弃天气权限数据）
-    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather']
+    # 补齐 webhooks
+    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks']
     menu_perms = {}
     for m in ALL_MENUS:
         val = request.form.get(f'menu_perm_{m}')
@@ -2658,6 +2670,14 @@ def admin_batch_user_permissions():
         else:
             legacy_p = request.form.get('perm_level', '0')
             menu_perms[m] = int(legacy_p) if str(legacy_p).isdigit() else 0
+
+    # 批量备份授权（修复 C1）
+    backup_auth = request.form.get('backup_authorized', '')
+    backup_auth_val = (backup_auth == '1' or backup_auth == 'on')
+
+    # 批量 Webhook 授权
+    webhook_auth = request.form.get('webhook_authorized', '')
+    webhook_auth_val = (webhook_auth == '1' or webhook_auth == 'on' or 'webhooks' in menus_list)
 
     # V3: 批量 AI 助手授权
     ai_auth = request.form.get('ai_authorized', '')
@@ -2679,10 +2699,10 @@ def admin_batch_user_permissions():
                 u.can_view_others = (ledger_p >= 1)
                 u.can_edit_others = (ledger_p >= 2)
                 u.can_delete_others = (ledger_p >= 3)
-                # V3: 批量 AI 授权
                 u.ai_authorized = ai_auth_val
-                # V6: 批量定时任务授权
                 u.scheduled_task_authorized = task_auth_val
+                u.backup_authorized = backup_auth_val
+                u.webhook_authorized = webhook_auth_val
                 count += 1
         except Exception:
             continue
@@ -2735,7 +2755,7 @@ def admin_update_user_permissions(user_id):
     user.allowed_menus = ",".join(menus_list)
 
     # 2. 各菜单独立数据权限更新
-    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather']
+    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks']
     MENU_NAMES = {
         'ledger': '礼金账本',
         'dashboard': '数据分析',
@@ -2745,7 +2765,8 @@ def admin_update_user_permissions(user_id):
         'reminders': '纪念日备忘',
         'recycle_bin': '回收站',
         'backups': 'WebDAV备份',
-        'weather': '天气'
+        'weather': '天气',
+        'webhooks': 'Webhook通知'
     }
     PERM_LABELS = {
         0: '仅自身',
@@ -2777,6 +2798,10 @@ def admin_update_user_permissions(user_id):
     # 3. 备份功能授权
     backup_auth = request.form.get('backup_authorized', '')
     user.backup_authorized = (backup_auth == '1' or backup_auth == 'on')
+
+    # Webhook 与告警功能授权
+    webhook_auth = request.form.get('webhook_authorized', '')
+    user.webhook_authorized = (webhook_auth == '1' or webhook_auth == 'on' or 'webhooks' in menus_list)
 
     # V6: 定时任务功能授权
     task_auth = request.form.get('scheduled_task_authorized', '')

@@ -11,7 +11,7 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.11.17  
+> **版本**：V10.11.18  
 > **生成日期**：2026-10-13  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
@@ -499,9 +499,9 @@ for sql in migration_sqls:
 |------|------|---------|
 | `base.html` | 398 | 全局布局、导航栏、Flash 提示、全局 JS/CSS 引入 |
 | `index.html` | 1079 | 礼金账本首页：列表/搜索/分页/统计/新增编辑模态框/NLP 录入/CSV 导入导出 |
-| `admin_webhooks.html` | 1527 | Webhook 管理：4-Tab 配置（事件开关/页面×事件矩阵/消息模板/监控范围）+ 推送日志 |
-| `admin_users.html` | 1359 | 用户管理：列表/权限配置模态框/AI+备份授权/凭证查看/重置密码+密保 |
-| `admin_backups.html` | 1249 | WebDAV 备份：配置/定时任务/云端备份列表/本地备份/附件恢复/授权管理 |
+| `admin_webhooks.html` | 2015 | Webhook 管理：通道配置与机器人/系统告警消息推送（双Tab）/操作授权/推送日志 |
+| `admin_users.html` | 1509 | 用户管理：列表/权限配置模态框/AI+备份+Webhook授权/凭证查看/重置密码+密保 |
+| `admin_backups.html` | 1253 | WebDAV 备份：配置/定时任务/云端备份列表/本地备份/附件恢复/定时调度 |
 | `banquet_detail.html` | 994 | 宴席明细：现场收礼/分页/搜索/批量操作/分享链接 |
 | `reminders.html` | 862 | 纪念日备忘：列表/搜索/批量推送模态框/多通道选择/定时调度 |
 | `banquets.html` | 648 | 宴席总览：卡片/表格双视图/搜索/批量删除 |
@@ -1806,27 +1806,27 @@ graph LR
 - **背景与现状偏差**：
   在 V10.11.8 引入「告警消息推送」时，开发人员误将其嵌入 templates/admin_backups.html（WebDAV 备份页面），后端接口门控挂载在 backups 权限下。但告警推送（天气预警、接口异常、完整性、任务失败）底层执行引擎为 webhook_utils.py，消息通道为企业微信/钉钉/飞书等 Webhook，业务认知与功能架构严重偏离。
 - **决策与实施结果（V10.11.15 落地闭环）**：
-  1. **页面层归位**：将 #alertPushCard 及关联脚本完全移出 dmin_backups.html，迁入 templates/admin_webhooks.html；采用 Bootstrap 5 导航胶囊 Tab 结构将页面划分为「通知渠道与机器人」与「系统告警消息推送」两大子面板，支持 URL 哈希锚点直达 (#tab-alerts)。
+  1. **页面层归位**：将 #alertPushCard 及关联脚本完全移出 admin_backups.html，迁入 templates/admin_webhooks.html；采用 Bootstrap 5 导航胶囊 Tab 结构将页面划分为「通知渠道与机器人」与「系统告警消息推送」两大子面板，支持 URL 哈希锚点直达 (#tab-alerts)。
   2. **权限与路由对齐**：
-outes_ext.py 中 menu_map 将 8 个告警相关 API 端点 (dmin_alerts_*) 从 'backups' 门控迁移为 'webhooks' 门控；
-outes_alert.py 的权限校验由备份授权判定重构成 can_access_webhooks()，同时支持超级管理员与 Webhook 通知授权用户。
-  3. **备份页面纯净化**：dmin_backups.html 移除全部告警推送代码，聚焦 WebDAV 自动/手动备份、加密归档、还原恢复与任务调度。
+routes_ext.py 中 menu_map 将 8 个告警相关 API 端点 (admin_alerts_*) 从 'backups' 门控迁移为 'webhooks' 门控；
+routes_alert.py 的权限校验由备份授权判定重构成 can_access_webhooks()，同时支持超级管理员与 Webhook 通知授权用户。
+  3. **备份页面纯净化**：admin_backups.html 移除全部告警推送代码，聚焦 WebDAV 自动/手动备份、加密归档、还原恢复与任务调度。
 
 ### 11.3 ADR-41：AI 助手 API 动态探活与模型拉取 Dual-Mode 容错机制
 - **背景与根因**：
   在 templates/admin_ai_config.html 中，用户在添加新的 AI 模型配置时，点击「获取可用模型列表」或「测试连接」，前端向 /api/ai/config/models 和 /api/ai/config/test 发起请求。原逻辑仅通过 config_index 从已保存的持久化配置列表中索引获取配置。当新增配置尚未保存入库时，config_index >= len(saved_configs)，导致后端抛出 400: 配置索引超出范围 错误，用户无法在保存前验证 API Key 及获取模型。
 - **决策方案**：
   1. **Dual-Mode 降级适配**：在 
-outes_ai.py 的 pi_ai_test_config 与 pi_ai_fetch_models 中增加双轨容错逻辑：若 config_index 越界或为新增草稿态，优先从请求体中提取即时填写的 pi_key、ase_url、model_name 等参数，动态构建临时 AIAssistant 实例进行测试与模型获取；
-  2. **前端参数完整闭环**：templates/admin_ai_config.html 的 fetchModels() 函数在发起请求时，除传入 config_index 外，同时带上当前输入框的 pi_key 与 ase_url，实现未入库草稿态下的无缝探活。
+routes_ai.py 的 api_ai_test_config 与 api_ai_fetch_models 中增加双轨容错逻辑：若 config_index 越界或为新增草稿态，优先从请求体中提取即时填写的 api_key、base_url、model_name 等参数，动态构建临时 AIAssistant 实例进行测试与模型获取；
+  2. **前端参数完整闭环**：templates/admin_ai_config.html 的 fetchModels() 函数在发起请求时，除传入 config_index 外，同时带上当前输入框的 api_key 与 base_url，实现未入库草稿态下的无缝探活。
 
 ### 11.4 ADR-42：统计业务 Service 层抽取、轻量投影优化与容器探针规范
 - **背景**：
   
-outes_ext.py 膨胀超 6000 行，数据看板 /api/dashboard/stats 与海报 /api/poster/data 中直接执行全表 query.all() 并在 Python 内存中循环计算，随着记账数据量增加，大量全量 ORM 实例导致请求响应变慢与内存浪费；同时缺少容器及负载均衡所需的标准探活端点。
+routes_ext.py 膨胀超 6000 行，数据看板 /api/dashboard/stats 与海报 /api/poster/data 中直接执行全表 query.all() 并在 Python 内存中循环计算，随着记账数据量增加，大量全量 ORM 实例导致请求响应变慢与内存浪费；同时缺少容器及负载均衡所需的标准探活端点。
 - **决策方案**：
   1. **Service 层业务抽离**：创建 dashboard_service.py，承载数据看板与分享长图海报的核心聚合与趋势计算，
-outes_ext.py 仅负责参数提取与 JSON 封装。
+routes_ext.py 仅负责参数提取与 JSON 封装。
   2. **轻量字段投影 (PF-03)**：采用 query.with_entities(amount, record_type, event_reason, name, created_at) 查询，仅提取纯标量数据，规避实体映射开销。
   3. **健康检查端点**：提供 GET /health，返回轻量 JSON 状态，满足自动化运维巡检。
 
@@ -1890,3 +1890,26 @@ outes_ext.py 仅负责参数提取与 JSON 封装。
 - **决策方案**：
   1. 严格补齐 templates/admin_backups.html 的闭合标签，并通过 Jinja2 编译检查与页面请求测试，恢复 200 OK；
   2. 修复 templates/dashboard.html 的 JavaScript 脚本闭包，保证 ECharts 实例正常挂载并响应数据渲染。
+
+### 11.10 ADR-48：Webhook 与系统告警全链路权限自洽、批量授权修复与日志性能治理（V10.11.18 落地）
+- **背景与根因**：
+  1. 权限模型与字段断裂：系统在 V10.11.15 重构 Webhook 与告警推送时，`routes_alert.py` 引用了 `webhook_authorized` 字段，但 `models.py` User 模型未定义该列；`admin_users.html` 单用户与批量区均未提供 `webhooks` 菜单勾选框，导致普通用户永远无法获得 `can_access_menu('webhooks')`，告警 API 全部被 `menu_map` 拦截，`AlertPushGrant` 操作授权完全无法生效；
+  2. 路由与前端割裂：Webhook 6 个写操作路由硬编码 `is_admin` 校验，与放开的页面 GET 形成「进得去、点不动（全 403）」的体验冲突；同时 `admin_webhooks.html` 在 HTML 属性中明文暴露所有通道的 Secret/Token；普通用户在侧边导航栏无任何 Webhook 入口；
+  3. 批量授权遗漏 Bug：`admin_batch_user_permissions` 路由完全漏存 `backup_authorized`，导致批量修改备份授权静默失效；且工单系统 `TICKET_MENU_OPTIONS` 缺少 `webhooks`，无权限跳转后陷入无法申请工单死循环；
+  4. 性能瓶颈：`WebhookLog` 全表缺少索引，分页和排序退化为全表扫描；日志列表未预加载 `operator` 导致 500 条日志渲染触发严重 N+1 查询风暴。
+- **决策方案与实施结果**：
+  1. **模型与字段完整闭环**：
+     - `models.py` 的 `User` 模型正式补充 `webhook_authorized = db.Column(db.Boolean, default=False)` 字段及 `can_use_webhook()` 方法；`app.py` 补充对应 `ALTER TABLE` 自动迁移；
+     - 同步 `models.py` 和 `app.py` 中的 `ALL_MENUS`（加入 `webhooks`），单用户与批量路由 `admin_update_user_permissions` 和 `admin_batch_user_permissions` 完整保存 `webhook_authorized`；
+     - 修复 `admin_batch_user_permissions` 漏存 `backup_authorized` 的缺陷，并在启动时幂等清洗存量普通用户 `allowed_menus` 中的废弃 `backups` 死数据。
+  2. **权限配置界面与工单系统对齐**：
+     - `templates/admin_users.html` 单用户区与批量区同步补充「Webhook通知」菜单及「Webhook 与告警功能授权」复选框，移除批量区过时的 WebDAV 备份菜单选项；
+     - `routes_ext.py` 的 `TICKET_MENU_OPTIONS` 增加 `('webhooks', 'Webhook通知')`，打通工单流；
+     - `templates/base.html` 导航栏为非管理员但具备 Webhook 权限的用户增加「Webhook通知」入口。
+  3. **路由门控解耦与凭证脱敏治理**：
+     - Webhook 写操作路由（新增/编辑/状态切换/删除/测试/删日志）门控统一重构为 `_can_manage()` 与细粒度授权判定，普通授权用户操作畅通无阻；
+     - `templates/admin_webhooks.html` 对普通用户输出的 `bot_secret` 与 `secret_token` 实施掩码脱敏（非超管输出 `******`）；后端编辑保存时识别掩码自动保留原凭证，消除敏感密钥外泄风险。
+  4. **数据库索引增强与 N+1 消除**：
+     - 为 `WebhookLog` 的 `created_at`、`event_type`、`is_success`、`webhook_id` 以及 `ScheduledTaskExecutionLog` 的 `end_time`、`status` 建立索引；
+     - 日志列表查询采用 `db.joinedload(WebhookLog.operator)` 预加载，彻底消除 N+1 查询；修复日志表空行 `colspan=9` 对齐。
+

@@ -129,6 +129,8 @@ class User(UserMixin, db.Model):
     ai_authorized = db.Column(db.Boolean, default=False)
     # 备份授权标记（管理员可授权普通用户使用备份功能）
     backup_authorized = db.Column(db.Boolean, default=False)
+    # Webhook与告警授权标记（管理员可授权普通用户使用Webhook通知与告警功能）
+    webhook_authorized = db.Column(db.Boolean, default=False)
     # 定时任务授权标记（管理员可授权普通用户使用定时任务功能）
     scheduled_task_authorized = db.Column(db.Boolean, default=False)
     menu_permissions = db.Column(db.Text, default='{}')  # 各菜单独立数据权限配置 JSON (如 {'ledger':0,'banquets':1,'backups':0})
@@ -147,7 +149,7 @@ class User(UserMixin, db.Model):
 
     def get_allowed_menus(self):
         if getattr(self, 'is_admin', False):
-            return ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'admin_users', 'admin_logs', 'admin_broadcasts', 'admin_webhooks', 'admin_backups']
+            return ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'admin_users', 'admin_logs', 'admin_broadcasts', 'admin_webhooks', 'admin_backups']
         raw = getattr(self, 'allowed_menus', '') or ''
         return [m.strip() for m in raw.split(',') if m.strip()]
 
@@ -165,7 +167,7 @@ class User(UserMixin, db.Model):
                 res = json.loads(raw)
             except Exception:
                 res = {}
-        ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather']
+        ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks']
         final_perms = {}
         for m in ALL_MENUS:
             val = res.get(m)
@@ -191,7 +193,7 @@ class User(UserMixin, db.Model):
     def set_menu_permissions(self, perms_dict):
         """设置各菜单独立数据权限配置"""
         clean_perms = {}
-        ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather']
+        ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks']
         for m in ALL_MENUS:
             val = perms_dict.get(m, 0) if isinstance(perms_dict, dict) else 0
             try:
@@ -371,6 +373,14 @@ class User(UserMixin, db.Model):
         if getattr(self, 'is_admin', False):
             return True
         return bool(getattr(self, 'scheduled_task_authorized', False))
+
+    def can_use_webhook(self):
+        """检查用户是否有权使用 Webhook 通知与告警功能"""
+        if getattr(self, 'is_admin', False):
+            return True
+        if bool(getattr(self, 'webhook_authorized', False)):
+            return True
+        return self.can_access_menu('webhooks') or self.can_access_menu('admin_webhooks')
 
     def can_view_others_backup(self):
         """检查用户是否可查看其他用户的备份数据（menu_permissions['backups'] >= 1）"""
@@ -1025,8 +1035,8 @@ class ScheduledTaskExecutionLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     task_id = db.Column(db.Integer, db.ForeignKey('scheduled_backup_tasks.id', ondelete='CASCADE'), nullable=False)
     start_time = db.Column(db.DateTime, nullable=True)
-    end_time = db.Column(db.DateTime, nullable=True)
-    status = db.Column(db.String(20), default='running')  # running / success / failed
+    end_time = db.Column(db.DateTime, nullable=True, index=True)
+    status = db.Column(db.String(20), default='running', index=True)  # running / success / failed
     output_log = db.Column(db.Text, nullable=True)  # 执行输出日志
     executed_by = db.Column(db.String(100), nullable=True)  # 执行人用户名（定时任务自动执行时为 'system'）
     created_at = db.Column(db.DateTime, default=datetime.now)
@@ -1073,13 +1083,13 @@ class WebhookLog(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     operator_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
-    webhook_id = db.Column(db.Integer, db.ForeignKey('webhook_configs.id', ondelete='CASCADE'), nullable=True)
-    event_type = db.Column(db.String(50), nullable=False)  # add, delete, test, reminder, broadcast
+    webhook_id = db.Column(db.Integer, db.ForeignKey('webhook_configs.id', ondelete='CASCADE'), nullable=True, index=True)
+    event_type = db.Column(db.String(50), nullable=False, index=True)  # add, delete, test, reminder, broadcast
     payload = db.Column(db.Text, nullable=True)
     status_code = db.Column(db.Integer, nullable=True)
     response_body = db.Column(db.Text, nullable=True)
-    is_success = db.Column(db.Boolean, default=False)
-    created_at = db.Column(db.DateTime, default=datetime.now)
+    is_success = db.Column(db.Boolean, default=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
     user = db.relationship('User', foreign_keys=[user_id], backref=db.backref('webhook_logs', lazy=True))
     operator = db.relationship('User', foreign_keys=[operator_id])
 

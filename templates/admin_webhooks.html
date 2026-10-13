@@ -130,9 +130,9 @@
                       data-connection-type="{{ w.connection_type or 'webhook_url' }}"
                       data-bot-platform="{{ w.bot_platform or 'wecom' }}"
                       data-bot-id="{{ w.bot_id or '' }}"
-                      data-bot-secret="{{ w.bot_secret or '' }}"
+                      data-bot-secret="{{ w.bot_secret if current_user.is_admin else ('******' if w.bot_secret else '') }}"
                       data-url="{{ w.webhook_url or '' }}"
-                      data-secret="{{ w.secret_token or '' }}"
+                      data-secret="{{ w.secret_token if current_user.is_admin else ('******' if w.secret_token else '') }}"
                data-notify-add="{{ 1 if w.notify_on_add else 0 }}"
                data-notify-delete="{{ 1 if w.notify_on_delete else 0 }}"
                data-notify-reminder="{{ 1 if w.notify_on_reminder else 0 }}"
@@ -326,7 +326,7 @@
           </tr>
           {% else %}
           <tr id="emptyLogsRow">
-            <td colspan="8" class="text-center py-4 text-muted">暂无推送日志记录</td>
+            <td colspan="9" class="text-center py-4 text-muted">暂无推送日志记录</td>
           </tr>
           {% endfor %}
           <tr id="noMatchLogsRow" style="display: none;">
