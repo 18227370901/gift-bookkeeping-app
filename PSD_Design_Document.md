@@ -1899,7 +1899,7 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   4. 性能瓶颈：`WebhookLog` 全表缺少索引，分页和排序退化为全表扫描；日志列表未预加载 `operator` 导致 500 条日志渲染触发严重 N+1 查询风暴。
 - **决策方案与实施结果**：
   1. **模型与字段完整闭环**：
-     - `models.py` 的 `User` 模型正式补充 `webhook_authorized = db.Column(db.Boolean, default=False)` 字段及 `can_use_webhook()` 方法；`app.py` 补充对应 `ALTER TABLE` 自动迁移；
+     - `models.py` 的 `User` 模型正式补充 `webhook_authorized = db.Column(db.Boolean, default=False)` 字段及 `can_use_webhook()` 方法；`app.py` 补充对应 `ALTER TABLE` 自动迁移，数据库结构版本推进至 `_SCHEMA_VERSION = 1020`，并在 `init_database` 启动入口增加原生字段前置防御性校验，彻底杜绝跳过迁移导致的列缺失 500 异常；
      - 同步 `models.py` 和 `app.py` 中的 `ALL_MENUS`（加入 `webhooks`），单用户与批量路由 `admin_update_user_permissions` 和 `admin_batch_user_permissions` 完整保存 `webhook_authorized`；
      - 修复 `admin_batch_user_permissions` 漏存 `backup_authorized` 的缺陷，并在启动时幂等清洗存量普通用户 `allowed_menus` 中的废弃 `backups` 死数据。
   2. **权限配置界面与工单系统对齐**：

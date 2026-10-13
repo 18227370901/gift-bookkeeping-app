@@ -670,7 +670,8 @@ def num2cn_filter(num):
 # V10.10.16: 数据库结构版本标记，用于幂等快速跳过迁移流程
 # V10.10.17: 支持 PostgreSQL（用 schema_version 表替代 PRAGMA user_version）
 # V10.11.8: 新增 alert_push_configs / alert_push_grants 两张告警推送表
-_SCHEMA_VERSION = 1019
+# V10.11.18: 新增 users.webhook_authorized 字段与相关索引
+_SCHEMA_VERSION = 1020
 
 def _is_db_schema_current():
     """检查数据库结构版本是否已标记为当前版本（SQLite 用 PRAGMA user_version，PG 用 schema_version 表）"""
@@ -826,6 +827,24 @@ def _do_startup_sync():
 
 def init_database():
     with app.app_context():
+        # V10.11.18: 启动前置防御性结构检查，保证 users.webhook_authorized 字段存在，防止 ORM 加载崩溃
+        try:
+            if db_url.startswith('sqlite:'):
+                _raw_db = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
+                if _raw_db and os.path.exists(_raw_db):
+                    import sqlite3 as _pre_sq
+                    with _pre_sq.connect(_raw_db) as _pre_cn:
+                        _cols = [r[1] for r in _pre_cn.execute("PRAGMA table_info(users)").fetchall()]
+                        if _cols and 'webhook_authorized' not in _cols:
+                            _pre_cn.execute("ALTER TABLE users ADD COLUMN webhook_authorized BOOLEAN DEFAULT 0")
+                            _pre_cn.commit()
+            elif db_url.startswith('postgresql:'):
+                with db.engine.connect() as _pre_pg:
+                    _pre_pg.execute(db.text("ALTER TABLE users ADD COLUMN IF NOT EXISTS webhook_authorized BOOLEAN DEFAULT FALSE"))
+                    _pre_pg.commit()
+        except Exception as _pre_err:
+            print(f"[Init] 前置字段防御检查跳过: {_pre_err}")
+
         # V10.10.16: 幂等快速跳过——已标记最新版本的库跳过完整迁移流程
         if _is_db_schema_current():
             print(f"[Init] 数据库结构已最新 (v{_SCHEMA_VERSION})，跳过迁移流程")
