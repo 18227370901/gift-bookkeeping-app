@@ -10,7 +10,7 @@
   - GET  /admin/alerts/run         手动触发一轮巡检（需 can_edit 权限，便于验证）
   - GET/POST /admin/alerts/grants  操作授权管理（仅超级管理员）
 权限联调规则：
-  - 页面入口受 /admin/backups 既有门控（is_admin 或备份授权用户）；
+  - 页面入口受 /admin/webhooks 门控（is_admin 或 Webhook 授权用户）；
     本模块全部接口再做操作级实时校验，权限被回收后下一次操作即 403（前端提示并跳转）
 遵循项目现有路由组织方式：register_alert_routes(app) 由 app.py 调用注册。
 """
@@ -42,9 +42,14 @@ def register_alert_routes(app):
     @login_required
     def admin_alerts_config():
         """告警配置 + 权限快照：前端依据权限渲染可编辑/置灰/隐藏三态"""
-        if not (getattr(current_user, 'is_admin', False) or
-                getattr(current_user, 'backup_authorized', False)):
-            return _alert_api_deny('权限不足：无备份管理访问权限')
+        def can_access_webhooks():
+            return getattr(current_user, 'is_admin', False) or (
+                hasattr(current_user, 'can_access_menu') and (
+                    current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks')
+                )
+            ) or getattr(current_user, 'webhook_authorized', False)
+        if not can_access_webhooks():
+            return _alert_api_deny('权限不足：无 Webhook 通知访问权限')
         # 区块可见性：超级管理员或存在任意告警授权的用户可见完整区块
         visible = has_alert_permission(current_user, 'view')
         return jsonify({
@@ -213,6 +218,11 @@ def register_alert_routes(app):
                 'id': u.id,
                 'username': u.username,
                 'is_admin': bool(u.is_admin),
+                'webhook_authorized': bool(
+                    getattr(u, 'is_admin', False) or
+                    getattr(u, 'webhook_authorized', False) or
+                    (hasattr(u, 'can_access_menu') and (u.can_access_menu('webhooks') or u.can_access_menu('admin_webhooks')))
+                ),
                 'backup_authorized': bool(getattr(u, 'backup_authorized', False)),
                 'can_edit': bool(u.is_admin) or bool(g and g.can_edit),
                 'can_test': bool(u.is_admin) or bool(g and g.can_test),

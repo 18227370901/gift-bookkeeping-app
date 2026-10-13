@@ -128,16 +128,19 @@
         /* 拖动中：禁止选中文本 + 全局列宽光标 */
         body.colw-resizing { user-select: none !important; -webkit-user-select: none !important; }
         body.colw-resizing * { cursor: col-resize !important; }
-        /* fixed 布局下单元格单行截断（超宽列出横向滚动，不撑开） */
-        table.colw-fixed td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        /* 重置按钮：容器右上角悬浮小按钮 */
-        .colw-wrap { position: relative; }
-        .colw-reset-btn {
-            position: absolute; top: 4px; right: 10px; z-index: 20;
-            opacity: 0.5; font-size: 0.72rem; padding: 1px 8px; border-radius: 6px;
-            transition: opacity 0.15s ease;
+        /* fixed 布局下单元格单行截断（超宽列出横向滚动，不撑开；操作列保持自适应不截断按钮） */
+        table.colw-fixed td:not([data-col="actions"]):not(:last-child) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        table.colw-fixed td[data-col="actions"], table.colw-fixed td:last-child { white-space: nowrap !important; overflow: visible !important; }
+        .table-responsive {
+            position: relative;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
         }
-        .colw-reset-btn:hover { opacity: 1; }
+        /* 重置按钮：优雅融入标题栏或工具栏，消除与操作列表头的任何覆盖重叠 */
+        .colw-reset-btn {
+            font-size: 0.75rem; padding: 2px 10px; border-radius: 6px;
+            transition: all 0.15s ease;
+        }
         /* 移动端降级：不显示分隔条与重置按钮（JS 同步禁用拖拽） */
         @media (max-width: 767.98px) {
             table[data-resizable] .colw-resizer, .colw-reset-btn { display: none !important; }

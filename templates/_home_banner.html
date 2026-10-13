@@ -1,29 +1,88 @@
-{# V10.11.12 首页背景横幅（时间/农历/节气节日班休/天气）
-   被 index.html 与 permission_tickets.html（无账本权限用户的登录落点页）引入。
-   天气城市三层分流见 /api/home/weather；本文件为自包含块（HTML+CSS+JS）。 #}
-<!-- ==================== V10.11.12 首页背景横幅：时间/农历/节气节日班休/天气 ==================== -->
-<!-- 所有登录用户可见（含无账本权限用户）；天气城市三层分流见 /api/home/weather -->
+{# V10.11.16 首页背景横幅（时间/农历/黄历宜忌/本月往来/天气）
+   被 index.html 与 permission_tickets.html 引入。
+   三栏式高雅布局，解决卡片中间留白，融合传统黄历与人情账本核心数据。 #}
+<!-- ==================== 首页背景横幅 ==================== -->
 <div class="hb-banner mb-4" id="homeBanner">
     <div class="hb-deco hb-deco-1"></div>
     <div class="hb-deco hb-deco-2"></div>
     <div class="row g-3 align-items-center position-relative">
-        <div class="col-md-7">
+        <!-- 左栏：时钟、公历、农历与节日班休 -->
+        <div class="col-lg-4 col-md-5">
             <div class="hb-greet mb-1"><i class="fa-solid fa-sun me-2"></i><span id="hbGreet">你好</span>，{{ current_user.username }}</div>
             <div class="hb-clock" id="hbClock">--:--:--</div>
             <div class="hb-date mt-1" id="hbDate">--</div>
             <div class="hb-lunar" id="hbLunar">--</div>
-            <div class="hb-badges mt-1" id="hbBadges"></div>
+            <div class="hb-badges mt-2" id="hbBadges"></div>
         </div>
-        <div class="col-md-5">
+
+        <!-- 中栏：高雅微晶卡片（黄历宜忌 + 本月往来微看板 + 快捷直达） -->
+        <div class="col-lg-5 col-md-7">
+            <div class="hb-mid-card">
+                <!-- 黄历与宜忌条 -->
+                <div class="d-flex align-items-center justify-content-between mb-2 pb-1 border-bottom border-light border-opacity-25">
+                    <div class="hb-mid-title"><i class="fa-solid fa-compass me-1 text-warning"></i><strong>今日黄历</strong></div>
+                    <span class="hb-fortune-tag" id="hbFortuneTag">--</span>
+                </div>
+                <div class="hb-yi-ji-box mb-2">
+                    <div class="hb-yi-line mb-1">
+                        <span class="hb-yi-badge">宜</span>
+                        <span class="hb-yi-text" id="hbYiText">--</span>
+                    </div>
+                    <div class="hb-ji-line">
+                        <span class="hb-ji-badge">忌</span>
+                        <span class="hb-ji-text" id="hbJiText">--</span>
+                    </div>
+                </div>
+
+                <!-- 本月人情收支看板 -->
+                <div class="hb-ledger-stats mb-2" id="hbLedgerStats">
+                    <div class="d-flex justify-content-between align-items-center small opacity-90 mb-1">
+                        <span><i class="fa-solid fa-receipt me-1 opacity-75"></i>本月人情往来</span>
+                        <span class="opacity-75" id="hbStatCount">-- 笔</span>
+                    </div>
+                    <div class="row g-1 text-center hb-stat-row">
+                        <div class="col-4">
+                            <div class="hb-stat-box">
+                                <div class="hb-stat-label">收礼</div>
+                                <div class="hb-stat-val text-warning" id="hbStatRec">--</div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="hb-stat-box">
+                                <div class="hb-stat-label">送礼</div>
+                                <div class="hb-stat-val" id="hbStatSent">--</div>
+                            </div>
+                        </div>
+                        <div class="col-4">
+                            <div class="hb-stat-box">
+                                <div class="hb-stat-label">净结余</div>
+                                <div class="hb-stat-val" id="hbStatNet">--</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 快捷功能直达 -->
+                <div class="hb-quick-actions d-flex flex-wrap gap-2">
+                    <button type="button" class="hb-action-chip" id="hbBtnAddRecord"><i class="fa-solid fa-pen-to-square me-1"></i>记一笔</button>
+                    <a href="/banquets" class="hb-action-chip"><i class="fa-solid fa-wine-glass me-1"></i>办宴席</a>
+                    <a href="/dashboard" class="hb-action-chip"><i class="fa-solid fa-chart-pie me-1"></i>看分析</a>
+                    <a href="/weather" class="hb-action-chip"><i class="fa-solid fa-calendar-days me-1"></i>万年历</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右栏：天气实况 -->
+        <div class="col-lg-3 col-md-12">
             <div class="hb-weather" id="hbWeatherBox">
-                <i class="fa-solid fa-cloud-showers-heavy fa-2x me-3 opacity-50"></i><span class="hb-weather-loading">天气加载中…</span>
+                <i class="fa-solid fa-cloud-sun fa-2x me-2 opacity-50"></i><span class="hb-weather-loading">天气加载中…</span>
             </div>
         </div>
     </div>
 </div>
 
 <style>
-/* V10.11.12 首页背景横幅：红金渐变主视觉（白天/黑夜双主题，纯 CSS 零图片资源） */
+/* 首页背景横幅：红金渐变主视觉（白天/黑夜双主题，自包含纯 CSS 零图片） */
 .hb-banner {
     position: relative; overflow: hidden; border-radius: 1rem;
     padding: 1.5rem 1.75rem; color: #fff;
@@ -34,55 +93,110 @@
     background: linear-gradient(135deg, #4a0f0f 0%, #7f1d1d 52%, #9a3412 100%);
     box-shadow: 0 0.5rem 1.25rem rgba(0, 0, 0, 0.45);
 }
-/* 装饰光斑（营造背景图层次，不干扰内容） */
 .hb-deco { position: absolute; border-radius: 50%; pointer-events: none; }
-.hb-deco-1 { width: 300px; height: 300px; right: -80px; top: -120px; background: radial-gradient(circle, rgba(255, 255, 255, 0.16) 0%, transparent 70%); }
-.hb-deco-2 { width: 220px; height: 220px; left: -70px; bottom: -110px; background: radial-gradient(circle, rgba(255, 224, 130, 0.14) 0%, transparent 70%); }
+.hb-deco-1 { width: 320px; height: 320px; right: -90px; top: -130px; background: radial-gradient(circle, rgba(255, 255, 255, 0.16) 0%, transparent 70%); }
+.hb-deco-2 { width: 240px; height: 240px; left: -80px; bottom: -120px; background: radial-gradient(circle, rgba(255, 224, 130, 0.14) 0%, transparent 70%); }
 .hb-greet { font-size: 0.95rem; opacity: 0.92; }
 .hb-clock {
-    font-size: 2.6rem; font-weight: 700; line-height: 1.15; letter-spacing: 2px;
-    font-variant-numeric: tabular-nums; /* 等宽数字：走秒不抖动布局 */
+    font-size: 2.5rem; font-weight: 700; line-height: 1.15; letter-spacing: 2px;
+    font-variant-numeric: tabular-nums;
     text-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
 }
-.hb-date { font-size: 1rem; opacity: 0.95; }
-.hb-lunar { font-size: 0.9rem; opacity: 0.88; }
-/* 节气/节日/班休徽章（配色对齐天气页万年历今日大卡） */
+.hb-date { font-size: 0.98rem; opacity: 0.95; }
+.hb-lunar { font-size: 0.88rem; opacity: 0.88; }
 .hb-badges { display: flex; flex-wrap: wrap; gap: 6px; }
 .hb-badge { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 0.75rem; line-height: 1.5; }
 .hb-badge.term { background: rgba(25, 135, 84, 0.92); }
 .hb-badge.festival { background: #a61e4d; }
 .hb-badge.rest { background: #e03131; }
 .hb-badge.work { background: #6c757d; }
-/* 右侧天气块 */
+
+/* 中栏微晶玻璃卡片 */
+.hb-mid-card {
+    background: rgba(255, 255, 255, 0.12);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    border-radius: 0.85rem;
+    padding: 0.85rem 1.1rem;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+}
+[data-bs-theme="dark"] .hb-mid-card {
+    background: rgba(0, 0, 0, 0.22);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+.hb-mid-title { font-size: 0.88rem; }
+.hb-fortune-tag {
+    font-size: 0.75rem; padding: 1px 8px; border-radius: 999px;
+    background: rgba(255, 215, 0, 0.22); border: 1px solid rgba(255, 215, 0, 0.45);
+    color: #fff9c4; font-weight: 500;
+}
+.hb-yi-ji-box { font-size: 0.82rem; }
+.hb-yi-line, .hb-ji-line { display: flex; align-items: baseline; gap: 6px; }
+.hb-yi-badge {
+    background: #2e7d32; color: #fff; padding: 1px 6px;
+    border-radius: 4px; font-size: 0.72rem; font-weight: 700; flex-shrink: 0;
+}
+.hb-ji-badge {
+    background: #c62828; color: #fff; padding: 1px 6px;
+    border-radius: 4px; font-size: 0.72rem; font-weight: 700; flex-shrink: 0;
+}
+.hb-yi-text { opacity: 0.95; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hb-ji-text { opacity: 0.88; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 本月人情微统计条 */
+.hb-stat-box {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 6px; padding: 3px 6px;
+}
+.hb-stat-label { font-size: 0.72rem; opacity: 0.8; }
+.hb-stat-val { font-size: 0.88rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* 快捷按钮 */
+.hb-action-chip {
+    display: inline-flex; align-items: center; text-decoration: none;
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #fff; font-size: 0.78rem; padding: 3px 10px; border-radius: 999px;
+    cursor: pointer; transition: all 0.2s ease;
+}
+.hb-action-chip:hover {
+    background: rgba(255, 255, 255, 0.3); color: #fff;
+    transform: translateY(-1px);
+}
+
+/* 右栏天气 */
 .hb-weather { text-align: right; }
 .hb-weather-loading { font-size: 0.9rem; opacity: 0.85; }
 .hb-city { font-size: 0.9rem; opacity: 0.92; }
 .hb-src-badge { font-size: 0.7rem; padding: 1px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.22); margin-left: 6px; }
 .hb-temp-line { display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; margin-top: 2px; }
-.hb-temp { font-size: 2.6rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.22); }
+.hb-temp { font-size: 2.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.22); }
 .hb-temp-unit { font-size: 1.1rem; opacity: 0.9; }
 .hb-desc { font-size: 1rem; opacity: 0.95; }
 .hb-minmax { font-size: 0.85rem; opacity: 0.88; margin-top: 2px; }
-/* 移动端堆叠（对齐万年历移动端断点 767.98px） */
+
+/* 响应式 */
+@media (max-width: 991.98px) {
+    .hb-weather { text-align: left; margin-top: 0.5rem; }
+    .hb-temp-line { justify-content: flex-start; }
+}
 @media (max-width: 767.98px) {
     .hb-banner { padding: 1.15rem 1.15rem; }
     .hb-clock { font-size: 2rem; }
     .hb-temp { font-size: 2rem; }
-    .hb-weather { text-align: left; margin-top: 4px; }
-    .hb-temp-line { justify-content: flex-start; }
 }
 </style>
 
 <script src="{{ url_for('static', filename='js/lunar_utils.js') }}"></script>
 <script>
-/* ==================== V10.11.12 首页横幅逻辑：走秒时钟 + 农历 + 天气 ==================== */
 (function () {
     'use strict';
     var el = function (id) { return document.getElementById(id); };
     var pad2 = function (n) { return (n < 10 ? '0' : '') + n; };
     var WEEK_CN = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
 
-    // ---- 问候语 + 图标（按时段） ----
+    // ---- 问候语 + 图标 ----
     var greet = '你好', icon = 'fa-sun';
     var h = new Date().getHours();
     if (h < 5) { greet = '夜深了'; icon = 'fa-moon-stars'; }
@@ -95,7 +209,7 @@
     el('hbGreet').textContent = greet;
     el('hbGreet').parentElement.querySelector('i').className = 'fa-solid ' + icon + ' me-2';
 
-    // ---- 农历全称 + 节气/节日（本地 LunarUtils，零请求；失败降级公历） ----
+    // ---- 时钟走秒 ----
     var now = new Date();
     var y = now.getFullYear(), mo = now.getMonth() + 1, day = now.getDate();
     var F = (typeof LunarUtils !== 'undefined') ? LunarUtils.getFullInfo(y, mo, day) : null;
@@ -109,33 +223,73 @@
     tick();
     setInterval(tick, 1000);
 
+    // ---- 农历、节气与黄历宜忌 ----
     if (F) {
         el('hbLunar').textContent = F.lunarFull;
         var badges = '';
         if (F.term) { badges += '<span class="hb-badge term" title="节气">' + F.term + '</span>'; }
         (F.festivals || []).forEach(function (f) { badges += '<span class="hb-badge festival" title="节日">' + f + '</span>'; });
         el('hbBadges').innerHTML = badges;
+
+        if (F.fortune) {
+            el('hbFortuneTag').textContent = F.fortune.name + ' · ' + F.fortune.tag;
+            el('hbYiText').textContent = F.fortune.yi || '诸事皆宜';
+            el('hbJiText').textContent = F.fortune.ji || '诸事不忌';
+        }
     } else {
         el('hbLunar').textContent = '';
+        el('hbFortuneTag').textContent = '吉日';
+        el('hbYiText').textContent = '诸事皆宜';
+        el('hbJiText').textContent = '诸事不忌';
     }
 
-    // ---- 天气块（/api/home/weather：服务端三层分流 + 30 分钟缓存） ----
-    // 仅当本用户天气页记忆为「城市名自由输入」模式时上报 city（级联用户按需求回退管理员城市）
-    var uid = (document.body.dataset && document.body.dataset.userId) ? String(document.body.dataset.userId) : '0';
-    var myCity = '';
-    try {
-        if (localStorage.getItem('gift_weather_' + uid + '_mode') === 'text') {
-            myCity = (localStorage.getItem('gift_weather_' + uid + '_city') || '').trim();
-        }
-    } catch (e) { /* localStorage 不可用时走管理员城市 */ }
+    // ---- 快捷记一笔按钮联动 ----
+    var addBtn = el('hbBtnAddRecord');
+    if (addBtn) {
+        addBtn.addEventListener('click', function () {
+            var modalEl = document.getElementById('addRecordModal');
+            if (modalEl && typeof bootstrap !== 'undefined') {
+                var modal = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+                modal.show();
+            } else {
+                window.location.href = '/#addRecordModal';
+            }
+        });
+    }
 
-    var SRC_TEXT = { user: '我的城市', admin: '管理员城市', default: '默认' };
-    fetch('/api/home/weather' + (myCity ? ('?city=' + encodeURIComponent(myCity)) : ''), { credentials: 'same-origin' })
+    // ---- 天气与人情账本统计 (/api/home/weather) ----
+    var uid = (document.body.dataset && document.body.dataset.userId) ? String(document.body.dataset.userId) : '0';
+    var qParams = [];
+    try {
+        var lastMode = localStorage.getItem('gift_weather_' + uid + '_last_query_mode');
+        if (lastMode === 'coords') {
+            var lat = localStorage.getItem('gift_weather_' + uid + '_last_query_lat');
+            var lon = localStorage.getItem('gift_weather_' + uid + '_last_query_lon');
+            var label = localStorage.getItem('gift_weather_' + uid + '_last_query_label');
+            if (lat && lon) {
+                qParams.push('lat=' + encodeURIComponent(lat));
+                qParams.push('lon=' + encodeURIComponent(lon));
+                if (label) qParams.push('label=' + encodeURIComponent(label));
+            }
+        } else if (lastMode === 'city') {
+            var c = localStorage.getItem('gift_weather_' + uid + '_last_query_city');
+            if (c) qParams.push('city=' + encodeURIComponent(c));
+        } else {
+            if (localStorage.getItem('gift_weather_' + uid + '_mode') === 'text') {
+                var legacyCity = (localStorage.getItem('gift_weather_' + uid + '_city') || '').trim();
+                if (legacyCity) qParams.push('city=' + encodeURIComponent(legacyCity));
+            }
+        }
+    } catch (e) { }
+
+    var qStr = qParams.length ? ('?' + qParams.join('&')) : '';
+    fetch('/api/home/weather' + qStr, { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (j) {
             var data = (j && j.code === 200) ? j.data : null;
             if (!data) { hideWeather(); return; }
-            // 班/休徽章（服务端读取，无权限问题）
+
+            // 班/休徽章
             if (data.badge) {
                 var b = data.badge;
                 el('hbBadges').insertAdjacentHTML('beforeend',
@@ -143,9 +297,27 @@
                     (b.holiday ? '今日休息日：' : '今日调休补班：') + (b.name || '') + '">' +
                     (b.holiday ? '休' : '班') + '</span>');
             }
+
+            // 本月人情往来统计渲染
+            if (data.ledger) {
+                var l = data.ledger;
+                el('hbStatRec').textContent = '¥' + Number(l.received || 0).toLocaleString('zh-CN', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+                el('hbStatSent').textContent = '¥' + Number(l.sent || 0).toLocaleString('zh-CN', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+                var netVal = Number(l.net || 0);
+                el('hbStatNet').textContent = (netVal >= 0 ? '+' : '') + '¥' + netVal.toLocaleString('zh-CN', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+                el('hbStatNet').className = 'hb-stat-val ' + (netVal >= 0 ? 'text-success' : 'text-danger');
+                el('hbStatCount').textContent = '共 ' + (l.count || 0) + ' 笔往来';
+            } else {
+                var statBox = el('hbLedgerStats');
+                if (statBox) statBox.style.display = 'none';
+            }
+
+            // 天气渲染
             if (!data.weather) { hideWeather(); return; }
             var w = data.weather;
-            var srcBadge = (data.source && SRC_TEXT[data.source]) ? '<span class="hb-src-badge" title="城市来源">' + SRC_TEXT[data.source] + '</span>' : '';
+            var isPreset = !data.has_weather_permission || data.is_admin_preset;
+            var srcBadgeText = isPreset ? '管理员预设' : (data.source === 'user' ? '我的地点' : '管理员预设');
+            var srcBadge = '<span class="hb-src-badge" title="地点来源">' + srcBadgeText + '</span>';
             var iconHtml = w.icon ? '<i class="fa-solid ' + w.icon + ' me-2"></i>' : '';
             var tempText = (w.temp === null || w.temp === undefined) ? '--' : Math.round(w.temp);
             var minmax = '';
@@ -155,10 +327,19 @@
                     minmax += ' · 明 ' + Math.round(w.tomorrow_max) + '°/' + Math.round(w.tomorrow_min) + '°';
                 }
             }
+
+            var extraAction = '';
+            if (isPreset) {
+                extraAction = '<div class="mt-1 small opacity-75" title="管理员预设"><i class="fa-solid fa-circle-info me-1"></i>这是管理员预设的地址</div>';
+            } else {
+                extraAction = '<div class="mt-1"><a href="/weather" class="text-white text-opacity-75 small text-decoration-none"><i class="fa-solid fa-angle-right me-1"></i>查看15天预报</a></div>';
+            }
+
             el('hbWeatherBox').innerHTML =
                 '<div class="hb-city"><i class="fa-solid fa-location-dot me-1"></i>' + data.city + srcBadge + '</div>' +
                 '<div class="hb-temp-line"><span class="hb-temp">' + tempText + '</span><span class="hb-temp-unit">°C</span><span class="hb-desc">' + iconHtml + (w.desc || '') + '</span></div>' +
-                (minmax ? '<div class="hb-minmax">' + minmax + '</div>' : '');
+                (minmax ? '<div class="hb-minmax">' + minmax + '</div>' : '') +
+                extraAction;
         })
         .catch(function () { hideWeather(); });
 
@@ -167,4 +348,4 @@
     }
 })();
 </script>
-<!-- ==================== /V10.11.12 首页背景横幅 ==================== -->
+<!-- ==================== /首页背景横幅 ==================== -->

@@ -73,6 +73,7 @@
         // 3) 切换 fixed 布局 + 单行截断样式（CSS 配合）
         table.style.tableLayout = 'fixed';
         table.classList.add('colw-fixed');
+        syncTableWidth(table);
 
         // 4) 注入分隔条与重置按钮
         ths.forEach(function (th) { attachResizer(table, th); });
@@ -80,6 +81,23 @@
 
         // 5) 截断单元格补 title 提示（hover 看全文）
         refreshCellTitles(table);
+    }
+
+    function syncTableWidth(table) {
+        if (!table) return;
+        var headRow = table.querySelector('thead tr');
+        if (!headRow) return;
+        var ths = headRow.querySelectorAll('th[data-col]');
+        var total = 0;
+        ths.forEach(function (th) {
+            var w = parseFloat(th.style.width) || th.getBoundingClientRect().width;
+            total += w;
+        });
+        var wrap = table.closest('.table-responsive') || table.parentElement;
+        var wrapW = wrap ? wrap.clientWidth : 0;
+        var targetW = Math.max(total, wrapW);
+        table.style.width = targetW + 'px';
+        table.style.minWidth = targetW + 'px';
     }
 
     function applyStored(table, ths) {
@@ -91,6 +109,7 @@
             var w = (saved && saved[col]) ? saved[col] : (table.__colwDefaults ? table.__colwDefaults[col] : th.getBoundingClientRect().width);
             th.style.width = clampCol(th, w) + 'px';
         });
+        syncTableWidth(table);
     }
 
     function colMin(th) {
@@ -127,12 +146,14 @@
             function onMove(ev) {
                 var w = clampCol(th, startW + (ev.clientX - startX));
                 th.style.width = w + 'px';
+                syncTableWidth(table);
             }
             function onUp() {
                 bar.removeEventListener('pointermove', onMove);
                 bar.removeEventListener('pointerup', onUp);
                 bar.removeEventListener('pointercancel', onUp);
                 document.body.classList.remove('colw-resizing');
+                syncTableWidth(table);
                 saveWidths(table);
                 refreshCellTitles(table);
             }
@@ -147,6 +168,7 @@
             e.stopPropagation();
             var w = measureContentWidth(table, th);
             th.style.width = clampCol(th, w) + 'px';
+            syncTableWidth(table);
             saveWidths(table);
             refreshCellTitles(table);
         });
@@ -211,13 +233,20 @@
         } catch (e) { /* 存储满等异常静默，不影响功能 */ }
     }
 
-    // 容器右上角注入「重置列宽」按钮
+    // 注入「重置列宽」按钮（优雅置于卡片标题栏右侧或独立工具条，绝不遮挡操作列表头）
     function injectResetBtn(table) {
+        var card = table.closest('.card');
+        var cardHeader = card ? card.querySelector('.card-header') : null;
         var wrap = table.closest('.table-responsive') || table.parentElement;
-        if (!wrap || wrap.querySelector('.colw-reset-btn')) return;
+        if (!wrap) return;
+
+        var tid = table.__colwId || 'default';
+        if (document.querySelector('.colw-reset-btn[data-table="' + tid + '"]')) return;
+
         var btn = document.createElement('button');
         btn.type = 'button';
-        btn.className = 'btn btn-outline-secondary btn-sm colw-reset-btn';
+        btn.className = 'btn btn-outline-secondary btn-sm colw-reset-btn ms-2';
+        btn.setAttribute('data-table', tid);
         btn.innerHTML = '<i class="fa-solid fa-rotate-left me-1"></i>重置列宽';
         btn.title = '清除已保存的列宽，恢复默认布局';
         btn.addEventListener('click', function () {
@@ -229,10 +258,23 @@
                     th.style.width = clampCol(th, table.__colwDefaults[col]) + 'px';
                 });
             }
+            syncTableWidth(table);
             refreshCellTitles(table);
         });
-        wrap.classList.add('colw-wrap');
-        wrap.appendChild(btn);
+
+        if (cardHeader) {
+            var targetBox = cardHeader.querySelector('.colw-header-actions') || cardHeader.querySelector('.d-flex.gap-2');
+            if (targetBox) {
+                targetBox.appendChild(btn);
+            } else {
+                cardHeader.appendChild(btn);
+            }
+        } else {
+            var bar = document.createElement('div');
+            bar.className = 'd-flex justify-content-end p-1 colw-bar mb-1';
+            bar.appendChild(btn);
+            wrap.parentNode.insertBefore(bar, wrap);
+        }
     }
 
     // ===== 降级清理（移动端）=====
@@ -240,13 +282,16 @@
         if (!table) return;
         table.__colwInit = false;
         table.style.removeProperty('table-layout');
+        table.style.removeProperty('width');
+        table.style.removeProperty('min-width');
         table.classList.remove('colw-fixed');
         table.querySelectorAll('.colw-resizer').forEach(function (b) { b.remove(); });
+        var tid = table.__colwId || 'default';
+        var existingBtn = document.querySelector('.colw-reset-btn[data-table="' + tid + '"]');
+        if (existingBtn) existingBtn.remove();
         var wrap = table.closest('.table-responsive') || table.parentElement;
         if (wrap) {
             wrap.classList.remove('colw-wrap');
-            var btn = wrap.querySelector('.colw-reset-btn');
-            if (btn) btn.remove();
         }
         var headRow = table.querySelector('thead tr');
         if (headRow) {

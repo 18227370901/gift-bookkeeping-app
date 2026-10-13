@@ -98,7 +98,8 @@ _PG_ALL_TABLES = [
     'shared_ledger_links', 'backup_configs', 'banquets',
     'anniversary_reminders', 'chat_sessions', 'chat_messages',
     'ai_query_logs', 'scheduled_backup_tasks', 'backup_attachments',
-    'permission_tickets', 'scheduled_task_execution_logs'
+    'permission_tickets', 'scheduled_task_execution_logs',
+    'family_groups', 'family_members', 'alert_push_configs', 'alert_push_grants'
 ]
 _PG_USER_TABLES = ['gift_records', 'banquets', 'anniversary_reminders']
 _PG_GLOBAL_TABLES = [t for t in _PG_ALL_TABLES if t not in _PG_USER_TABLES]
@@ -244,6 +245,7 @@ def build_user_scoped_backup_db(db_path, user):
             'registration_tokens', 'broadcasts', 'broadcast_reads',
             'shared_ledger_links', 'backup_attachments', 'permission_tickets',
             'chat_sessions', 'chat_messages', 'ai_query_logs',
+            'family_groups', 'family_members', 'alert_push_configs', 'alert_push_grants',
         ]
         for tbl in _global_tables:
             try:
@@ -965,14 +967,14 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             # V10.11.10 万年历班/休接口：与天气查询同挂 weather 菜单门控
             'api_holiday_year': 'weather',
             # V10.11.8 告警推送接口：挂 backups 菜单门控（无 WebDAV 备份菜单权限的用户直访这些 URL 会被拦截）
-            'admin_alerts_config': 'backups',
-            'admin_alerts_config_save': 'backups',
-            'admin_alerts_test': 'backups',
-            'admin_alerts_run': 'backups',
-            'admin_alerts_logs': 'backups',
-            'admin_alerts_logs_csv': 'backups',
-            'admin_alerts_grants': 'backups',
-            'admin_alerts_grants_save': 'backups',
+            'admin_alerts_config': 'webhooks',
+            'admin_alerts_config_save': 'webhooks',
+            'admin_alerts_test': 'webhooks',
+            'admin_alerts_run': 'webhooks',
+            'admin_alerts_logs': 'webhooks',
+            'admin_alerts_logs_csv': 'webhooks',
+            'admin_alerts_grants': 'webhooks',
+            'admin_alerts_grants_save': 'webhooks',
         }
         required_menu = menu_map.get(endpoint)
         if required_menu and hasattr(current_user, 'can_access_menu'):
@@ -985,7 +987,10 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     'ledger': '礼金账本',
                     'dashboard': '数据分析',
                     'family': '家庭记账',
-                    'weather': '天气'
+                    'weather': '天气',
+                    'webhooks': 'Webhook通知',
+                    'admin_webhooks': 'Webhook通知',
+                    'backups': 'WebDAV备份'
                 }
                 m_name = menu_names.get(required_menu, '该功能')
                 if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -3357,7 +3362,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_webhooks():
         """管理员 Webhook 与长连接机器人配置及推送日志"""
-        if not current_user.is_admin:
+        if not current_user.is_admin and not (hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))):
             flash('权限不足', 'danger')
             return redirect(url_for('index'))
 
@@ -5572,116 +5577,17 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @app.route('/api/dashboard/stats')
     @login_required
     def api_dashboard_stats():
-        """数据分析看板 API — 返回汇总/月度/年度/事由分布/TOP10 数据，支持日期范围筛选"""
+        """数据分析看板 API — 返回汇总/月度/年度/事由分布/TOP10 数据，支持日期范围筛选 (P2-1 / P2-5 优化)"""
         try:
-            # 获取当前用户可访问的记录
-            if current_user.is_admin or current_user.can_view_others_for('ledger'):
-                query = GiftRecord.query.filter(GiftRecord.deleted_at.is_(None))
-            else:
-                query = GiftRecord.query.filter(GiftRecord.deleted_at.is_(None), GiftRecord.user_id == current_user.id)
-
-            # V10.11.1 日期范围筛选参数
-            start_month = request.args.get('start_month', '').strip()
-            end_month = request.args.get('end_month', '').strip()
-            start_year = request.args.get('start_year', '').strip()
-            end_year = request.args.get('end_year', '').strip()
-
-            # 根据月度范围筛选
-            if start_month and end_month:
-                try:
-                    start_date = datetime.strptime(start_month + '-01', '%Y-%m-%d')
-                    end_date = datetime.strptime(end_month + '-01', '%Y-%m-%d')
-                    # end_month 取当月最后一天
-                    if end_date.month == 12:
-                        end_date = end_date.replace(day=31)
-                    else:
-                        end_date = end_date.replace(month=end_date.month + 1, day=1) - timedelta(days=1)
-                    query = query.filter(GiftRecord.created_at >= start_date, GiftRecord.created_at <= end_date)
-                except Exception:
-                    pass
-            elif start_year and end_year:
-                try:
-                    start_date = datetime(int(start_year), 1, 1)
-                    end_date = datetime(int(end_year), 12, 31, 23, 59, 59)
-                    query = query.filter(GiftRecord.created_at >= start_date, GiftRecord.created_at <= end_date)
-                except Exception:
-                    pass
-
-            records = query.order_by(GiftRecord.created_at.desc()).all()
-
-            # 汇总统计
-            total_received = sum(r.amount for r in records if r.record_type not in ('send', 'give'))
-            total_sent = sum(r.amount for r in records if r.record_type in ('send', 'give'))
-            net_amount = total_received - total_sent
-            total_count = len(records)
-
-            # 月度趋势
-            monthly_map = {}
-            for r in records:
-                month_key = r.created_at.strftime('%Y-%m') if r.created_at else '未知'
-                if month_key not in monthly_map:
-                    monthly_map[month_key] = {'month': month_key, 'received': 0, 'sent': 0}
-                if r.record_type in ('send', 'give'):
-                    monthly_map[month_key]['sent'] += r.amount
-                else:
-                    monthly_map[month_key]['received'] += r.amount
-            monthly_trend = sorted(monthly_map.values(), key=lambda x: x['month'])
-
-            # 年度趋势
-            yearly_map = {}
-            for r in records:
-                year_key = str(r.created_at.year) if r.created_at else '未知'
-                if year_key not in yearly_map:
-                    yearly_map[year_key] = {'year': year_key, 'received': 0, 'sent': 0}
-                if r.record_type in ('send', 'give'):
-                    yearly_map[year_key]['sent'] += r.amount
-                else:
-                    yearly_map[year_key]['received'] += r.amount
-            yearly_trend = sorted(yearly_map.values(), key=lambda x: x['year'])
-
-            # 事由分布
-            reason_map = {}
-            for r in records:
-                reason = r.event_reason or '其它'
-                if reason not in reason_map:
-                    reason_map[reason] = {'reason': reason, 'count': 0, 'amount': 0}
-                reason_map[reason]['count'] += 1
-                reason_map[reason]['amount'] += r.amount
-            reason_distribution = sorted(reason_map.values(), key=lambda x: x['amount'], reverse=True)
-
-            # TOP10 亲友往来
-            contact_map = {}
-            for r in records:
-                name = (r.name or '').strip()
-                if not name:
-                    continue
-                if name not in contact_map:
-                    contact_map[name] = {'name': name, 'received': 0, 'sent': 0, 'count': 0}
-                if r.record_type in ('send', 'give'):
-                    contact_map[name]['sent'] += r.amount
-                else:
-                    contact_map[name]['received'] += r.amount
-                contact_map[name]['count'] += 1
-            for v in contact_map.values():
-                v['total'] = v['received'] + v['sent']
-            top10_contacts = sorted(contact_map.values(), key=lambda x: x['total'], reverse=True)[:10]
-
-            return jsonify({
-                'code': 200,
-                'data': {
-                    'summary': {
-                        'total_received': round(total_received, 2),
-                        'total_sent': round(total_sent, 2),
-                        'net_amount': round(net_amount, 2),
-                        'total_count': total_count,
-                        'avg_per_record': round(total_received / total_count, 2) if total_count > 0 else 0
-                    },
-                    'monthly_trend': monthly_trend,
-                    'yearly_trend': yearly_trend,
-                    'reason_distribution': reason_distribution,
-                    'top10_contacts': top10_contacts
-                }
-            })
+            from dashboard_service import calculate_dashboard_stats
+            data = calculate_dashboard_stats(
+                current_user,
+                start_month=request.args.get('start_month', '').strip(),
+                end_month=request.args.get('end_month', '').strip(),
+                start_year=request.args.get('start_year', '').strip(),
+                end_year=request.args.get('end_year', '').strip()
+            )
+            return jsonify({'code': 200, 'data': data})
         except Exception as e:
             return jsonify({'code': 500, 'message': f'获取看板数据失败: {str(e)}'}), 500
 
@@ -6213,68 +6119,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @app.route('/api/poster/data')
     @login_required
     def api_poster_data():
-        """海报数据 API"""
+        """海报数据 API (P2-1 / P2-5 优化)"""
         try:
-            if current_user.is_admin or current_user.can_view_others_for('ledger'):
-                query = GiftRecord.query.filter(GiftRecord.deleted_at.is_(None))
-            else:
-                query = GiftRecord.query.filter(GiftRecord.deleted_at.is_(None), GiftRecord.user_id == current_user.id)
-            records = query.order_by(GiftRecord.created_at.desc()).all()
-
-            total_received = sum(r.amount for r in records if r.record_type not in ('send', 'give'))
-            total_sent = sum(r.amount for r in records if r.record_type in ('send', 'give'))
-
-            # TOP5
-            contact_map = {}
-            for r in records:
-                name = (r.name or '').strip()
-                if not name:
-                    continue
-                if name not in contact_map:
-                    contact_map[name] = {'name': name, 'received': 0, 'sent': 0}
-                if r.record_type in ('send', 'give'):
-                    contact_map[name]['sent'] += r.amount
-                else:
-                    contact_map[name]['received'] += r.amount
-            for v in contact_map.values():
-                v['total'] = v['received'] + v['sent']
-            top5 = sorted(contact_map.values(), key=lambda x: x['total'], reverse=True)[:5]
-
-            # 事由分布
-            reason_map = {}
-            total_reason_amount = 0
-            for r in records:
-                reason = r.event_reason or '其它'
-                if reason not in reason_map:
-                    reason_map[reason] = {'reason': reason, 'amount': 0}
-                reason_map[reason]['amount'] += r.amount
-                total_reason_amount += r.amount
-            reasons = []
-            for v in sorted(reason_map.values(), key=lambda x: x['amount'], reverse=True):
-                v['percentage'] = round(v['amount'] / total_reason_amount * 100, 1) if total_reason_amount > 0 else 0
-                reasons.append(v)
-
-            # 海报二维码 URL（管理员可在系统设置中自定义注册链接）
-            qr_url = SystemSetting.get_val('poster_qr_url', '')
-            if not qr_url:
-                # 默认使用当前站点注册页面
-                qr_url = request.url_root.rstrip('/') + '/register'
-
-            return jsonify({
-                'code': 200,
-                'data': {
-                    'year': datetime.now().year,
-                    'summary': {
-                        'total_received': round(total_received, 2),
-                        'total_sent': round(total_sent, 2),
-                        'net_amount': round(total_received - total_sent, 2),
-                        'total_count': len(records)
-                    },
-                    'top5': top5,
-                    'reasons': reasons,
-                    'qr_url': qr_url
-                }
-            })
+            from dashboard_service import calculate_poster_stats
+            data = calculate_poster_stats(current_user, root_url=request.url_root)
+            return jsonify({'code': 200, 'data': data})
         except Exception as e:
             return jsonify({'code': 500, 'message': str(e)}), 500
 

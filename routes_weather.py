@@ -35,34 +35,42 @@ _HOME_WEATHER_CACHE = {}
 _HOME_WEATHER_TTL = 30 * 60
 
 
-def _build_home_weather(city):
+def _build_home_weather(city=None, lat=None, lon=None, label=None):
     """首页横幅轻量查询（当前实况 + 今明两日高低温，days=2 不拉全量预报）
-    失败返回 None（前端隐藏天气区，横幅时间/农历不受影响）。查询成功后写入模块级缓存。"""
+    支持 coordinates 坐标直查 与 city 文本查询。失败返回 None。"""
     now = _time.time()
-    hit = _HOME_WEATHER_CACHE.get(city)
+    cache_key = f"coords:{lat}:{lon}:{label}" if (lat and lon) else f"city:{city}"
+    hit = _HOME_WEATHER_CACHE.get(cache_key)
     if hit and hit[0] > now:
         return hit[1]
+    data = None
     try:
-        # days=2：仅需今日与明日温度；天气页同款 query_weather 主入口（含双代理路径）
-        data = query_weather(city, days=2)
+        if lat and lon:
+            data = query_weather_by_coords(lat, lon, days=2, label=label or "")
+        elif city:
+            data = query_weather(city, days=2)
     except Exception:
-        # 降级：不抛错不上报，仅无天气区
         return None
-    current = (data or {}).get('current') or {}
-    daily = (data or {}).get('daily') or []
+    if not data:
+        return None
+
+    current = (data or {}).get("current") or {}
+    daily = (data or {}).get("daily") or []
+    city_info = (data or {}).get("city") or {}
+    display_city = label or city_info.get("name") or city or "选定区域"
     payload = {
-        'city': city,
-        'temp': current.get('temperature'),
-        'desc': current.get('weather_text') or '',
-        'icon': current.get('icon') or '',
-        'code': current.get('weather_code'),
-        'today_max': (daily[0] or {}).get('temp_max') if daily else None,
-        'today_min': (daily[0] or {}).get('temp_min') if daily else None,
-        'tomorrow_max': (daily[1] or {}).get('temp_max') if len(daily) > 1 else None,
-        'tomorrow_min': (daily[1] or {}).get('temp_min') if len(daily) > 1 else None,
-        'update_time': current.get('time') or '',
+        "city": display_city,
+        "temp": current.get("temperature"),
+        "desc": current.get("weather_text") or "",
+        "icon": current.get("icon") or "",
+        "code": current.get("weather_code"),
+        "today_max": (daily[0] or {}).get("temp_max") if daily else None,
+        "today_min": (daily[0] or {}).get("temp_min") if daily else None,
+        "tomorrow_max": (daily[1] or {}).get("temp_max") if len(daily) > 1 else None,
+        "tomorrow_min": (daily[1] or {}).get("temp_min") if len(daily) > 1 else None,
+        "update_time": current.get("time") or "",
     }
-    _HOME_WEATHER_CACHE[city] = (now + _HOME_WEATHER_TTL, payload)
+    _HOME_WEATHER_CACHE[cache_key] = (now + _HOME_WEATHER_TTL, payload)
     return payload
 
 
@@ -102,7 +110,17 @@ def register_weather_routes(app):
             except Exception:
                 current_app.logger.exception('查询天气异常: lat=%s lon=%s', lat, lon)
                 return jsonify({'code': 500, 'message': '服务器内部错误，请稍后重试'}), 500
-            return jsonify({'code': 200, 'message': 'ok', 'data': data})
+            # V10.11.16 管理员级联查询同步到系统设置，供无天气权限用户共享
+            if getattr(current_user, "is_admin", False):
+                try:
+                    label_val = label or (data.get("city") or {}).get("name") or "选定区域"
+                    SystemSetting.set_val("admin_weather_mode", "coords")
+                    SystemSetting.set_val("admin_weather_city", label_val)
+                    SystemSetting.set_val("admin_weather_lat", str(lat))
+                    SystemSetting.set_val("admin_weather_lon", str(lon))
+                except Exception:
+                    current_app.logger.warning("admin_weather 级联落库失败", exc_info=True)
+            return jsonify({"code": 200, "message": "ok", "data": data})
 
         # ---- 文本模式（自由输入，兼容旧版） ----
         city = (request.args.get('city') or '').strip()
@@ -128,11 +146,14 @@ def register_weather_routes(app):
 
         # V10.11.12 首页背景横幅：管理员用自由输入框查询成功时，
         # 同步城市名到系统设置（供无天气权限用户背景共享；失败不影响本接口返回）
-        if getattr(current_user, 'is_admin', False):
+        if getattr(current_user, "is_admin", False):
             try:
-                SystemSetting.set_val('admin_weather_city', city)
+                SystemSetting.set_val("admin_weather_mode", "text")
+                SystemSetting.set_val("admin_weather_city", city)
+                SystemSetting.set_val("admin_weather_lat", "")
+                SystemSetting.set_val("admin_weather_lon", "")
             except Exception:
-                current_app.logger.warning('admin_weather_city 落库失败: %s', city, exc_info=True)
+                current_app.logger.warning("admin_weather_city 落库失败: %s", city, exc_info=True)
 
         return jsonify({'code': 200, 'message': 'ok', 'data': data})
 
@@ -172,37 +193,121 @@ def register_weather_routes(app):
         避免前端调 /api/holiday/year（该接口挂 weather 权限门控）产生 403。
         降级：天气拉取失败 weather=null（前端隐藏天气区，横幅其余部分不受影响）。
         """
-        # 1. 解析当前用户自己记忆的城市（仅合法长度才采纳；无权限时强制忽略）
-        raw_city = (request.args.get('city') or '').strip()
-        if len(raw_city) > CITY_NAME_MAX_LEN:
-            raw_city = ''
-        has_perm = getattr(current_user, 'is_admin', False) or (
-            hasattr(current_user, 'can_access_menu') and
-            current_user.can_access_menu('weather'))
+        # 1. 权限与地点分流解析
+        has_perm = getattr(current_user, "is_admin", False) or (
+            hasattr(current_user, "can_access_menu") and
+            current_user.can_access_menu("weather"))
 
-        city, source = '', 'default'
-        if has_perm and raw_city:
-            city, source = raw_city, 'user'
-        if not city:
-            admin_city = (SystemSetting.get_val('admin_weather_city') or '').strip()
-            if admin_city and len(admin_city) <= CITY_NAME_MAX_LEN:
-                city, source = admin_city, 'admin'
-        if not city:
-            city, source = _HOME_WEATHER_DEFAULT_CITY, 'default'
+        raw_city = (request.args.get("city") or "").strip()
+        raw_lat = (request.args.get("lat") or "").strip()
+        raw_lon = (request.args.get("lon") or "").strip()
+        raw_label = (request.args.get("label") or "").strip()
+
+        target_city = None
+        target_lat = None
+        target_lon = None
+        target_label = None
+        source = "default"
+
+        # 若当前用户有天气权限：优先采用用户最后一次查询的地点（不区分省市区级联或自由搜索）
+        if has_perm:
+            if raw_lat and raw_lon:
+                try:
+                    f_lat = float(raw_lat)
+                    f_lon = float(raw_lon)
+                    if 3 <= f_lat <= 54 and 73 <= f_lon <= 136:
+                        target_lat = f_lat
+                        target_lon = f_lon
+                        target_label = raw_label[:CITY_NAME_MAX_LEN * 2] if raw_label else ""
+                        source = "user"
+                except (ValueError, TypeError):
+                    pass
+            elif raw_city and len(raw_city) <= CITY_NAME_MAX_LEN:
+                target_city = raw_city
+                source = "user"
+
+        # 若当前用户无天气权限，或有权限但尚未有个人查询记录：默认回退到管理员预设地点
+        if not target_city and not (target_lat and target_lon):
+            admin_mode = (SystemSetting.get_val("admin_weather_mode") or "").strip()
+            admin_city = (SystemSetting.get_val("admin_weather_city") or "").strip()
+            admin_lat = (SystemSetting.get_val("admin_weather_lat") or "").strip()
+            admin_lon = (SystemSetting.get_val("admin_weather_lon") or "").strip()
+            if admin_mode == "coords" and admin_lat and admin_lon:
+                try:
+                    f_lat = float(admin_lat)
+                    f_lon = float(admin_lon)
+                    if 3 <= f_lat <= 54 and 73 <= f_lon <= 136:
+                        target_lat = f_lat
+                        target_lon = f_lon
+                        target_label = admin_city or "选定区域"
+                        source = "admin"
+                except (ValueError, TypeError):
+                    pass
+            elif admin_city and len(admin_city) <= CITY_NAME_MAX_LEN:
+                target_city = admin_city
+                source = "admin"
+            else:
+                target_city = _HOME_WEATHER_DEFAULT_CITY
+                source = "default"
 
         # 2. 轻量天气查询（30 分钟缓存 + 失败降级 None）
-        weather = _build_home_weather(city)
+        weather = _build_home_weather(city=target_city, lat=target_lat, lon=target_lon, label=target_label)
 
-        # 3. 今日班/休徽章（服务端直读 holiday_service，无权限问题）
+        # 3. 今日班/休徽章
         badge = None
         try:
             today = _date.today()
             holidays = get_year_holidays(today.year) or {}
-            info = holidays.get('%02d-%02d' % (today.month, today.day))
+            info = holidays.get("%02d-%02d" % (today.month, today.day))
             if info:
-                badge = {'holiday': bool(info.get('holiday')), 'name': info.get('name') or ''}
+                badge = {"holiday": bool(info.get("holiday")), "name": info.get("name") or ""}
         except Exception:
             pass
 
-        return jsonify({'code': 200, 'message': 'ok', 'data': {
-            'city': city, 'source': source, 'weather': weather, 'badge': badge}})
+        # 4. 本月人情往来摘要
+        ledger_summary = None
+        try:
+            from models import GiftRecord
+            today = _date.today()
+            first_day = today.replace(day=1)
+            if today.month == 12:
+                next_month = today.replace(year=today.year + 1, month=1, day=1)
+            else:
+                next_month = today.replace(month=today.month + 1, day=1)
+
+            if getattr(current_user, "is_admin", False) or (hasattr(current_user, "can_view_others_for") and current_user.can_view_others_for("ledger")):
+                l_q = GiftRecord.query.filter(GiftRecord.deleted_at.is_(None))
+            else:
+                l_q = GiftRecord.query.filter(GiftRecord.deleted_at.is_(None), GiftRecord.user_id == current_user.id)
+
+            m_rows = l_q.with_entities(GiftRecord.amount, GiftRecord.record_type).filter(
+                GiftRecord.created_at >= first_day,
+                GiftRecord.created_at < next_month
+            ).all()
+
+            rec = sum((r.amount or 0) for r in m_rows if r.record_type not in ("send", "give"))
+            snt = sum((r.amount or 0) for r in m_rows if r.record_type in ("send", "give"))
+            ledger_summary = {
+                "received": round(rec, 2),
+                "sent": round(snt, 2),
+                "net": round(rec - snt, 2),
+                "count": len(m_rows)
+            }
+        except Exception:
+            pass
+
+        display_name = (weather.get("city") if weather else None) or target_label or target_city or _HOME_WEATHER_DEFAULT_CITY
+        return jsonify({
+            "code": 200,
+            "message": "ok",
+            "data": {
+                "city": display_name,
+                "source": source,
+                "has_weather_permission": has_perm,
+                "is_admin_preset": (not has_perm),
+                "preset_notice": "这是管理员预设的地址" if not has_perm else None,
+                "weather": weather,
+                "badge": badge,
+                "ledger": ledger_summary,
+            }
+        })

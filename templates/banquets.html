@@ -292,7 +292,7 @@
                 <h5 class="modal-title"><i class="fa-solid fa-plus-circle me-2"></i>创建专属宴席账本</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <form action="{{ url_for('banquets_view') }}" method="POST">
+            <form action="{{ url_for('banquets_view') }}" method="POST" onsubmit="var btn=this.querySelector('button[type=submit]'); if(btn){ btn.disabled=true; btn.innerHTML='<i class=\'fa-solid fa-spinner fa-spin me-1\'></i>创建中...'; }">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="modal-body">
                     <div class="mb-3">

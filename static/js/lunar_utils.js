@@ -450,6 +450,7 @@ var LunarUtils = (function () {
         if (gf) festivals.push(gf);
         var lf = lunarFestivalOf(y, m, d, lunar);
         if (lf) festivals.push(lf);
+        var fortune = getDayFortune(y, m, d);
         return {
             week: lunar.week,
             gregText: y + '年' + m + '月' + d + '日',
@@ -458,8 +459,33 @@ var LunarUtils = (function () {
             gz: lunar.gz,
             animal: lunar.animal,
             festivals: festivals,
-            term: termOf(y, m, d)
+            term: termOf(y, m, d),
+            fortune: fortune
         };
+    }
+
+    // ===== 每日吉相与宜忌（基于传统建除十二神轮转算法） =====
+    var JIAN_CHU_LIST = [
+        { name: '建日', tag: '吉', yi: '订盟 · 纳采 · 祭祀 · 会亲友', ji: '动土 · 开仓 · 掘井' },
+        { name: '除日', tag: '平', yi: '扫舍 · 沐浴 · 祈福 · 求医', ji: '嫁娶 · 远行 · 签约' },
+        { name: '满日', tag: '吉', yi: '祈福 · 办宴 · 嫁娶 · 开市 · 酬谢', ji: '动土 · 诉讼 · 栽种' },
+        { name: '平日', tag: '平', yi: '修饰 · 安门 · 会友 · 祭祀', ji: '开市 · 嫁娶 · 掘井' },
+        { name: '定日', tag: '黄道吉日', yi: '嫁娶 · 纳采 · 会友 · 设宴 · 进财', ji: '词讼 · 出行 · 动土' },
+        { name: '执日', tag: '平', yi: '祭祀 · 祈福 · 礼金往来 · 纳财', ji: '搬迁 · 出行 · 开市' },
+        { name: '破日', tag: '平', yi: '求医 · 坏垣 · 祭祀 · 破屋', ji: '办宴 · 嫁娶 · 订盟 · 签约' },
+        { name: '危日', tag: '平', yi: '祈福 · 安床 · 宴会 · 酬神', ji: '登高 · 涉水 · 动土' },
+        { name: '成日', tag: '黄道吉日', yi: '嫁娶 · 办宴 · 订盟 · 进人口 · 入学', ji: '诉讼 · 争讼 · 词讼' },
+        { name: '收日', tag: '吉', yi: '纳财 · 会亲友 · 收礼 · 宴客', ji: '借贷 · 安葬 · 远行' },
+        { name: '开日', tag: '黄道吉日', yi: '嫁娶 · 开市 · 祈福 · 纳财 · 会友', ji: '破土 · 动土 · 针灸' },
+        { name: '闭日', tag: '平', yi: '修造 · 祭祀 · 塞穴 · 聚财', ji: '宴请 · 出行 · 诉讼' }
+    ];
+
+    function getDayFortune(y, m, d) {
+        var baseDate = new Date(1900, 0, 31);
+        var curDate = new Date(y, m - 1, d);
+        var diff = Math.round((curDate - baseDate) / 86400000);
+        var idx = ((diff % 12) + 12) % 12;
+        return JIAN_CHU_LIST[idx];
     }
 
     return {
@@ -467,6 +493,7 @@ var LunarUtils = (function () {
         getDayLabel: getDayLabel,
         getFullInfo: getFullInfo,
         termOf: termOf,
-        gregFestivalOf: gregFestivalOf
+        gregFestivalOf: gregFestivalOf,
+        getDayFortune: getDayFortune
     };
 })();

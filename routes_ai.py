@@ -295,6 +295,43 @@ def register_ai_routes(app, log_action=None):
         if not isinstance(configs_raw, list):
             return jsonify({'code': 400, 'message': 'ai_configs 必须是数组'}), 400
 
+        # 模式1：保存单个配置（支持针对单个卡片保存）
+        if data.get('config_index') is not None and 'config' in data:
+            try:
+                idx = int(data['config_index'])
+            except (ValueError, TypeError):
+                return jsonify({'code': 400, 'message': 'config_index 必须是整数'}), 400
+            single_cfg = data['config']
+            if not isinstance(single_cfg, dict):
+                return jsonify({'code': 400, 'message': 'config 必须是对象'}), 400
+
+            configs = current_user.get_ai_configs()
+            if 0 <= idx < len(configs):
+                configs[idx] = single_cfg
+            else:
+                configs.append(single_cfg)
+            current_user.set_ai_configs(configs)
+            db.session.commit()
+
+            cfg_name = single_cfg.get('name') or f"#{idx + 1}"
+            safe_log('AI 配置更新', f"保存了单个 AI 配置 [{cfg_name}]", user=current_user)
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                    f"保存AI配置",
+                    f"操作人：{current_user.username} | 页面：AI助手配置 | 保存单个配置：{cfg_name}",
+                    page_key='ai_config', user_name=current_user.username,
+                    operator_id=current_user.id
+                )
+            except Exception:
+                pass
+
+            return jsonify({'code': 200, 'message': f"配置「{cfg_name}」保存成功", 'data': {
+                'ai_configs': current_user.get_ai_configs(),
+                'saved_index': idx
+            }})
+
+        # 模式2：批量保存全部配置
         current_user.set_ai_configs(configs_raw)
         db.session.commit()
 
@@ -332,8 +369,12 @@ def register_ai_routes(app, log_action=None):
 
         data = request.get_json(silent=True) or {}
 
-        # 模式1：按索引测试已保存的配置
+        # 模式1与模式2自适应：支持已保存配置索引与新增未保存配置参数
         config_index = data.get('config_index')
+        api_key = (data.get('api_key') or '').strip()
+        base_url = (data.get('base_url') or '').strip()
+        model = (data.get('model') or '').strip()
+
         if config_index is not None:
             try:
                 config_index = int(config_index)
@@ -341,21 +382,16 @@ def register_ai_routes(app, log_action=None):
                 return jsonify({'code': 400, 'message': 'config_index 必须是整数'}), 400
 
             configs = current_user.get_ai_configs()
-            if config_index < 0 or config_index >= len(configs):
+            if 0 <= config_index < len(configs):
+                cfg = configs[config_index]
+                result = test_ai_config(
+                    api_key or cfg.get('api_key', ''),
+                    base_url or cfg.get('base_url', ''),
+                    model or cfg.get('model', '')
+                )
+                return jsonify({'code': 200, 'data': result})
+            elif not api_key:
                 return jsonify({'code': 400, 'message': '配置索引超出范围'}), 400
-
-            cfg = configs[config_index]
-            result = test_ai_config(
-                cfg.get('api_key', ''),
-                cfg.get('base_url', ''),
-                cfg.get('model', '')
-            )
-            return jsonify({'code': 200, 'data': result})
-
-        # 模式2：直接传入配置参数测试
-        api_key = (data.get('api_key') or '').strip()
-        base_url = (data.get('base_url') or '').strip()
-        model = (data.get('model') or '').strip()
 
         result = test_ai_config(api_key, base_url, model)
         return jsonify({'code': 200, 'data': result})
@@ -376,7 +412,7 @@ def register_ai_routes(app, log_action=None):
 
         data = request.get_json(silent=True) or {}
 
-        # 模式1：按索引取已保存的配置
+        # 模式1与模式2自适应：支持已保存配置索引与新增未保存配置（优先回退使用传入的 key/url）
         config_index = data.get('config_index')
         api_key = (data.get('api_key') or '').strip()
         base_url = (data.get('base_url') or '').strip()
@@ -387,12 +423,14 @@ def register_ai_routes(app, log_action=None):
                 return jsonify({'code': 400, 'message': 'config_index 必须是整数'}), 400
 
             configs = current_user.get_ai_configs()
-            if config_index < 0 or config_index >= len(configs):
+            if 0 <= config_index < len(configs):
+                cfg = configs[config_index]
+                if not api_key:
+                    api_key = cfg.get('api_key', '')
+                if not base_url:
+                    base_url = cfg.get('base_url', '')
+            elif not api_key:
                 return jsonify({'code': 400, 'message': '配置索引超出范围'}), 400
-
-            cfg = configs[config_index]
-            api_key = cfg.get('api_key', '')
-            base_url = cfg.get('base_url', '')
 
         if not api_key:
             return jsonify({'code': 400, 'message': 'API Key 为空，请先填写后再获取模型列表'}), 400

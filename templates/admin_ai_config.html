@@ -182,6 +182,9 @@ function renderConfigs() {
                     <button class="btn btn-sm btn-outline-info" onclick="testConfig(${idx})" id="testBtn-${idx}" title="测试此配置是否可用">
                         <i class="fa-solid fa-vial me-1"></i>测试
                     </button>
+                    <button class="btn btn-sm btn-success" onclick="saveSingleConfig(${idx})" id="saveBtn-${idx}" title="保存此配置">
+                        <i class="fa-solid fa-floppy-disk me-1"></i>保存
+                    </button>
                     <button class="btn btn-sm btn-outline-danger" onclick="removeConfig(${idx})">
                         <i class="fa-solid fa-trash"></i>
                     </button>
@@ -307,14 +310,20 @@ async function fetchModels(idx, silent) {
         return;
     }
 
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>获取中';
-    resultDiv.innerHTML = '<div class="text-muted small mt-1"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在调用 {Base URL}/models 拉取模型列表...</div>';
+    if (!silent) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>获取中...';
+        resultDiv.innerHTML = '<div class="text-muted small mt-1"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在调用 {Base URL}/models 拉取模型列表...</div>';
+    }
 
     try {
-const data = await aiFetch('/api/ai/config/models', {
+        const data = await aiFetch('/api/ai/config/models', {
             method: 'POST',
-            body: JSON.stringify({ config_index: idx })
+            body: JSON.stringify({
+                config_index: idx,
+                api_key: cfg.api_key || '',
+                base_url: cfg.base_url || ''
+            })
         });
 
         if (data && data.code === 200 && data.data) {
@@ -322,21 +331,30 @@ const data = await aiFetch('/api/ai/config/models', {
             if (result.success && result.models && result.models.length > 0) {
                 modelFetchedKey[idx] = (cfg.api_key || '') + '|' + (cfg.base_url || '');
                 renderModelSelect(idx, result.models, result.message);
-            } else {
+            } else if (!silent) {
                 resultDiv.innerHTML = `<div class="alert alert-danger py-1 mb-0 mt-2 test-result"><i class="fa-solid fa-circle-xmark me-1"></i>${escapeHtml(result.message || '获取失败')}${result.detail ? `<div class="small text-muted">${escapeHtml(result.detail)}</div>` : ''}</div>`;
+            } else {
+                resultDiv.innerHTML = '';
             }
-        } else {
+        } else if (!silent) {
             resultDiv.innerHTML = `<div class="alert alert-danger py-1 mb-0 mt-2 test-result"><i class="fa-solid fa-circle-xmark me-1"></i>${escapeHtml(data?.message || '获取模型列表失败')}</div>`;
+        } else {
+            resultDiv.innerHTML = '';
         }
     } catch (err) {
-        resultDiv.innerHTML = `<div class="alert alert-danger py-1 mb-0 mt-2 test-result"><i class="fa-solid fa-circle-xmark me-1"></i>请求异常: ${escapeHtml(String(err))}</div>`;
+        if (!silent) {
+            resultDiv.innerHTML = `<div class="alert alert-danger py-1 mb-0 mt-2 test-result"><i class="fa-solid fa-circle-xmark me-1"></i>请求异常: ${escapeHtml(String(err))}</div>`;
+        } else {
+            resultDiv.innerHTML = '';
+        }
     }
 
-    btn.disabled = false;
-    btn.innerHTML = '<i class="fa-solid fa-list me-1"></i>获取模型列表';
+    if (!silent) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-list me-1"></i>获取模型列表';
+    }
 }
 
-// 渲染模型下拉列表（消息 + 下拉一次性写入，点击后自动填入模型输入框）
 function renderModelSelect(idx, models, message) {
     const resultDiv = document.getElementById(`modelsResult-${idx}`);
     if (!resultDiv) return;
@@ -379,11 +397,82 @@ function scheduleAutoFetchModels(idx) {
     }, 800);
 }
 
-// 保存配置
+// 同步单个卡片的 DOM 输入值到 aiConfigs
+function syncCardDOM(idx) {
+    const cfg = aiConfigs[idx];
+    if (!cfg) return null;
+    const nameInput = document.querySelector('#config-' + idx + ' input[onchange*="name"]');
+    const modelInput = document.querySelector('#config-' + idx + ' input[onchange*="model"]');
+    const keyInput = document.getElementById('apiKey-' + idx);
+    const urlInput = document.querySelector('#config-' + idx + ' input[onchange*="base_url"]');
+    const enabledInput = document.getElementById('enabled-' + idx);
+    if (nameInput) cfg.name = nameInput.value;
+    if (modelInput) cfg.model = modelInput.value;
+    if (keyInput) cfg.api_key = keyInput.value;
+    if (urlInput) cfg.base_url = urlInput.value;
+    if (enabledInput) cfg.enabled = enabledInput.checked;
+    return cfg;
+}
+
+// 保存单个配置（针对单个卡片独立保存）
+async function saveSingleConfig(idx) {
+    const cfg = syncCardDOM(idx);
+    if (!cfg) return;
+
+    const btn = document.getElementById('saveBtn-' + idx);
+    const resultDiv = document.getElementById('testResult-' + idx);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>保存中...';
+    }
+
+    try {
+        const data = await aiFetch('/api/ai/config', {
+            method: 'POST',
+            body: JSON.stringify({
+                config_index: idx,
+                config: cfg
+            })
+        });
+
+        if (data && data.code === 200) {
+            const cfgName = cfg.name || ('配置 #' + (idx + 1));
+            if (resultDiv) {
+                resultDiv.innerHTML = '<div class="alert alert-success py-2 mb-0 mt-2 test-result d-flex align-items-center justify-content-between">' +
+                    '<div><i class="fa-solid fa-circle-check me-1"></i><strong>配置「' + escapeHtml(cfgName) + '」保存成功！</strong></div>' +
+                    '<button type="button" class="btn-close btn-sm ms-2" onclick="this.parentElement.remove()"></button>' +
+                    '</div>';
+            }
+            if (data.data && data.data.ai_configs) {
+                aiConfigs = data.data.ai_configs;
+            }
+            const headerTitle = document.querySelector('#config-' + idx + ' .config-card-header strong');
+            if (headerTitle) headerTitle.textContent = cfgName;
+            const badge = document.querySelector('#config-' + idx + ' .config-card-header .badge');
+            if (badge) {
+                badge.className = 'badge bg-' + (cfg.enabled ? 'success' : 'secondary') + ' me-2';
+                badge.textContent = cfg.enabled ? '启用' : '禁用';
+            }
+        } else {
+            alert('保存失败：' + (data?.message || '未知错误'));
+        }
+    } catch (err) {
+        alert('请求异常：' + err);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-floppy-disk me-1"></i>保存';
+        }
+    }
+}
+
+// 批量保存全部配置
 async function saveConfigs() {
     const saveBtn = document.getElementById('saveBtn');
     saveBtn.disabled = true;
     saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>保存中...';
+
+    aiConfigs.forEach(function (_, i) { syncCardDOM(i); });
     
     const data = await aiFetch('/api/ai/config', {
         method: 'POST',
@@ -391,10 +480,10 @@ async function saveConfigs() {
     });
     
     saveBtn.disabled = false;
-    saveBtn.innerHTML = '<i class="fa-solid fa-save me-1"></i>保存配置';
+    saveBtn.innerHTML = '<i class="fa-solid fa-save me-1"></i>保存全部配置';
     
     if (data && data.code === 200) {
-        alert('AI 配置保存成功！');
+        alert('全部 AI 配置保存成功！');
         aiConfigs = data.data.ai_configs || [];
         renderConfigs();
     } else {

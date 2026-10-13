@@ -45,14 +45,17 @@ AI_HTTP_TIMEOUT = (5, 20)  # 连接 5s / 读取 20s
 
 
 def _ai_http_get(url, headers=None):
-    """AI 网关 GET（requests 版）：① 禁代理直连；② 失败回落系统代理重试一次"""
+    """AI 网关 GET（requests 版）：① 禁代理直连（Session trust_env=False，彻底绕过异常本地代理与权限限制）；② 失败回落系统代理重试一次"""
     try:
-        return requests.get(url, headers=headers, timeout=AI_HTTP_TIMEOUT,
-                             proxies={'http': None, 'https': None})
-    except (requests.Timeout, requests.RequestException):
+        with requests.Session() as s:
+            s.trust_env = False
+            return s.get(url, headers=headers, timeout=AI_HTTP_TIMEOUT)
+    except (requests.Timeout, requests.RequestException, Exception):
         pass
     # 回落：系统代理/环境变量（默认 trust_env 行为）
-    return requests.get(url, headers=headers, timeout=AI_HTTP_TIMEOUT)
+    with requests.Session() as s:
+        s.trust_env = True
+        return s.get(url, headers=headers, timeout=AI_HTTP_TIMEOUT)
 
 
 def _chat_with_fallback(client_kwargs, create_kwargs):
@@ -317,7 +320,10 @@ def test_ai_config(api_key, base_url, model):
         elif 'authentication' in err_lower or 'api key' in err_lower or '401' in err_lower:
             reason = 'API Key 无效或已过期'
         elif 'connection' in err_lower or 'connect' in err_lower or 'timeout' in err_lower or 'refused' in err_lower:
-            reason = '无法连接到 API 地址，请检查 Base URL 是否正确'
+            if '10013' in err_str or 'permission' in err_lower:
+                reason = '网络连接权限受限（[WinError 10013]，可能是防火墙、安全软件或系统代理限制），请检查网络'
+            else:
+                reason = '无法连接到 API 地址，请检查 Base URL 是否正确'
         elif 'not found' in err_lower or '404' in err_lower or 'model' in err_lower:
             reason = '模型名称不存在，请检查 Model 参数'
         elif 'rate limit' in err_lower or '429' in err_lower:
@@ -355,15 +361,43 @@ def fetch_model_list(api_key, base_url):
 
     # Base URL 清洗：剥除误填的完整端点后缀（含 /models），取根地址再拼 /models
     base = normalize_base_url(base_url) if base_url else 'https://api.openai.com/v1'
-    models_url = base.rstrip('/') + '/models'
+    base_clean = base.rstrip('/')
 
-    try:
-        # V10.11.8：双路径网络策略（禁代理直连优先+代理兑底），修复系统代理故障时误报超时
-        resp = _ai_http_get(models_url, headers={'Authorization': 'Bearer ' + api_key})
-    except requests.Timeout:
-        return {'success': False, 'models': [], 'message': '请求模型列表超时，请检查 Base URL 与网络', 'detail': 'timeout'}
-    except requests.RequestException as e:
-        return {'success': False, 'models': [], 'message': '无法连接模型列表接口，请检查 Base URL 与网络', 'detail': str(e)[:300]}
+    # 候选端点探活：
+    # 候选 1: base + /models (如 https://exaiapi.fenzoz.com/v1/models)
+    # 候选 2: 若未以 /v1 结尾，补测 /v1/models (如 https://exaiapi.fenzoz.com -> https://exaiapi.fenzoz.com/v1/models)
+    # 候选 3: 若以 /v1 结尾，补测根 /models (如部分网关模型列表挂载在根端点)
+    candidate_urls = [base_clean + '/models']
+    if not base_clean.lower().endswith('/v1'):
+        candidate_urls.append(base_clean + '/v1/models')
+    else:
+        candidate_urls.append(base_clean[:-3].rstrip('/') + '/models')
+
+    resp = None
+    last_err = None
+    for target_url in candidate_urls:
+        try:
+            r = _ai_http_get(target_url, headers={'Authorization': 'Bearer ' + api_key})
+            resp = r
+            if r.status_code == 200:
+                break
+            if r.status_code in (401, 403):
+                # 鉴权失败说明端点本身存在，不需要继续探测其他端点
+                break
+        except (requests.Timeout, requests.RequestException, Exception) as e:
+            last_err = e
+            continue
+
+    if resp is None:
+        err_msg = str(last_err) if last_err else '无法连接'
+        err_lower = err_msg.lower()
+        if '10013' in err_msg or 'permission' in err_lower:
+            hint = '网络连接权限受限（[WinError 10013]，可能是防火墙、安全软件或系统代理限制），请检查网络'
+        elif 'timeout' in err_lower:
+            hint = '请求模型列表超时，请检查 Base URL 与网络连接'
+        else:
+            hint = '无法连接模型列表接口，请检查 Base URL 与网络'
+        return {'success': False, 'models': [], 'message': hint, 'detail': err_msg[:300]}
 
     try:
         data = resp.json()
@@ -375,6 +409,11 @@ def fetch_model_list(api_key, base_url):
     if resp.status_code in (401, 403):
         return {'success': False, 'models': [],
                 'message': 'API Key 无效或无权访问模型列表（HTTP {0}）'.format(resp.status_code),
+                'detail': resp.text[:300]}
+
+    if resp.status_code == 404:
+        return {'success': False, 'models': [],
+                'message': '该 API 服务未开放 /models 模型列表接口（HTTP 404），可直接手动填写模型名称',
                 'detail': resp.text[:300]}
 
     if resp.status_code != 200:

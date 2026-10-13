@@ -200,20 +200,15 @@ function getEChartsTheme() {
 
 // ===== 初始化所有图表 =====
 function initCharts() {
-    var theme = getEChartsTheme();
-    trendChart = echarts.init(document.getElementById('trendChart'));
-    reasonChart = echarts.init(document.getElementById('reasonChart'));
-    top10Chart = echarts.init(document.getElementById('top10Chart'));
-    
-    // V10.11.11 监听主题切换（dark / light），实时重绘 ECharts
-    var themeObserver = new MutationObserver(function(mutations) {
-        mutations.forEach(function(m) {
-            if (m.attributeName === 'data-bs-theme') {
-                if (typeof initCharts === 'function') initCharts();
-            }
-        });
-    });
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bs-theme'] });
+    if (!trendChart) {
+        trendChart = echarts.init(document.getElementById('trendChart'));
+    }
+    if (!reasonChart) {
+        reasonChart = echarts.init(document.getElementById('reasonChart'));
+    }
+    if (!top10Chart) {
+        top10Chart = echarts.init(document.getElementById('top10Chart'));
+    }
 
     window.addEventListener('resize', function() {
         if (trendChart) trendChart.resize();
@@ -221,6 +216,25 @@ function initCharts() {
         if (top10Chart) top10Chart.resize();
     });
 }
+
+// 刷新全部图表的主题色彩（支持暗黑/浅色模式实时热重载）
+function applyThemeToCharts() {
+    if (dashboardData) {
+        renderTrendChart();
+        renderReasonChart();
+        renderTop10Chart();
+    }
+}
+
+// V10.11.15 监听主题切换（dark / light），单例模式实时重绘 ECharts
+var themeObserver = new MutationObserver(function(mutations) {
+    mutations.forEach(function(m) {
+        if (m.attributeName === 'data-bs-theme') {
+            applyThemeToCharts();
+        }
+    });
+});
+themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-bs-theme'] });
 
 // ===== 渲染趋势图 =====
 function renderTrendChart() {

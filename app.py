@@ -42,6 +42,8 @@ else:
 template_folder = os.path.join(BUNDLE_DIR, 'templates')
 app = Flask(__name__, template_folder=template_folder)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'gift-bookkeeping-secret-key-2026-prod-secure'
+if not os.environ.get('SECRET_KEY') or os.environ.get('SECRET_KEY') == 'gift-bookkeeping-secret-key-2026-prod-secure':
+    app.logger.warning('[Security Warning] 未检测到自定义环境变量 SECRET_KEY，正在使用默认密钥。生产环境请设置 SECRET_KEY 环境变量！')
 
 # 服务/容器启动时间戳：用于在服务重启时强制失效所有旧用户会话
 APP_START_TIME = time.time()
@@ -1120,6 +1122,15 @@ try:
 except Exception as _e:
     print(f"[Warning] 应用启动自动初始化数据库提示: {_e}")
 
+
+@app.route('/health', methods=['GET'])
+def health_check():
+    """轻量健康检查端点（供容器探针/负载均衡器/监控服务调用）"""
+    return jsonify({
+        'status': 'ok',
+        'app': 'gift_bookkeeping_app',
+        'version': 'V10.11.15'
+    }), 200
 
 @app.route('/')
 @login_required
@@ -2342,7 +2353,8 @@ def admin_logs():
         ('reminders', '纪念日备忘'), ('recycle_bin', '回收站'), ('admin_users', '用户管理'),
         ('webhooks', 'Webhook'), ('backups', '备份管理'), ('permission_tickets', '权限工单'),
         ('broadcasts', '系统广播'), ('ai_assistant', 'AI助手'), ('auth', '认证安全'),
-        ('system', '系统配置'),
+        ('system', '系统配置'), ('weather', '天气'), ('family', '家庭记账'),
+        ('dashboard', '数据分析'),
     ]
     if not audit_modules_raw:
         audit_modules_enabled = [m[0] for m in audit_modules_all]  # 默认全部启用

@@ -172,7 +172,7 @@ function loadMyGroups() {
             html += '<div class="card border-0 shadow-sm mb-3">' +
                 '<div class="card-body">' +
                 '<div class="d-flex justify-content-between align-items-center mb-2">' +
-                '<div><h5 class="fw-bold mb-0"><i class="fa-solid fa-people-roof text-warning me-2"></i>' + g.name + '</h5>' +
+                '<div><h5 class="fw-bold mb-0"><i class="fa-solid fa-people-roof text-warning me-2"></i>' + escapeHtml(g.name) + '</h5>' +
                 (g.description ? '<p class="text-muted small mb-0">' + escapeHtml(g.description) + '</p>' : '') + '</div>' +
                 '<div class="d-flex gap-2">' +
                 (isOwner || {{ 'true' if current_user.is_admin else 'false' }} ? '<button class="btn btn-sm btn-outline-primary" onclick="openInviteModal(' + g.id + ')"><i class="fa-solid fa-user-plus me-1"></i>邀请成员</button>' : '') +
