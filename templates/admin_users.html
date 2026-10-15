@@ -2,6 +2,14 @@
 
 {% block title %}后台用户管理 - 随礼记账簿{% endblock %}
 
+{% block extra_css %}
+<style>
+  .modal { white-space: normal; }
+  .modal-dialog-scrollable form { display: flex; flex-direction: column; max-height: 100%; overflow: hidden; }
+  .modal-dialog-scrollable .modal-body { overflow-y: auto; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
   <div>
@@ -437,9 +445,9 @@
               <!-- 配置数据权限 Modal -->
               {% if not u.is_admin and u.id != current_user.id %}
               <div class="modal fade text-start" id="permModal{{ u.id }}" tabindex="-1">
-                <div class="modal-dialog modal-dialog-centered">
-                  <div class="modal-content">
-                    <form action="{{ url_for('admin_update_user_permissions', user_id=u.id) }}" method="POST">
+                <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+                  <div class="modal-content" style="white-space: normal;">
+                    <form action="{{ url_for('admin_update_user_permissions', user_id=u.id) }}" method="POST" style="display: flex; flex-direction: column; max-height: 100%; overflow: hidden;">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <div class="modal-header border-0 pb-0">
                         <h6 class="modal-title fw-bold text-primary"><i class="fa-solid fa-user-gear me-1"></i>配置用户 [{{ u.username }}] 的跨用户数据权限</h6>
@@ -587,7 +595,7 @@
                               </div>
                             </div>
 
-                            <!-- V10.11.6 新增：天气（只读工具菜单，0/1 级） -->
+                            <!-- V10.11.6 新增：天气（只读工具菜单，1 级） -->
                             <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
                               <div class="form-check mb-0 d-flex align-items-center">
                                 <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="weather" id="menu_weather_{{ u.id }}" {% if u.can_access_menu('weather') %}checked{% endif %}>
@@ -596,10 +604,8 @@
                                 </label>
                               </div>
                               <div style="min-width: 210px;">
-                                {% set p_weather = u.get_menu_perm('weather') %}
                                 <select class="form-select form-select-sm" name="menu_perm_weather">
-                                  <option value="0" {% if p_weather == 0 %}selected{% endif %}>无天气访问权限</option>
-                                  <option value="1" {% if p_weather == 1 %}selected{% endif %}>可查看实时天气</option>
+                                  <option value="1" selected>可查看实时天气</option>
                                 </select>
                               </div>
                             </div>
@@ -688,10 +694,13 @@
                           </div>
                         </div>
 
-                        <div class="alert alert-info py-2 px-3 small mb-0">
-                          <i class="fa-solid fa-circle-info me-1"></i>
-                          每个菜单独立选择，互不影响；未配置的菜单默认“仅管理自身数据”。
-                          <br><strong class="text-danger"><i class="fa-solid fa-shield-halved me-1"></i>安全保护：</strong>普通用户无论获得何种跨用户权限，均<strong>无法修改或删除管理员</strong>创建的数据。
+                        <div class="alert alert-info py-2 px-3 small mb-0" style="white-space: normal; word-break: break-word;">
+                          <div class="mb-1">
+                            <i class="fa-solid fa-circle-info me-1"></i>每个菜单独立选择，互不影响；未配置的菜单默认“仅管理自身数据”。
+                          </div>
+                          <div>
+                            <strong class="text-danger"><i class="fa-solid fa-shield-halved me-1"></i>安全保护：</strong>普通用户无论获得何种跨用户权限，均<strong>无法修改或删除管理员</strong>创建的数据。
+                          </div>
                         </div>
                       </div>
                       <div class="modal-footer border-0 pt-0">
@@ -1262,9 +1271,9 @@ function copyCredPassword() {
 
 <!-- 批量配置用户权限 Modal -->
 <div class="modal fade" id="batchPermModal" tabindex="-1">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content">
-      <form action="{{ url_for('admin_batch_user_permissions') }}" method="POST" id="batchPermForm">
+  <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+    <div class="modal-content" style="white-space: normal;">
+      <form action="{{ url_for('admin_batch_user_permissions') }}" method="POST" id="batchPermForm" style="display: flex; flex-direction: column; max-height: 100%; overflow: hidden;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div id="batchPermUserIdsContainer"></div>
         <div class="modal-header border-0 pb-0">
@@ -1417,8 +1426,7 @@ function copyCredPassword() {
                 </div>
                 <div style="min-width: 210px;">
                   <select class="form-select form-select-sm" name="menu_perm_weather">
-                    <option value="0" selected>无天气访问权限</option>
-                    <option value="1">可查看实时天气</option>
+                    <option value="1" selected>可查看实时天气</option>
                   </select>
                 </div>
               </div>
@@ -1493,9 +1501,13 @@ function copyCredPassword() {
             </div>
           </div>
 
-          <div class="alert alert-info py-2 px-3 small mb-0">
-            <i class="fa-solid fa-circle-info me-1"></i>
-            批量应用时，每个菜单所选权限将统一应用至所有勾选用户，未配置项默认“仅管理自身数据”。
+          <div class="alert alert-info py-2 px-3 small mb-0" style="white-space: normal; word-break: break-word;">
+            <div class="mb-1">
+              <i class="fa-solid fa-circle-info me-1"></i>批量应用时，每个菜单所选权限将统一应用至所有勾选用户，未配置项默认“仅管理自身数据”。
+            </div>
+            <div>
+              <strong class="text-danger"><i class="fa-solid fa-shield-halved me-1"></i>安全保护：</strong>普通用户无论获得何种跨用户权限，均<strong>无法修改或删除管理员</strong>创建的数据。
+            </div>
           </div>
         </div>
         <div class="modal-footer border-0 pt-0">

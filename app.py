@@ -2690,6 +2690,12 @@ def admin_batch_user_permissions():
             legacy_p = request.form.get('perm_level', '0')
             menu_perms[m] = int(legacy_p) if str(legacy_p).isdigit() else 0
 
+    # 针对天气只读工具菜单：未勾选天气则权限级别归零，勾选则设为 1
+    if 'weather' not in menus_list:
+        menu_perms['weather'] = 0
+    else:
+        menu_perms['weather'] = 1
+
     # 批量备份授权（修复 C1）
     backup_auth = request.form.get('backup_authorized', '')
     backup_auth_val = (backup_auth == '1' or backup_auth == 'on')
@@ -2807,6 +2813,12 @@ def admin_update_user_permissions(user_id):
                 menu_perms[m] = int(legacy_p)
             else:
                 menu_perms[m] = 0
+
+    # 针对天气只读工具菜单：未勾选天气则权限级别归零，勾选则设为 1
+    if 'weather' not in menus_list:
+        menu_perms['weather'] = 0
+    else:
+        menu_perms['weather'] = 1
 
     user.set_menu_permissions(menu_perms)
     ledger_p = menu_perms.get('ledger', 0)

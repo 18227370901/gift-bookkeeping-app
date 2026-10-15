@@ -1913,3 +1913,11 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
      - 为 `WebhookLog` 的 `created_at`、`event_type`、`is_success`、`webhook_id` 以及 `ScheduledTaskExecutionLog` 的 `end_time`、`status` 建立索引；
      - 日志列表查询采用 `db.joinedload(WebhookLog.operator)` 预加载，彻底消除 N+1 查询；修复日志表空行 `colspan=9` 对齐。
 
+### 11.11 ADR-49：用户权限配置交互与天气模块精简去冗余及弹窗排版治理（V10.11.18 落地）
+- **背景与根因**：
+  1. 天气权限二元开关与下拉冗余冲突：天气功能为无用户隔离属性的纯只读工具页面，其访问权由 `allowed_menus` 中的 `weather` 键完全控制。此前权限配置界面为天气模块提供了「无天气访问权限」与「可查看实时天气」两个下拉选项，当管理员勾选天气但选择「无天气访问权限」时，后台虽通过逻辑剔除天气键，但前端存在认知冲突与状态二义性，属于功能冗余；
+  2. 样式污染与排版溢出缺陷：用户管理页面的权限配置弹窗 (`permModal{{ u.id }}`) 挂载在表格末列操作栏 `<td class="text-end pe-4">` 内部，继承了父级 `td:last-child` 的全局规则 `white-space: nowrap;`；弹窗底部「安全保护」提示语因无法换行导致单行宽度达到 566px，超出 464px 宽度的提示框达 102px（水平溢出）；且弹窗总高 1013px 缺少 `modal-dialog-scrollable`，在常规分辨率屏幕上直接被挤出屏幕视口底部（垂直溢出）。
+- **决策方案与实施结果**：
+  1. **天气权限去冗余归一**：单用户与批量权限配置弹窗移除「无天气访问权限」选项，仅保留「可查看实时天气」；权限完全由「天气」复选框控制，未勾选时后台自动归零 `menu_perms['weather'] = 0`，勾选时设为 `1`，实现交互认知与存储逻辑的自洽统一；
+  2. **弹窗排版与折行治理**：在页面 `extra_css` 及弹窗容器显式声明 `.modal { white-space: normal; }`，切断操作列 `white-space: nowrap` 的污染；弹窗提示框添加 `word-break: break-word;`，提示语优雅自动折行并紧密贴合提示框边界；
+  3. **弹窗自适应滚动适配**：单用户与批量弹窗升级为 `modal-dialog-scrollable` 并配置表单 flex 滚动容器，确保在任意分辨率屏幕下弹窗头部与底部操作按钮固定可见，内部自适应平滑滚动。
