@@ -1465,7 +1465,7 @@ graph LR
 <tr><td>统一模型</td><td>每组 = 有序端点列表 <code>[{url, enabled}]</code> + <code>timeout</code>（默认 8s，企微 10s）+ <code>retries</code>（默认 0）；存储复用 <code>system_settings</code> 表新增 19 个 key（<code>api_urls_*</code> / <code>ai_search_enabled</code>）；实时读库即存即生效；故障转移：按序遍历启用端点，任一成功即返回，全败按重试轮数整轮重试后走各模块既有降级。</td></tr>
 <tr><td>按组改造</td><td><code>weather_service._http_get_endpoint()</code> 替换 3 处硬编码；<code>holiday_service</code> 请求前 <code>normalize_holiday_url().replace('{年份}', year)</code> 自动注入年份；<code>webhook_utils</code> 三处 <code>WSClientOptions</code> 增加 <code>ws_url=await _pick_wecom_ws_url_async()</code> 握手探测；<code>web_search.py</code> 新增总开关与 DuckDuckGo 兼容自定义端点请求。</td></tr>
 <tr><td>一键测试</td><td><code>POST /admin/service-config/test</code>（仅管理员 + CSRF），按组真实协议校验（Open-Meteo JSON 结构 / 节假日 <code>code==0</code>（需浏览器 UA 防 403） / 企微 WS 握手 / 搜索端点解析）；基于表单当前值（未保存也可测），行内反馈 ✓/✗ 与耗时、原因。</td></tr>
-<tr><td>页面与权限</td><td>新增 <code>templates/admin_service_config.html</code>；<code>routes_ext.py</code> 新增 GET / POST 保存 / POST 测试三路由（白名单分组 + URL 前缀校验 + 至少 1 条启用端点 + 节假日自动补全）；<code>base.html</code> 系统管理菜单新增「外部接口配置」；默认值 = 现状硬编码地址，行为零变化。</td></tr>
+<tr><td>页面与权限</td><td>新增 <code>templates/admin_service_config.html</code>；<code>routes_ext.py</code> 新增 GET / POST 保存 / POST 测试三路由（白名单分组 + URL 前缀校验 + 至少 1 条启用端点 + 节假日自动补全；保存接口天然支持单组提交，其余组不受影响）；每组卡片独立「保存」「取消」按钮（取消恢复已保存快照），顶部保留全局「保存配置」；<code>base.html</code> 系统管理菜单新增「外部接口配置」；默认值 = 现状硬编码地址，行为零变化。</td></tr>
 <tr><td>验证结论</td><td>浏览器逐项实测：默认配置下各模块行为一致；天气 forecast 组首行配不可达地址保存后，实际查询仍返回完整数据（自动故障转移）；「测试全部启用」按序输出并提示「第 N 个端点可用」；节假日输入 <code>.../year/</code> 保存后自动补全 <code>{年份}</code>；企微 WS 握手成功；AI 搜索端点如实报错（DuckDuckGo 国内不可达）；测试配置已恢复默认。</td></tr>
 </table>
 </div>
