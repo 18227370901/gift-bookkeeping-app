@@ -24,7 +24,7 @@ import time
 import requests
 
 # V10.11.20 外部接口服务配置（多端点 + 故障转移 + 重试参数），见 service_config.py
-import service_config
+from services import service_config
 
 # 支持范围（与万年历农历数据表一致）
 HOLIDAY_YEAR_MIN = 1900
@@ -50,8 +50,8 @@ BUILTIN_HOLIDAYS = {
 }
 
 
-# 磁盘缓存路径（data/ 目录，与运行库同级的公开数据缓存）
-_CACHE_FILE = os.path.join('data', 'holiday_cache.json')
+# 磁盘缓存路径（V10.11.21 起归入 logs/ 目录：公开数据缓存不入库不上传，cwd 相对路径——服务以项目根为工作目录）
+_CACHE_FILE = os.path.join('logs', 'holiday_cache.json')
 
 # 进程内存缓存：{year(int): holiday字典}
 _mem_cache = {}
@@ -80,8 +80,8 @@ def _save_disk_cache(year, holiday):
     到 2027 年时窗口自动变为 2025-2027，既避免旧年份无限堆积，也保证未来年份
     （官方安排发布后）始终能正常拉取进入缓存，彻底消除数据滞后。"""
     try:
-        if not os.path.exists('data'):
-            os.makedirs('data', exist_ok=True)
+        if not os.path.exists('logs'):
+            os.makedirs('logs', exist_ok=True)
         data = _load_disk_cache()
         data[str(year)] = holiday
         # 滚动窗口过滤（保留非数字键以防未来扩展；写入年不在窗口内时当次仍内存可用，磁盘不留）

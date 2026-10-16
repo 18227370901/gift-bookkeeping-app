@@ -8,14 +8,14 @@ import threading
 from datetime import datetime, timedelta
 from flask import render_template, request, redirect, url_for, flash, jsonify, send_from_directory, make_response, Response, session, current_app
 from flask_login import login_required, current_user
-from models import (
+from services.models import (
     db, User, GiftRecord, Banquet, AnniversaryReminder, Broadcast, BroadcastRead,
     WebhookConfig, WebhookLog, SharedLedgerLink, BackupConfig, LoginRisk, SecurityRisk,
     SystemSetting, ScheduledBackupTask, BackupAttachment, PermissionTicket,
     ScheduledTaskExecutionLog, FamilyGroup, FamilyMember
 )
-from webhook_utils import trigger_webhook_event, test_single_webhook, validate_wecom_credentials, extract_chatid_from_url, start_wecom_long_connection_listener, _cached_chatids, record_webhook_log, _send_payload, send_wecom_long_connection_message
-from webdav_utils import (
+from services.webhook_utils import trigger_webhook_event, test_single_webhook, validate_wecom_credentials, extract_chatid_from_url, start_wecom_long_connection_listener, _cached_chatids, record_webhook_log, _send_payload, send_wecom_long_connection_message
+from services.webdav_utils import (
     test_connection as test_webdav_connection,
     upload_backup as upload_backup_webdav,
     list_backups as list_webdav_backups,
@@ -29,11 +29,11 @@ from webdav_utils import (
     # 页面 has_pyzipper 收到 None（falsy）会导致 pyzipper 实际已安装也误报"未安装"
     _ensure_pyzipper
 )
-from gift_utils import (
+from services.gift_utils import (
     parse_gift_nlp, parse_gift_nlp_multi, split_gift_nlp_text,
     get_gift_suggestion, calculate_reconciliation, cn2num
 )
-from _daemon_lock import try_acquire_daemon_lock
+from services._daemon_lock import try_acquire_daemon_lock
 
 
 # ===== 金额转中文大写辅助函数 =====
@@ -3367,7 +3367,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         if not getattr(current_user, 'is_admin', False):
             flash('权限不足', 'danger')
             return redirect(url_for('index'))
-        from service_config import get_all_config
+        from services.service_config import get_all_config
         return render_template('admin_service_config.html', cfg=get_all_config())
 
     @app.route('/admin/service-config/save', methods=['POST'])
@@ -3376,7 +3376,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         """保存外部接口配置（白名单分组 + URL 格式校验 + 节假日变量自动补全）"""
         if not getattr(current_user, 'is_admin', False):
             return jsonify({'success': False, 'message': '权限不足'}), 403
-        from service_config import DEFAULT_GROUPS, save_group_config, normalize_holiday_url
+        from services.service_config import DEFAULT_GROUPS, save_group_config, normalize_holiday_url
         try:
             payload = request.get_json(silent=True) or {}
         except Exception:
@@ -3430,7 +3430,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         """一键测试外部接口端点（针对当前表单输入值，未保存也可测）"""
         if not getattr(current_user, 'is_admin', False):
             return jsonify({'success': False, 'message': '权限不足'}), 403
-        from service_config import DEFAULT_GROUPS, test_group
+        from services.service_config import DEFAULT_GROUPS, test_group
         try:
             payload = request.get_json(silent=True) or {}
         except Exception:
@@ -3472,7 +3472,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         # V10.11.18 性能优化：joinedload 消除 500 条日志模板渲染时的 N+1 数据库查询
         logs = WebhookLog.query.options(db.joinedload(WebhookLog.operator)).order_by(WebhookLog.created_at.desc()).limit(500).all()
         # V10.1: 注入矩阵数据到模板
-        from webhook_utils import PAGE_NAMES as _PAGE_NAMES, EVENT_COLUMNS as _EVENT_COLUMNS, PAGE_EVENT_MATRIX as _PAGE_EVENT_MATRIX, DEFAULT_MESSAGE_TEMPLATES as _DEFAULT_TEMPLATES
+        from services.webhook_utils import PAGE_NAMES as _PAGE_NAMES, EVENT_COLUMNS as _EVENT_COLUMNS, PAGE_EVENT_MATRIX as _PAGE_EVENT_MATRIX, DEFAULT_MESSAGE_TEMPLATES as _DEFAULT_TEMPLATES
         return render_template('admin_webhooks.html', webhooks=webhooks, logs=logs,
                                ALL_PAGES=_PAGE_NAMES, EVENT_COLUMNS=_EVENT_COLUMNS,
                                PAGE_EVENT_MATRIX=_PAGE_EVENT_MATRIX,
@@ -3529,11 +3529,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         try:
             types_list = _wh_json.loads(monitor_event_types) if monitor_event_types else []
             if not types_list:
-                from webhook_utils import EVENT_COLUMNS as _ev_cols
+                from services.webhook_utils import EVENT_COLUMNS as _ev_cols
                 types_list = list(_ev_cols.keys())
                 monitor_event_types = _wh_json.dumps(types_list)
         except Exception:
-            from webhook_utils import EVENT_COLUMNS as _ev_cols
+            from services.webhook_utils import EVENT_COLUMNS as _ev_cols
             monitor_event_types = _wh_json.dumps(list(_ev_cols.keys()))
 
         is_ajax = request.headers.get('X-Requested-With') == 'XMLHttpRequest'
@@ -3765,7 +3765,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_test_webhook(webhook_id):
         """测试 Webhook 或长连接机器人发送"""
-        from alert_service import has_alert_permission
+        from services.alert_service import has_alert_permission
         def _can_test():
             return getattr(current_user, 'is_admin', False) or bool(getattr(current_user, 'webhook_authorized', False)) or has_alert_permission(current_user, 'test') or (
                 hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))
@@ -3804,7 +3804,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_delete_webhook_log(log_id):
         """删除单条 Webhook 推送日志"""
-        from alert_service import has_alert_permission
+        from services.alert_service import has_alert_permission
         def _can_del_log():
             return getattr(current_user, 'is_admin', False) or bool(getattr(current_user, 'webhook_authorized', False)) or has_alert_permission(current_user, 'view_log') or (
                 hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))
@@ -3833,7 +3833,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_batch_delete_webhook_logs():
         """批量删除 Webhook 推送日志"""
-        from alert_service import has_alert_permission
+        from services.alert_service import has_alert_permission
         def _can_del_logs():
             return getattr(current_user, 'is_admin', False) or bool(getattr(current_user, 'webhook_authorized', False)) or has_alert_permission(current_user, 'view_log') or (
                 hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))
@@ -4567,7 +4567,10 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
             # 第4步：备份现有数据库防止损坏
             if os.path.exists(db_path):
-                shutil.copy2(db_path, db_path + f".bak_{int(time.time())}")
+                # V10.11.21 结构重组：历史库备份归入 logs/ 目录（仅本地留存，不入库不上传）
+                _bak_dir = os.path.abspath(os.path.join(os.path.dirname(db_path), '..', 'logs'))
+                os.makedirs(_bak_dir, exist_ok=True)
+                shutil.copy2(db_path, os.path.join(_bak_dir, os.path.basename(db_path) + f".bak_{int(time.time())}"))
 
             # 第5步：用 sqlite3.backup() 原子性替换数据库内容（不操作文件，避免 WAL 不一致）
             try:
@@ -4642,8 +4645,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('仅支持 JSON、CSV、TXT、XLSX、DOCX、ZIP 格式文件！', 'danger')
             return redirect(url_for('admin_backups'))
 
-        # 保存到 data/attachments 目录
-        attachments_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'attachments')
+        # 保存到 data/attachments 目录（V10.11.21 结构重组：迁入 routes/ 后锚点上溯一级回项目根）
+        attachments_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'attachments')
         os.makedirs(attachments_dir, exist_ok=True)
         filename = file.filename
         save_path = os.path.join(attachments_dir, filename)
@@ -4815,7 +4818,10 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 # 管理员：保持原文件级替换逻辑（V5: 改用 sqlite3.backup() 原子操作，避免 WAL 不一致）
                 # 第4步：备份当前数据库防止恢复失败
                 if os.path.exists(db_path):
-                    shutil.copy2(db_path, db_path + f".bak_{int(time.time())}")
+                    # V10.11.21 结构重组：历史库备份归入 logs/ 目录（仅本地留存，不入库不上传）
+                    _bak_dir = os.path.abspath(os.path.join(os.path.dirname(db_path), '..', 'logs'))
+                    os.makedirs(_bak_dir, exist_ok=True)
+                    shutil.copy2(db_path, os.path.join(_bak_dir, os.path.basename(db_path) + f".bak_{int(time.time())}"))
 
                 # 第5步：用 sqlite3.backup() 原子性替换数据库内容（不操作文件，避免 WAL 不一致）
                 try:
@@ -5716,7 +5722,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     def api_dashboard_stats():
         """数据分析看板 API — 返回汇总/月度/年度/事由分布/TOP10 数据，支持日期范围筛选 (P2-1 / P2-5 优化)"""
         try:
-            from dashboard_service import calculate_dashboard_stats
+            from services.dashboard_service import calculate_dashboard_stats
             data = calculate_dashboard_stats(
                 current_user,
                 start_month=request.args.get('start_month', '').strip(),
@@ -6106,7 +6112,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             if ',' in image_b64 and image_b64.startswith('data:'):
                 image_b64 = image_b64.split(',', 1)[1]
 
-            from ai_service import recognize_gift_image
+            from services.ai_service import recognize_gift_image
             result = recognize_gift_image(image_b64, user=current_user)
             return jsonify(result)
         except Exception as e:
@@ -6225,7 +6231,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 'total_count': len(records)
             }
 
-            from pdf_generator import generate_pdf_statement
+            from services.pdf_generator import generate_pdf_statement
             pdf_buffer = generate_pdf_statement(record_list, summary, title='礼金对账单')
             safe_log('导出PDF对账单', f'共 {len(records)} 条记录', user=current_user)
 
@@ -6258,7 +6264,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     def api_poster_data():
         """海报数据 API (P2-1 / P2-5 优化)"""
         try:
-            from dashboard_service import calculate_poster_stats
+            from services.dashboard_service import calculate_poster_stats
             data = calculate_poster_stats(current_user, root_url=request.url_root)
             return jsonify({'code': 200, 'data': data})
         except Exception as e:

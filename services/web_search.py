@@ -20,7 +20,7 @@ DDGS = None
 _HAS_DDS = None  # None=未检测, True/False=已检测
 
 # V10.11.20 外部接口服务配置（总开关 / 多端点 / 重试参数）
-import service_config
+from services import service_config
 
 # 默认搜索端点（对应官方库调用）
 _DEFAULT_SEARCH_URL = 'https://duckduckgo.com'

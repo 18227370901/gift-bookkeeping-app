@@ -28,10 +28,10 @@ def _ensure_openai():
         _HAS_OPENAI = False
     return OpenAI
 
-from models import db, User, ChatSession, ChatMessage, AIQueryLog
-from models import encrypt_credential, decrypt_credential
-from web_search import needs_search, search_and_summarize
-from gift_utils import cn2num as _cn2num
+from services.models import db, User, ChatSession, ChatMessage, AIQueryLog
+from services.models import encrypt_credential, decrypt_credential
+from services.web_search import needs_search, search_and_summarize
+from services.gift_utils import cn2num as _cn2num
 
 
 # ==================== V10.11.8 网络策略：禁代理直连优先 + 系统代理兑底 ====================

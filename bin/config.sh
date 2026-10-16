@@ -25,8 +25,10 @@ if [ ! -d "$APP_DIR" ]; then
 fi
 VENV_DIR="$APP_DIR/venv"
 APP_SCRIPT="app.py"
-PID_FILE="$APP_DIR/app.pid"
-LOG_FILE="$APP_DIR/app.log"
+# V10.11.21 结构重组：PID 文件（运行期临时产物）归入 logs/ 目录
+PID_FILE="$APP_DIR/logs/app.pid"
+# V10.11.21 结构重组：运行日志归入 logs/ 目录（不入库不上传）
+LOG_FILE="$APP_DIR/logs/app.log"
 
 # ===== SNI 多项目共用端口配置 =====
 PROJECT_NAME="${PROJECT_NAME:-gift_app}"

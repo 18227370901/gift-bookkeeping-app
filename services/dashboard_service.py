@@ -7,7 +7,7 @@
   - 计算收送汇总、月度趋势、年度趋势、事由分布与 TOP 亲友往来
 """
 from datetime import datetime, timedelta
-from models import GiftRecord, SystemSetting
+from services.models import GiftRecord, SystemSetting
 
 
 def get_accessible_gift_query(user):

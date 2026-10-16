@@ -16,7 +16,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
-from models import (
+from services.models import (
     db, User, GiftRecord, OperationLog, SystemSetting, RegistrationToken,
     LoginRisk, SecurityRisk, Broadcast, BroadcastRead, WebhookConfig, WebhookLog,
     SharedLedgerLink, BackupConfig, Banquet, AnniversaryReminder,
@@ -24,14 +24,14 @@ from models import (
     ScheduledBackupTask, BackupAttachment, PermissionTicket,
     FamilyGroup, FamilyMember
 )
-from webhook_utils import trigger_webhook_event
-from webdav_utils import (
+from services.webhook_utils import trigger_webhook_event
+from services.webdav_utils import (
     test_connection as test_webdav_connection,
     upload_backup as upload_backup_webdav,
     list_backups as list_webdav_backups,
     download_backup as restore_webdav_backup
 )
-from routes_ext import register_routes_ext
+from routes.routes_ext import register_routes_ext
 
 # Determine bundle directory for PyInstaller / PyBuild
 if getattr(sys, 'frozen', False):
@@ -1075,7 +1075,7 @@ def init_database():
         try:
             import json as _migrate_json
             all_user_ids = [u.id for u in User.query.with_entities(User.id).all()]
-            from webhook_utils import EVENT_COLUMNS as _migrate_events
+            from services.webhook_utils import EVENT_COLUMNS as _migrate_events
             all_event_types = list(_migrate_events.keys())
             hooks_to_migrate = WebhookConfig.query.all()
             # V10.10.20: changed 必须在循环外初始化——原实现存在两个缺陷：
@@ -3538,16 +3538,16 @@ register_routes_ext(
 )
 
 # 注册 AI 助手路由
-from routes_ai import register_ai_routes
+from routes.routes_ai import register_ai_routes
 register_ai_routes(app, log_action=log_action)
 
 # 注册天气查询路由（Open-Meteo 数据源）
-from routes_weather import register_weather_routes
+from routes.routes_weather import register_weather_routes
 register_weather_routes(app)
 
 # V10.11.8 注册告警推送路由（配置/测试/日志/授权）并启动后台巡检守护线程
-from routes_alert import register_alert_routes
-from alert_service import start_alert_inspector
+from routes.routes_alert import register_alert_routes
+from services.alert_service import start_alert_inspector
 register_alert_routes(app)
 start_alert_inspector(app)
 print('[Init] 告警巡检守护线程已启动（30 分钟一轮，总开关/授权由巡检时实时判定）')

@@ -87,7 +87,7 @@ def _retries_key(group):
 def _get_setting(key, default=None):
     """读 system_settings（无 app context / 读失败时兜底默认值，保证后台线程安全）"""
     try:
-        from models import SystemSetting
+        from services.models import SystemSetting
         return SystemSetting.get_val(key, default)
     except Exception:
         return default
@@ -96,7 +96,7 @@ def _get_setting(key, default=None):
 def _set_setting(key, value):
     """写 system_settings（异常静默，配置写失败不阻断主流程）"""
     try:
-        from models import SystemSetting
+        from services.models import SystemSetting
         SystemSetting.set_val(key, value)
     except Exception:
         pass
@@ -192,7 +192,7 @@ def save_group_config(group, urls, timeout=None, retries=None, ai_search_enabled
 def clear_group(group):
     """删除该组全部配置 key（读取时自动回落默认值）"""
     try:
-        from models import SystemSetting, db
+        from services.models import SystemSetting, db
         for key in (_url_key(group), _timeout_key(group), _retries_key(group)):
             s = SystemSetting.query.filter_by(key=key).first()
             if s:

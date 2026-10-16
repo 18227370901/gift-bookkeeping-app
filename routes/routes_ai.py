@@ -8,10 +8,10 @@ import json
 from datetime import datetime
 from flask import render_template, request, redirect, url_for, flash, jsonify, session, abort
 from flask_login import login_required, current_user
-from models import db, User, ChatSession, ChatMessage, AIQueryLog
-from ai_service import ai_chat, _build_config_list, _get_suggestions, test_ai_config, fetch_model_list
-from webhook_utils import trigger_webhook_event
-from models import WebhookConfig
+from services.models import db, User, ChatSession, ChatMessage, AIQueryLog
+from services.ai_service import ai_chat, _build_config_list, _get_suggestions, test_ai_config, fetch_model_list
+from services.webhook_utils import trigger_webhook_event
+from services.models import WebhookConfig
 
 
 def register_ai_routes(app, log_action=None):
