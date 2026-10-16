@@ -20,12 +20,12 @@ from datetime import date as _date
 from flask import render_template, request, jsonify, current_app
 from flask_login import login_required, current_user
 
-from weather_service import (
+from services.weather_service import (
     query_weather, query_weather_by_coords, WeatherError, CITY_NAME_MAX_LEN,
     DEFAULT_FORECAST_DAYS,
 )
-from holiday_service import get_year_holidays, HOLIDAY_YEAR_MIN, HOLIDAY_YEAR_MAX
-from models import SystemSetting
+from services.holiday_service import get_year_holidays, HOLIDAY_YEAR_MIN, HOLIDAY_YEAR_MAX
+from services.models import SystemSetting
 
 # ===================== V10.11.12 首页背景横幅天气 =====================
 # 管理员从未查过天气时的兜底城市（V10.11.12 需求确认：默认成都）
@@ -267,7 +267,7 @@ def register_weather_routes(app):
         # 4. 本月人情往来摘要
         ledger_summary = None
         try:
-            from models import GiftRecord
+            from services.models import GiftRecord
             today = _date.today()
             first_day = today.replace(day=1)
             if today.month == 12:

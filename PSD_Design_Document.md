@@ -11,7 +11,7 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.11.20  
+> **版本**：V10.11.21  
 > **生成日期**：2026-10-16  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
@@ -1936,3 +1936,14 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   4. **一键测试**：`POST /admin/service-config/test`（仅管理员 + CSRF），入参 = 表单当前值（未保存也可测）；按组真实协议校验——Open-Meteo 三组校验 HTTP 200 + 关键 JSON 字段、节假日校验 `code==0`（timor.tech 反爬需模拟浏览器 UA，实测 UA 前 403 / UA 后 200）、企微 WS 握手连通（不做 bot 鉴权）、AI 搜索端点请求 + 结果结构解析；前端每行「测试」按钮与组级「测试全部启用」按钮，行内/结果区展示 ✓/✗、耗时、失败原因（403/超时/非 JSON/字段缺失等）。
   5. **页面与权限**：新增 `templates/admin_service_config.html`（6 组卡片：端点行 [地址 + 启用勾选 + 上移/下移/删除 + 测试]、「＋ 添加端点」（**新增行自带「保存」「取消」按钮，仅新增时显示**——保存将该组当前值含新增行整体入库、成功后该行转为已保存行按钮消失；取消放弃该行不入库；已保存行仅保留测试/上移/下移/删除）、请求超时/重试次数输入、AI 组总开关、顶部全局「保存配置」「恢复默认」（二次确认）、黑夜模式 + CSRF）；`routes_ext.py` 新增 GET `/admin/service-config`、POST `/admin/service-config/save`（白名单分组、URL 前缀 `http/https/wss/ws` 校验、每组至少 1 条启用端点、节假日自动补全；**天然支持单组提交——仅传该组分组，其余组不受影响**）、POST `/admin/service-config/test`；`base.html` 系统管理菜单新增「外部接口配置」；默认值 = 现状硬编码地址，输入框 `placeholder=默认值`，行为零变化。**交互细节**：操作提示为页面顶部居中轻量 toast（success/danger 双色，自动消失可手动关闭，已移除全部原生 alert/confirm，「恢复默认」为 Bootstrap 模态二次确认）；行内按钮统一图标 + 中文（测试/上移/下移/删除，新增行另含保存/取消）；移动边界置灰——首行「上移」与末行「下移」自动 disabled（`refreshMoveButtons` 在添加/移动/删除/取消/恢复/保存重渲染后统一刷新，Jinja 初始行以 `loop.first/loop.last` 静态渲染）。
   6. **验证结论（浏览器逐项实测）**：默认配置下天气页、万年历班休、企微长连接、AI 搜索行为与改前一致；天气预报组首行配置不可达地址（`https://127.0.0.1:1/v1/forecast`）保存后，实际查询「北京市」仍返回完整天气数据（自动故障转移到第二行 open-meteo）；「测试全部启用」按序输出每行结果并提示「第 N 个端点可用，将优先使用」；节假日输入 `.../year/` 保存后库中自动存为 `https://timor.tech/api/holiday/year/{年份}`；企微 WS 握手测试成功（5249ms）；AI 搜索端点测试如实报错（国内 DuckDuckGo 不可达 ConnectTimeout）；测试配置已恢复默认并复核数据库零残留差异。
+
+### 11.13 ADR-51：根目录文件架构重组（V10.11.21 落地，仅结构·零业务逻辑变化）
+- **背景与根因**：
+  1. 根目录堆积 19 个 `.py` 文件（主入口 app.py 3189 行 + 18 个业务模块），阅读入口不清晰；正常工程惯例根目录仅应有启动入口、说明/设计文档、依赖清单等基础文件；
+  2. 运行期产物散落：根目录 4 个调试/运行日志、根目录与 data/ 共 5 个 `gift_bookkeeping.db.bak_*` 历史库备份、data/ 下 3 个节假日/天气磁盘缓存 json——与"仓库数据"混杂，虽有 .gitignore 兜底但结构混乱。
+- **决策方案与实施结果**：
+  1. **三分层包化迁移（git mv 保留文件历史，18 个文件全部识别为 rename）**：`services/`（13 模块：models/gift_utils/ai_service/web_search/webhook_utils/webdav_utils/weather_service/holiday_service/alert_service/dashboard_service/pdf_generator/service_config/_daemon_lock）、`routes/`（routes_ext/routes_ai/routes_weather/routes_alert）、`tools/`（generate_ssl_certs）；各包附 `__init__.py` 注释头；根目录仅剩 `app.py`（BUNDLE_DIR/templates/static/样例库语义不变）。
+  2. **logs/ 运行期产物统一收纳（仅本地留存，.gitignore 整体忽略）**：`bin/config.sh` 的 `LOG_FILE`/`PID_FILE` 改指 `logs/app.log`/`logs/app.pid`；`routes_ext.py` 两处恢复前自动备份路径由 `db_path + .bak_时间戳` 改为 `logs/` 下；`holiday_service`/`weather_service` 磁盘缓存路径常量由 `data/` 改 `logs/`（holiday 补 `os.makedirs('logs')` 保证）；存量文件迁移：根目录 4 日志 + 根目录 2 个旧库备份 + data/ 3 个运行库自动备份 + data/ 3 个缓存 json 全部移入 logs/；`data/` 收敛为仅运行库（含 WAL/SHM）与 attachments 用户附件。
+  3. **路径适配（全部语义等价替换，零逻辑变化）**：55 处 import 改写（正则脚本批量：顶层 `from X import` → `from services.X import`、裸 `import X` → `from services import X`、routes 四模块同理；函数内延迟导入一并处理，改后全项目零残留旧式引用）；5 处 `__file__` 锚点各上溯一级（`os.path.dirname(os.path.dirname(...))`）——`_daemon_lock` 锁文件、`webhook_utils._resolve_db_file` 三候选 db 路径、`alert_service.check_data_integrity` 静态资源检查、`weather_service` 区划 js 加载、`routes_ext` 附件目录，指向路径与重组前逐字节一致；`bin/ssl_certs.sh` 两处证书脚本路径改指 `tools/`。
+  4. **验证（编译+服务层+浏览器三层）**：22 文件 `py_compile` 全过；服务层直连冒烟（节假日 2026 年 39 天班休从 logs/ 缓存正常读取、weather/service_config 链路导入正常）；重启后 `/health` 200、15 个页面全 200、天气/节假日/看板 API 200、企微长连接 WebSocket 正常建立（853000 为样例 bot 凭证预期认证失败）；`routes_ext.py` 6319 行逐行对比实际差异仅 50 行（全部为 import/锚点/备份路径行）。
+  5. **连带影响**：Docker 版/APK 版目录结构本次不动（三者共享文件约定改为按路径映射同步：传统版 `services/web_search.py` ↔ 两版 `web_search.py`）；PyInstaller frozen 分支逻辑（app.py 内 BUNDLE_DIR）不受影响；两版此前共享的 `bin/` 脚本未动。

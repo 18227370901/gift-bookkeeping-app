@@ -20,8 +20,8 @@ import io
 from flask import (request, jsonify, current_app, Response)
 from flask_login import login_required, current_user
 
-from models import db, AlertPushConfig, AlertPushGrant, WebhookLog, User
-from alert_service import (
+from services.models import db, AlertPushConfig, AlertPushGrant, WebhookLog, User
+from services.alert_service import (
     get_alert_config, get_alert_config_dict, has_alert_permission,
     has_any_alert_permission, send_test_alert, run_inspection_once,
     parse_alert_cities, MAX_ALERT_CITIES, ALERT_TYPE_NAMES,
