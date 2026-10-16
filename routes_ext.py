@@ -3359,6 +3359,96 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 pass
         return jsonify({'code': 200, 'message': '所有通知已全部标记为已读'})
 
+    # ===================== V10.11.20 外部接口服务配置（管理员） =====================
+    @app.route('/admin/service-config', methods=['GET'])
+    @login_required
+    def admin_service_config():
+        """管理员「外部接口服务配置」页面：天气/节假日/企微长连接/AI搜索 多端点 + 一键测试"""
+        if not getattr(current_user, 'is_admin', False):
+            flash('权限不足', 'danger')
+            return redirect(url_for('index'))
+        from service_config import get_all_config
+        return render_template('admin_service_config.html', cfg=get_all_config())
+
+    @app.route('/admin/service-config/save', methods=['POST'])
+    @login_required
+    def admin_service_config_save():
+        """保存外部接口配置（白名单分组 + URL 格式校验 + 节假日变量自动补全）"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from service_config import DEFAULT_GROUPS, save_group_config, normalize_holiday_url
+        try:
+            payload = request.get_json(silent=True) or {}
+        except Exception:
+            payload = {}
+        groups = payload.get('groups') or {}
+        saved = 0
+        for gname in DEFAULT_GROUPS:
+            gdata = groups.get(gname)
+            if not isinstance(gdata, dict):
+                continue
+            urls = gdata.get('urls')
+            timeout = gdata.get('timeout')
+            retries = gdata.get('retries')
+            if not isinstance(urls, list) or not urls:
+                return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」端点列表不能为空'}), 400
+            cleaned = []
+            for item in urls:
+                if not isinstance(item, dict):
+                    continue
+                u = str(item.get('url') or '').strip()
+                if not u:
+                    continue
+                if not (u.startswith('http://') or u.startswith('https://') or u.startswith('wss://') or u.startswith('ws://')):
+                    return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」地址必须以 http/https/wss 开头：{u}'}), 400
+                if gname == 'holiday':
+                    # 管理员只需填到 .../year/，系统自动补全 {年份} 变量
+                    u = normalize_holiday_url(u)
+                cleaned.append({'url': u, 'enabled': bool(item.get('enabled', True))})
+            if not cleaned or not any(x['enabled'] for x in cleaned):
+                return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」至少需要 1 条启用中的端点'}), 400
+            try:
+                timeout = max(1, min(60, int(timeout)))
+            except Exception:
+                timeout = DEFAULT_GROUPS[gname]['timeout']
+            try:
+                retries = max(0, min(10, int(retries)))
+            except Exception:
+                retries = DEFAULT_GROUPS[gname]['retries']
+            save_group_config(gname, cleaned, timeout=timeout, retries=retries)
+            saved += 1
+        # AI 联网搜索总开关（独立于端点列表）
+        ai_enabled = payload.get('ai_search_enabled')
+        if ai_enabled is not None:
+            save_group_config('ai_search', None, ai_search_enabled=bool(ai_enabled))
+        safe_log('更新外部接口服务配置', f'操作人：{current_user.username} | 更新分组数：{saved}')
+        return jsonify({'success': True, 'message': f'外部接口配置已保存（{saved} 组）'})
+
+    @app.route('/admin/service-config/test', methods=['POST'])
+    @login_required
+    def admin_service_config_test():
+        """一键测试外部接口端点（针对当前表单输入值，未保存也可测）"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from service_config import DEFAULT_GROUPS, test_group
+        try:
+            payload = request.get_json(silent=True) or {}
+        except Exception:
+            payload = {}
+        gname = str(payload.get('group') or '')
+        if gname not in DEFAULT_GROUPS:
+            return jsonify({'success': False, 'message': '未知分组'}), 400
+        urls = payload.get('urls')
+        timeout = payload.get('timeout')
+        if not isinstance(urls, list) or not urls:
+            return jsonify({'success': False, 'message': '端点列表为空，无法测试'}), 400
+        try:
+            timeout = max(1, min(60, int(timeout)))
+        except Exception:
+            timeout = DEFAULT_GROUPS[gname]['timeout']
+        results = test_group(gname, urls, timeout=timeout)
+        return jsonify({'success': True, 'group': gname, 'results': results})
+
     @app.route('/admin/webhooks', methods=['GET'])
     @login_required
     def admin_webhooks():

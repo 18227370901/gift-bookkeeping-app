@@ -114,8 +114,8 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.11.13</span>
-    <span><strong>生成日期</strong>：2026-10-01</span>
+    <span><strong>版本</strong>：V10.11.20</span>
+    <span><strong>生成日期</strong>：2026-10-16</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
     <span class="badge">代码是实现真相</span>
@@ -1120,6 +1120,8 @@ graph LR
 <tr><td>错误格式</td><td><code>{"error": true, "reason": "..."}</code></td><td>服务层检测后透传 reason 为中文提示</td></tr>
 </table>
 
+<blockquote><strong>V10.11.20 补充（外部接口服务配置）</strong>：以上 Open-Meteo 三端点地址不再硬编码，由管理员在「系统管理 &gt; 外部接口配置」页自定义（<code>service_config.py</code> 统一管理，默认值同上表），全部支持 <strong>多端点 + 行内启用开关 + 排序 + 故障转移 + 重试参数 + 一键测试</strong>；节假日（timor.tech，<code>{年份}</code> 变量自动补全）、企微长连接（<code>wss://openws.work.weixin.qq.com</code>）、AI 联网搜索（DuckDuckGo + 总开关）一并纳入。详见第 11 部分 ADR-50。</p>
+
 <h2>10.3 WMO weather_code → 中文映射</h2>
 <p><code>0 晴 / 1 基本晴朗 / 2 局部多云 / 3 阴天 / 4 阴天 / 45 雾 / 48 冻雾 / 51·53·55 毛毛雨 / 56·57 冻毛毛雨 / 61 小雨 / 63 中雨 / 65 大雨 / 66·67 冻雨 / 71 小雪 / 73 中雪 / 75 大雪 / 77 米雪 / 80·81·82 阵雨 / 85·86 阵雪 / 95 雷阵雨 / 96 雷暴伴小冰雹 / 99 雷暴伴大冰雹</code>；未知码兜底「未知天气(N)」。</p>
 
@@ -1454,13 +1456,27 @@ graph LR
 
 <p><strong>文件变更</strong>：<code>templates/weather.html</code>（范围联动+宴席按钮）；<code>templates/banquets.html</code>（URL 参数接收）；<code>holiday_service.py</code>（滚动窗口+冷却）；<code>app.py</code>（保存归一+ALL_MENUS+回填标记+存量清洗）。</p>
 
+<!-- ==================== 第 11 部分补充：ADR-50 外部接口服务配置（V10.11.20） ==================== -->
+<div class="section">
+<h1>第 11 部分补充：ADR-50 外部接口服务配置（V10.11.20 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景</td><td>6 组「内置默认调用地址却页面无配置入口」的外部服务：Open-Meteo 地理编码/预报/空气质量、timor.tech 节假日、企微长连接、DuckDuckGo 搜索；地址硬编码于模块顶层，管理员无法自定义/降级数据源；节假日接口带 <code>{year}</code> 参数模板，AI 搜索无开关无故障转移。</td></tr>
+<tr><td>统一模型</td><td>每组 = 有序端点列表 <code>[{url, enabled}]</code> + <code>timeout</code>（默认 8s，企微 10s）+ <code>retries</code>（默认 0）；存储复用 <code>system_settings</code> 表新增 19 个 key（<code>api_urls_*</code> / <code>ai_search_enabled</code>）；实时读库即存即生效；故障转移：按序遍历启用端点，任一成功即返回，全败按重试轮数整轮重试后走各模块既有降级。</td></tr>
+<tr><td>按组改造</td><td><code>weather_service._http_get_endpoint()</code> 替换 3 处硬编码；<code>holiday_service</code> 请求前 <code>normalize_holiday_url().replace('{年份}', year)</code> 自动注入年份；<code>webhook_utils</code> 三处 <code>WSClientOptions</code> 增加 <code>ws_url=await _pick_wecom_ws_url_async()</code> 握手探测；<code>web_search.py</code> 新增总开关与 DuckDuckGo 兼容自定义端点请求。</td></tr>
+<tr><td>一键测试</td><td><code>POST /admin/service-config/test</code>（仅管理员 + CSRF），按组真实协议校验（Open-Meteo JSON 结构 / 节假日 <code>code==0</code>（需浏览器 UA 防 403） / 企微 WS 握手 / 搜索端点解析）；基于表单当前值（未保存也可测），行内反馈 ✓/✗ 与耗时、原因。</td></tr>
+<tr><td>页面与权限</td><td>新增 <code>templates/admin_service_config.html</code>；<code>routes_ext.py</code> 新增 GET / POST 保存 / POST 测试三路由（白名单分组 + URL 前缀校验 + 至少 1 条启用端点 + 节假日自动补全）；<code>base.html</code> 系统管理菜单新增「外部接口配置」；默认值 = 现状硬编码地址，行为零变化。</td></tr>
+<tr><td>验证结论</td><td>浏览器逐项实测：默认配置下各模块行为一致；天气 forecast 组首行配不可达地址保存后，实际查询仍返回完整数据（自动故障转移）；「测试全部启用」按序输出并提示「第 N 个端点可用」；节假日输入 <code>.../year/</code> 保存后自动补全 <code>{年份}</code>；企微 WS 握手成功；AI 搜索端点如实报错（DuckDuckGo 国内不可达）；测试配置已恢复默认。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.13</td></tr>
-<tr><td>生成日期</td><td>2026-10-10（V10.11.13 五项缺陷修复；承接 V10.11.12 登录后背景横幅）</td></tr>
+<tr><td>文档版本</td><td>V10.11.20</td></tr>
+<tr><td>生成日期</td><td>2026-10-16（V10.11.20 外部接口服务配置；承接 V10.11.18 Webhook/告警权限自洽与日志性能治理）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
