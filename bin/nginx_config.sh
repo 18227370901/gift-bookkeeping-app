@@ -28,9 +28,16 @@ setup_nginx_config() {
                 fi
             done
         fi
+        local nginx_template=""
+        if [ -f "$APP_DIR/config/nginx_ssl.conf" ]; then
+            nginx_template="$APP_DIR/config/nginx_ssl.conf"
+        elif [ -f "$APP_DIR/nginx_ssl.conf" ]; then
+            nginx_template="$APP_DIR/nginx_ssl.conf"
+        fi
+
         if [ -f "$target_conf" ] && ! should_overwrite "$target_conf" "$NGINX_CONF_FORCE_UPDATE" "NGINX_CONF_FORCE_UPDATE"; then
             echo_e "${YELLOW}保留现有 Nginx 配置文件，未重新渲染: $target_conf${NC}"
-        elif [ -f "$APP_DIR/nginx_ssl.conf" ]; then
+        elif [ -n "$nginx_template" ]; then
             local listen_value="$NGINX_PORT"
             local default_flag="否"
             if [ "$SNI_DEFAULT_SERVER" = "1" ]; then
@@ -38,7 +45,7 @@ setup_nginx_config() {
                 default_flag="是"
             fi
             {
-                echo "# 本文件由 run.sh 依据 nginx_ssl.conf 模板自动生成，请勿手工修改（改模板请编辑源文件后重跑 start）"
+                echo "# 本文件由 run.sh 依据 $(basename "$nginx_template") 模板自动生成，请勿手工修改（改模板请编辑源文件后重跑 start）"
                 echo "# 项目: $PROJECT_NAME | SNI域名: $SNI_DOMAIN | 监听端口: $NGINX_PORT | default_server: $default_flag | 生成时间: $(date '+%Y-%m-%d %H:%M:%S')"
                 sed -e '1,/^#   __SSL_KEY__/d' \
                     -e "s|__UPSTREAM_NAME__|${PROJECT_NAME}_backend|g" \

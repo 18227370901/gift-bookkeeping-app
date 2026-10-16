@@ -11,7 +11,7 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.11.21  
+> **版本**：V10.11.22  
 > **生成日期**：2026-10-16  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
@@ -131,7 +131,7 @@ AIGC:
 | **数据库** | SQLite (WAL) / PostgreSQL (可选) | — | `app.py:68-78`，`DATABASE_URL` 环境变量切换 |
 | **PostgreSQL 驱动** | psycopg2-binary + psycopg[binary]（V10.10.20 新增，SQLAlchemy 2.0 默认 psycopg3 驱动） | 2.9.9 / >=3.1 | `requirements.txt:8-9`（切换 PostgreSQL 的必要依赖；psycopg2-binary 供 webhook_utils 原生连接保留） |
 | **WSGI 容器** | Gunicorn (已声明但**未实际使用**) | 22.0.0 | `requirements.txt:6`；`run.sh:167-174` 实际用 `python3 app.py` |
-| **反向代理** | Nginx (SNI 多项目 443) | — | `nginx_ssl.conf`、`run.sh:224-291` |
+| **反向代理** | Nginx (SNI 多项目 443) | — | `config/nginx_ssl.conf`、`run.sh:224-291` |
 | **前端** | Jinja2 + Bootstrap 5 + 原生 JS | — | `templates/base.html:23-25、256`（**V10.10.18 已本地化 `static/vendor/` 加载**） |
 | **图表** | ECharts 5.5.0（V10.11 新增，本地化 `static/vendor/echarts/`） | 5.5.0 | `templates/dashboard.html`、`static/vendor/echarts/5.5.0/echarts.min.js` |
 | **Excel 解析** | openpyxl（V10.11 新增） | >=3.1.0 | `requirements.txt:18`、`routes_ext.py` 导入路由 |
@@ -925,7 +925,7 @@ flowchart TD
 
 | 层面 | 措施 | 代码依据 |
 |------|------|---------|
-| **传输安全** | Nginx TLS 1.2/1.3 + HTTP/2 + HSTS（`max-age=63072000`） | `nginx_ssl.conf:30-31,39` |
+| **传输安全** | Nginx TLS 1.2/1.3 + HTTP/2 + HSTS（`max-age=63072000`） | `config/nginx_ssl.conf:30-31,39` |
 | **会话安全** | Session Cookie HttpOnly + SameSite=Lax；服务重启强制重新登录（`APP_START_TIME`） | `app.py:50-54,168-182` |
 | **CSRF** | 手动 Token 生成 + 校验（POST/PUT/PATCH/DELETE）；企微回调/根路径豁免 | `app.py:214-238` |
 | **密码安全** | Werkzeug 哈希存储 + AES-256-GCM 可逆加密存储（管理员可查看明文） | `models.py:128-130` |
@@ -1017,7 +1017,7 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 | SEC-01 | `SECRET_KEY` 硬编码默认值 | 中 | `app.py:43` `'gift-bookkeeping-secret-key-2026-prod-secure'` | 未设置环境变量时使用默认密钥，会话可被伪造 |
 | SEC-02 | 加密密钥派生自 `SECRET_KEY`（SHA-256） | 中 | `models.py:14-25` `get_aes_key` | AES 密钥与 Flask 密钥耦合，密钥泄露=全部加密凭证可解 |
 | SEC-03 | `app.py:43` 和 `models.py:12` 各定义一份 `DEFAULT_SECRET_KEY` | 低 | 两处值一致但重复定义 | 修改时需同步两处 |
-| SEC-04 | Nginx `ssl_prefer_server_ciphers off` | 低 | `nginx_ssl.conf:33` | 依赖客户端选择密码套件，安全性略低于 `on` |
+| SEC-04 | Nginx `ssl_prefer_server_ciphers off` | 低 | `config/nginx_ssl.conf:33` | 依赖客户端选择密码套件，安全性略低于 `on` |
 
 #### 维度五：部署运维
 
@@ -1947,3 +1947,15 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   3. **路径适配（全部语义等价替换，零逻辑变化）**：55 处 import 改写（正则脚本批量：顶层 `from X import` → `from services.X import`、裸 `import X` → `from services import X`、routes 四模块同理；函数内延迟导入一并处理，改后全项目零残留旧式引用）；5 处 `__file__` 锚点各上溯一级（`os.path.dirname(os.path.dirname(...))`）——`_daemon_lock` 锁文件、`webhook_utils._resolve_db_file` 三候选 db 路径、`alert_service.check_data_integrity` 静态资源检查、`weather_service` 区划 js 加载、`routes_ext` 附件目录，指向路径与重组前逐字节一致；`bin/ssl_certs.sh` 两处证书脚本路径改指 `tools/`。
   4. **验证（编译+服务层+浏览器三层）**：22 文件 `py_compile` 全过；服务层直连冒烟（节假日 2026 年 39 天班休从 logs/ 缓存正常读取、weather/service_config 链路导入正常）；重启后 `/health` 200、15 个页面全 200、天气/节假日/看板 API 200、企微长连接 WebSocket 正常建立（853000 为样例 bot 凭证预期认证失败）；`routes_ext.py` 6319 行逐行对比实际差异仅 50 行（全部为 import/锚点/备份路径行）。
   5. **连带影响**：Docker 版/APK 版目录结构本次不动（三者共享文件约定改为按路径映射同步：传统版 `services/web_search.py` ↔ 两版 `web_search.py`）；PyInstaller frozen 分支逻辑（app.py 内 BUNDLE_DIR）不受影响；两版此前共享的 `bin/` 脚本未动。
+
+### 11.14 ADR-52：根目录文档与配置分层治理（V10.11.22 落地，仅结构·零业务逻辑变化）
+- **背景与根因**：
+  1. 根目录堆积 3.46MB HTML 设计文档、151KB Markdown 设计文档、229KB 包含千行历史日志的 README，且 Nginx 模板和 pip 构建残留元数据混杂在根目录，导致代码仓库首页视觉焦点分散、阅读体验差；
+  2. 缺少标准化的 `docs/` 文档归档目录与 `config/` 配置中心，历史变更与架构设计无独立存储，不利于长期维护。
+- **决策方案与实施结果**：
+  1. **docs/ 统一文档中心归档**：`PSD_Design_Document.md` 与单文件 3.46MB 的 `PSD_Design_Document.html` 移入 `docs/` 目录；从 `README.md` 抽离 V2 至 V10.10.29 全量历史版本变更记录（1100+ 行）至 `docs/CHANGELOG.md`；根目录 `README.md` 精简为项目简介、快速启动、核心功能与架构索引（~150行）。
+  2. **config/ 配置模板收敛与双路径适配**：`nginx_ssl.conf` 模板迁入 `config/` 目录；`bin/nginx_config.sh` 改造为优先查找 `$APP_DIR/config/nginx_ssl.conf` 并自动向下兼容回退 `$APP_DIR/nginx_ssl.conf`，确保 `./run.sh start/restart` 渲染 Nginx 配置 100% 平滑兼容。
+  3. **开箱样例库维护（方案 A 确认）**：保留根目录 `gift_bookkeeping.db`，确保 PyInstaller 单文件打包检测及跨仓库多形态数据一致性（零风险策略）。
+  4. **临时与敏感数据本地化防护**：本地构建产物 `wecom_aibot_python_sdk-1.0.2.dist-info/` 移入 `.temp/`；`.gitignore` 强化对 `config/config.local.sh` 与 `config/*.local.*` 等本地敏感配置的防提交保护，严防密钥泄露。
+  5. **验证（编译+服务运行+Shell语法全链路）**：22 个 Python 模块 py_compile 全过；后台进程平滑重启且 `/login` 返回 200 OK；Shell 脚本 `sh -n run.sh bin/*.sh` 语法与模板定位检测 100% 通过。
+- **连带影响**：全库 Python 核心业务逻辑与数据模型零修改；Shell 脚本双路径兼容；所有文档相对路径交叉引用保持闭环。

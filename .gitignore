@@ -29,3 +29,6 @@ data/attachments/
 logs/
 .temp/
 *.dist-info/
+# V10.11.22: config/ 目录服务器专属持久配置与本地覆盖规则（不入库避免泄露）
+config/config.local.sh
+config/*.local.*
