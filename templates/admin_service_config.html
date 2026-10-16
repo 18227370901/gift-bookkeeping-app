@@ -24,7 +24,11 @@
 <div class="card shadow-sm rounded-4 mb-4" data-group="{{ gname }}">
     <div class="card-header d-flex justify-content-between align-items-center rounded-top-4">
         <span><i class="fa-solid {{ ICONS[gname] }} me-2 text-primary"></i><b>{{ gcfg.label }}</b></span>
-        <button class="btn btn-outline-info btn-sm rounded-pill" onclick="testGroup('{{ gname }}')"><i class="fa-solid fa-vial me-1"></i>测试全部启用</button>
+        <span class="d-flex align-items-center gap-2">
+            <button class="btn btn-outline-info btn-sm rounded-pill" onclick="testGroup('{{ gname }}')"><i class="fa-solid fa-vial me-1"></i>测试全部启用</button>
+            <button class="btn btn-success btn-sm rounded-pill" type="button" onclick="saveGroup('{{ gname }}')"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
+            <button class="btn btn-outline-secondary btn-sm rounded-pill" type="button" onclick="cancelGroup('{{ gname }}')"><i class="fa-solid fa-rotate-left me-1"></i>取消</button>
+        </span>
     </div>
     <div class="card-body">
         {% if gname == 'ai_search' %}
@@ -82,7 +86,7 @@
 <script>
     // ===== 前端状态与工具 =====
     const GROUP_DEFAULTS = {{ cfg.groups|tojson }};
-    const AI_SEARCH_ENABLED = {{ 'true' if cfg.ai_search_enabled else 'false' }};
+    let AI_SEARCH_ENABLED = {{ 'true' if cfg.ai_search_enabled else 'false' }};
 
     function getCsrfToken() {
         const m = document.querySelector('meta[name="csrf-token"]');
@@ -206,22 +210,86 @@
         }).join('');
     }
 
+    // 端点行构造函数（新增/恢复/取消共用）
+    function makeEndpointRow(url, enabled, placeholder) {
+        const row = document.createElement('div');
+        row.className = 'input-group input-group-sm mb-2 endpoint-row';
+        row.innerHTML = `
+            <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}">
+            <span class="input-group-text"><input type="checkbox" class="form-check-input mt-0 endpoint-enabled" ${enabled !== false ? 'checked' : ''}></span>
+            <button class="btn btn-outline-success" type="button" title="测试端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial"></i></button>
+            <button class="btn btn-outline-secondary" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
+            <button class="btn btn-outline-secondary" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down"></i></button>
+            <button class="btn btn-outline-danger" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can"></i></button>`;
+        return row;
+    }
+
     // 添加端点行
     function addEndpointRow(gname) {
         const card = document.querySelector(`.card[data-group="${gname}"]`);
         const list = card.querySelector('.endpoint-list');
         const def = (GROUP_DEFAULTS[gname] && GROUP_DEFAULTS[gname].defaults && GROUP_DEFAULTS[gname].defaults[0]) ? GROUP_DEFAULTS[gname].defaults[0].url : '';
-        const row = document.createElement('div');
-        row.className = 'input-group input-group-sm mb-2 endpoint-row';
-        row.innerHTML = `
-            <input type="text" class="form-control endpoint-url" placeholder="${esc(def)}">
-            <span class="input-group-text"><input type="checkbox" class="form-check-input mt-0 endpoint-enabled" checked></span>
-            <button class="btn btn-outline-success" type="button" title="测试端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial"></i></button>
-            <button class="btn btn-outline-secondary" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
-            <button class="btn btn-outline-secondary" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down"></i></button>
-            <button class="btn btn-outline-danger" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can"></i></button>`;
+        const row = makeEndpointRow('', true, def);
         list.appendChild(row);
         row.querySelector('.endpoint-url').focus();
+    }
+
+    // 单组保存（只提交该组表单值；AI 组附带联网搜索总开关）
+    function saveGroup(gname) {
+        const card = document.querySelector(`.card[data-group="${gname}"]`);
+        if (!card) return;
+        const g = collectGroup(gname);
+        if (!g || !g.urls.length) {
+            alert('端点列表为空，无法保存');
+            return;
+        }
+        const body = { groups: {} };
+        body.groups[gname] = g;
+        if (gname === 'ai_search' && document.getElementById('aiSearchEnabled')) {
+            body.ai_search_enabled = document.getElementById('aiSearchEnabled').checked;
+        }
+        const btn = card.querySelector('button[onclick*="saveGroup"]');
+        const oldHtml = btn ? btn.innerHTML : '';
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>'; }
+        postJSON('/admin/service-config/save', body)
+            .then(data => {
+                if (data && data.success) {
+                    alert(data.message);
+                    // 保存成功：将该组快照刷新为刚保存的值（取消按钮基于新快照回滚）
+                    GROUP_DEFAULTS[gname].urls = g.urls;
+                    GROUP_DEFAULTS[gname].timeout = g.timeout;
+                    GROUP_DEFAULTS[gname].retries = g.retries;
+                    if (gname === 'ai_search') AI_SEARCH_ENABLED = body.ai_search_enabled !== false;
+                    const box = card.querySelector('.test-results');
+                    if (box) box.innerHTML = '';
+                } else {
+                    alert(data.message || '保存失败');
+                }
+            })
+            .catch(() => alert('网络错误，保存失败'))
+            .finally(() => {
+                if (btn) { btn.disabled = false; btn.innerHTML = oldHtml; }
+            });
+    }
+
+    // 单组取消：放弃本页对该组的未保存修改，恢复为已保存值（页面加载时的配置）
+    function cancelGroup(gname) {
+        const card = document.querySelector(`.card[data-group="${gname}"]`);
+        if (!card) return;
+        const saved = GROUP_DEFAULTS[gname];
+        const def = (saved.defaults && saved.defaults[0]) ? saved.defaults[0].url : '';
+        const list = card.querySelector('.endpoint-list');
+        list.innerHTML = '';
+        (saved.urls || []).forEach(ep => {
+            list.appendChild(makeEndpointRow(ep.url, ep.enabled, def));
+        });
+        card.querySelector('.timeout-input').value = saved.timeout != null ? saved.timeout : 8;
+        card.querySelector('.retries-input').value = saved.retries != null ? saved.retries : 0;
+        if (gname === 'ai_search' && document.getElementById('aiSearchEnabled')) {
+            document.getElementById('aiSearchEnabled').checked = AI_SEARCH_ENABLED;
+        }
+        const box = card.querySelector('.test-results');
+        if (box) box.innerHTML = '';
     }
 
     // 上移 / 下移
@@ -282,22 +350,13 @@
             const list = card.querySelector('.endpoint-list');
             list.innerHTML = '';
             (def.defaults || [{ url: '' }]).forEach((ep, i) => {
-                const row = document.createElement('div');
-                row.className = 'input-group input-group-sm mb-2 endpoint-row';
-                row.innerHTML = `
-                    <input type="text" class="form-control endpoint-url" value="${esc(ep.url)}">
-                    <span class="input-group-text"><input type="checkbox" class="form-check-input mt-0 endpoint-enabled" ${ep.enabled !== false ? 'checked' : ''}></span>
-                    <button class="btn btn-outline-success" type="button" title="测试端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial"></i></button>
-                    <button class="btn btn-outline-secondary" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
-                    <button class="btn btn-outline-secondary" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down"></i></button>
-                    <button class="btn btn-outline-danger" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can"></i></button>`;
-                list.appendChild(row);
+                list.appendChild(makeEndpointRow(ep.url, ep.enabled));
             });
             card.querySelector('.timeout-input').value = def.timeout != null ? def.timeout : 8;
             card.querySelector('.retries-input').value = def.retries != null ? def.retries : 0;
         }
         if (document.getElementById('aiSearchEnabled')) document.getElementById('aiSearchEnabled').checked = true;
-        alert('已恢复为默认值，请点击「保存配置」生效');
+        alert('已恢复为默认值，请点击「保存配置」或各组「保存」按钮生效');
     }
 </script>
 {% endblock %}
