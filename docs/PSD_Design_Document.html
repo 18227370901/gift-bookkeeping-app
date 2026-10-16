@@ -1490,7 +1490,7 @@ graph LR
 <table>
 <tr><th>项</th><th>说明</th></tr>
 <tr><td>背景</td><td>根目录堆积 3.46MB HTML 设计文档、151KB Markdown 设计文档、229KB 巨型 README 以及 Nginx 配置模板与 pip 残留元数据，导致首页视觉杂乱、可读性低。</td></tr>
-<tr><td>docs/ 归档</td><td>新建 <code>docs/</code> 目录：收纳 <code>PSD_Design_Document.md</code> 与 <code>PSD_Design_Document.html</code>；自 <code>README.md</code> 抽离 1100+ 行 V2~V10.10.29 历史记录至 <code>docs/CHANGELOG.md</code>，根目录 README 大幅精简聚焦快速上手与目录索引。</td></tr>
+<tr><td>docs/ 模块化</td><td>新建 <code>docs/</code> 目录：收纳 <code>PSD_Design_Document.md</code> 与 <code>PSD_Design_Document.html</code>；全量版本记录收归至 <code>docs/CHANGELOG.md</code>；部署运维、样例数据体系与 APK 构建分别独立为 <code>DEPLOYMENT.md</code>、<code>SAMPLE_DATA.md</code>、<code>ANDROID_BUILD.md</code>；根目录 <code>README.md</code> 精简至 152 行 / 10KB。</td></tr>
 <tr><td>config/ 收敛</td><td>新建 <code>config/</code> 目录：收纳 <code>nginx_ssl.conf</code>；<code>bin/nginx_config.sh</code> 升级双路径查找（优先 <code>config/</code> 兼容根目录回退），配置渲染与热重载零影响。</td></tr>
 <tr><td>样例库决策</td><td>遵循方案 A 决策，保留根目录 <code>gift_bookkeeping.db</code>，零风险保障 PyInstaller 单文件打包与跨仓库数据一致性。</td></tr>
 <tr><td>临时/敏感防护</td><td>本地构建产物 <code>wecom_aibot_python_sdk-1.0.2.dist-info/</code> 移入 <code>.temp/</code>；<code>.gitignore</code> 补充 <code>config/config.local.sh</code> 等本地规则，杜绝敏感配置推送。</td></tr>

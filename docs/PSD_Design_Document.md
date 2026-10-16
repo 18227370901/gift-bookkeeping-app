@@ -1953,7 +1953,7 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   1. 根目录堆积 3.46MB HTML 设计文档、151KB Markdown 设计文档、229KB 包含千行历史日志的 README，且 Nginx 模板和 pip 构建残留元数据混杂在根目录，导致代码仓库首页视觉焦点分散、阅读体验差；
   2. 缺少标准化的 `docs/` 文档归档目录与 `config/` 配置中心，历史变更与架构设计无独立存储，不利于长期维护。
 - **决策方案与实施结果**：
-  1. **docs/ 统一文档中心归档**：`PSD_Design_Document.md` 与单文件 3.46MB 的 `PSD_Design_Document.html` 移入 `docs/` 目录；从 `README.md` 抽离 V2 至 V10.10.29 全量历史版本变更记录（1100+ 行）至 `docs/CHANGELOG.md`；根目录 `README.md` 精简为项目简介、快速启动、核心功能与架构索引（~150行）。
+  1. **docs/ 统一文档中心归档与模块化拆分**：`PSD_Design_Document.md` 与单文件 3.46MB 的 `PSD_Design_Document.html` 移入 `docs/` 目录；从 `README.md` 抽离全量版本变更记录至 `docs/CHANGELOG.md`；深度运维部署、样例数据规则与 Android 打包分别分流至 `docs/DEPLOYMENT.md`、`docs/SAMPLE_DATA.md`、`docs/ANDROID_BUILD.md`；根目录 `README.md` 精简为项目简介、快速启动、9 大核心业务功能与架构索引（152 行 / 10KB，体积缩减 95%）。
   2. **config/ 配置模板收敛与双路径适配**：`nginx_ssl.conf` 模板迁入 `config/` 目录；`bin/nginx_config.sh` 改造为优先查找 `$APP_DIR/config/nginx_ssl.conf` 并自动向下兼容回退 `$APP_DIR/nginx_ssl.conf`，确保 `./run.sh start/restart` 渲染 Nginx 配置 100% 平滑兼容。
   3. **开箱样例库维护（方案 A 确认）**：保留根目录 `gift_bookkeeping.db`，确保 PyInstaller 单文件打包检测及跨仓库多形态数据一致性（零风险策略）。
   4. **临时与敏感数据本地化防护**：本地构建产物 `wecom_aibot_python_sdk-1.0.2.dist-info/` 移入 `.temp/`；`.gitignore` 强化对 `config/config.local.sh` 与 `config/*.local.*` 等本地敏感配置的防提交保护，严防密钥泄露。
