@@ -12,6 +12,15 @@
 >
 > 📌 **当前版本**：`V10.11.22` | 📖 **[查看全量版本发布历史与更新日志 (docs/CHANGELOG.md)](docs/CHANGELOG.md)**
 
+<!-- 
+  【AI 协作与维护规范 - 严禁违背】
+  本项目严格遵循文档分层治理架构（详见根目录 AGENTS.md）：
+  1. 严禁在本 README.md 中追加版本更新公告、历史变更日志或长篇技术细节！README.md 必须严格保持在 150-180 行以内的极简自述形态。
+  2. 新版本发布与全量更新日志：请一律追加至 docs/CHANGELOG.md。
+  3. 架构设计与 ADR 决策记录：请一律追加至 docs/PSD_Design_Document.md 及 docs/PSD_Design_Document.html。
+  4. 部署运维说明：请更新 docs/DEPLOYMENT.md；样例数据规范：请更新 docs/SAMPLE_DATA.md。
+-->
+
 ---
 
 ## 🔑 默认管理员账号与安全凭证
