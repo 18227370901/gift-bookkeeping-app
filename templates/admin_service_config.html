@@ -12,8 +12,8 @@
     </div>
 </div>
 
-<!-- 轻量提示（toast，替代原生 alert） -->
-<div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 2050;">
+<!-- 轻量提示（toast，替代原生 alert，顶部居中显示） -->
+<div class="toast-container position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 2050;">
     <div id="pageToast" class="toast align-items-center text-bg-success border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true">
         <div class="d-flex">
             <div class="toast-body" id="pageToastBody">保存成功</div>
@@ -71,10 +71,10 @@
                 <span class="input-group-text" title="启用该端点（停用则不参与故障转移）">
                     <input type="checkbox" class="form-check-input mt-0 endpoint-enabled" {% if ep.enabled %}checked{% endif %}>
                 </span>
-                <button class="btn btn-outline-success" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial"></i></button>
-                <button class="btn btn-outline-secondary" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
-                <button class="btn btn-outline-secondary" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down"></i></button>
-                <button class="btn btn-outline-danger" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can"></i></button>
+                <button class="btn btn-outline-success text-nowrap" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
+                <button class="btn btn-outline-secondary btn-up text-nowrap" type="button" title="上移" onclick="moveRow(this, -1)" {% if loop.first %}disabled{% endif %}><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
+                <button class="btn btn-outline-secondary btn-down text-nowrap" type="button" title="下移" onclick="moveRow(this, 1)" {% if loop.last %}disabled{% endif %}><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
+                <button class="btn btn-outline-danger text-nowrap" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
             </div>
             {% endfor %}
         </div>
@@ -259,17 +259,30 @@
         const row = document.createElement('div');
         row.className = 'input-group input-group-sm mb-2 endpoint-row' + (isNew ? ' is-new-row' : '');
         const extraBtns = isNew
-            ? `<button class="btn btn-success" type="button" title="保存此新增端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk"></i></button>
-               <button class="btn btn-outline-danger" type="button" title="放弃此新增端点" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark"></i></button>`
-            : `<button class="btn btn-outline-danger" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can"></i></button>`;
+            ? `<button class="btn btn-success text-nowrap" type="button" title="保存此新增端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
+               <button class="btn btn-outline-danger text-nowrap" type="button" title="放弃此新增端点" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>`
+            : `<button class="btn btn-outline-danger text-nowrap" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>`;
         row.innerHTML = `
             <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}">
             <span class="input-group-text"><input type="checkbox" class="form-check-input mt-0 endpoint-enabled" ${enabled !== false ? 'checked' : ''}></span>
-            <button class="btn btn-outline-success" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial"></i></button>
-            <button class="btn btn-outline-secondary" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
-            <button class="btn btn-outline-secondary" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down"></i></button>
+            <button class="btn btn-outline-success text-nowrap" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
+            <button class="btn btn-outline-secondary btn-up text-nowrap" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
+            <button class="btn btn-outline-secondary btn-down text-nowrap" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
             ${extraBtns}`;
         return row;
+    }
+
+    // 刷新该组上移/下移按钮置灰状态：首行「上移」置灰、末行「下移」置灰
+    function refreshMoveButtons(gname) {
+        const list = document.querySelector(`.card[data-group="${gname}"] .endpoint-list`);
+        if (!list) return;
+        const rows = list.querySelectorAll('.endpoint-row');
+        rows.forEach((row, i) => {
+            const up = row.querySelector('.btn-up');
+            const down = row.querySelector('.btn-down');
+            if (up) up.disabled = (i === 0);
+            if (down) down.disabled = (i === rows.length - 1);
+        });
     }
 
     // 添加端点行（新增态：带保存/取消按钮）
@@ -280,6 +293,7 @@
         const row = makeEndpointRow('', true, def, true);
         list.appendChild(row);
         row.querySelector('.endpoint-url').focus();
+        refreshMoveButtons(gname);
     }
 
     // 按已保存快照重渲染该组端点列表（消除新增行的保存/取消按钮）
@@ -295,6 +309,7 @@
         });
         card.querySelector('.timeout-input').value = saved.timeout != null ? saved.timeout : 8;
         card.querySelector('.retries-input').value = saved.retries != null ? saved.retries : 0;
+        refreshMoveButtons(gname);
     }
 
     // 新增端点行：保存（将该组当前表单值整体保存，新增行入库后转为已保存行）
@@ -310,7 +325,10 @@
     // 新增端点行：取消（放弃该行，不入库）
     function cancelEndpointRow(btn) {
         const row = btn.closest('.endpoint-row');
+        const card = btn.closest('.card');
+        const gname = card ? card.dataset.group : '';
         if (row) row.remove();
+        if (gname) refreshMoveButtons(gname);
     }
 
     // 保存一组配置（只提交该组表单值；AI 组附带联网搜索总开关）
@@ -363,6 +381,8 @@
         if (target < 0 || target >= rows.length) return;
         if (delta < 0) list.insertBefore(row, rows[target]);
         else list.insertBefore(rows[target], row);
+        const card = btn.closest('.card');
+        if (card) refreshMoveButtons(card.dataset.group);
     }
 
     // 删除行
@@ -375,6 +395,8 @@
             return;
         }
         row.remove();
+        const card = btn.closest('.card');
+        if (card) refreshMoveButtons(card.dataset.group);
     }
 
     // 保存全部
@@ -436,6 +458,7 @@
             });
             card.querySelector('.timeout-input').value = def.timeout != null ? def.timeout : 8;
             card.querySelector('.retries-input').value = def.retries != null ? def.retries : 0;
+            refreshMoveButtons(gname);
         }
         if (document.getElementById('aiSearchEnabled')) document.getElementById('aiSearchEnabled').checked = true;
         showToast('已恢复为默认值，请点击「保存配置」后生效');
