@@ -12,6 +12,36 @@
     </div>
 </div>
 
+<!-- 轻量提示（toast，替代原生 alert） -->
+<div class="toast-container position-fixed top-0 end-0 p-3" style="z-index: 2050;">
+    <div id="pageToast" class="toast align-items-center text-bg-success border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="d-flex">
+            <div class="toast-body" id="pageToastBody">保存成功</div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="关闭"></button>
+        </div>
+    </div>
+</div>
+
+<!-- 恢复默认值二次确认（Bootstrap 模态，替代原生 confirm） -->
+<div class="modal fade" id="restoreConfirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fa-solid fa-triangle-exclamation me-2 text-warning"></i>恢复默认值</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                确定将全部外部接口配置恢复为默认值吗？<br>
+                <span class="text-muted small">表单将重置为默认值，需点击「保存配置」后生效。</span>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-warning rounded-pill px-3" id="restoreConfirmBtn" onclick="doRestoreDefaults()">确定恢复</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="alert alert-info shadow-sm rounded-4 d-flex align-items-start gap-2">
     <i class="fa-solid fa-circle-info fa-lg mt-1"></i>
     <div class="small">
@@ -106,6 +136,22 @@
         const div = document.createElement('div');
         div.textContent = s == null ? '' : String(s);
         return div.innerHTML;
+    }
+
+    // 轻量提示（右上角 toast，替代原生 alert）
+    function showToast(msg, ok = true) {
+        const t = document.getElementById('pageToast');
+        if (!t) return;
+        document.getElementById('pageToastBody').textContent = msg || (ok ? '操作成功' : '操作失败');
+        t.classList.remove('text-bg-success', 'text-bg-danger');
+        t.classList.add(ok ? 'text-bg-success' : 'text-bg-danger');
+        if (window.bootstrap && bootstrap.Toast) {
+            const inst = bootstrap.Toast.getOrCreateInstance(t, { delay: 2600 });
+            inst.show();
+        } else {
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2600);
+        }
     }
 
     // 收集一组表单值
@@ -274,7 +320,7 @@
         if (!card) return;
         const g = collectGroup(gname);
         if (!g || !g.urls.length) {
-            alert('端点列表为空，无法保存');
+            showToast('端点列表为空，无法保存', false);
             return;
         }
         const body = { groups: {} };
@@ -288,7 +334,7 @@
         postJSON('/admin/service-config/save', body)
             .then(data => {
                 if (data && data.success) {
-                    alert(data.message);
+                    showToast(data.message || '保存成功');
                     // 保存成功：刷新该组快照，并将新增行转为已保存行（保存/取消按钮消失）
                     GROUP_DEFAULTS[gname].urls = g.urls;
                     GROUP_DEFAULTS[gname].timeout = g.timeout;
@@ -298,10 +344,10 @@
                     const box = card.querySelector('.test-results');
                     if (box) box.innerHTML = '';
                 } else {
-                    alert(data.message || '保存失败');
+                    showToast(data.message || '保存失败', false);
                 }
             })
-            .catch(() => alert('网络错误，保存失败'))
+            .catch(() => showToast('网络错误，保存失败', false))
             .finally(() => {
                 if (btn) { btn.disabled = false; btn.innerHTML = oldHtml; }
             });
@@ -325,7 +371,7 @@
         const list = row.parentElement;
         const rows = list.querySelectorAll('.endpoint-row');
         if (rows.length <= 1) {
-            alert('至少保留 1 个端点');
+            showToast('至少保留 1 个端点', false);
             return;
         }
         row.remove();
@@ -344,21 +390,42 @@
         postJSON('/admin/service-config/save', { groups, ai_search_enabled: aiEnabled })
             .then(data => {
                 if (data && data.success) {
-                    alert(data.message || '保存成功');
-                    window.location.reload();
+                    // 同步各组快照并重渲染（消除新增行的保存/取消按钮），无需刷新页面
+                    for (const gname of Object.keys(groups)) {
+                        const g = groups[gname];
+                        if (!g) continue;
+                        GROUP_DEFAULTS[gname].urls = g.urls;
+                        GROUP_DEFAULTS[gname].timeout = g.timeout;
+                        GROUP_DEFAULTS[gname].retries = g.retries;
+                        renderSavedRows(gname);
+                    }
+                    AI_SEARCH_ENABLED = aiEnabled;
+                    showToast(data.message || '保存成功');
                 } else {
-                    alert(data.message || '保存失败');
+                    showToast(data.message || '保存失败', false);
                 }
             })
-            .catch(() => alert('网络错误，保存失败'))
+            .catch(() => showToast('网络错误，保存失败', false))
             .finally(() => {
                 if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-floppy-disk me-1"></i>保存配置'; }
             });
     }
 
-    // 恢复默认（重置表单为默认值，不自动保存）
+    // 恢复默认（Bootstrap 模态二次确认，替代原生 confirm）
     function restoreDefaults() {
-        if (!confirm('确定将全部外部接口配置恢复为默认值吗？\n（表单会重置为默认值，需点击「保存配置」后生效）')) return;
+        if (window.bootstrap && bootstrap.Modal) {
+            const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('restoreConfirmModal'));
+            modal.show();
+        } else {
+            doRestoreDefaults();
+        }
+    }
+
+    function doRestoreDefaults() {
+        if (window.bootstrap && bootstrap.Modal) {
+            const modal = bootstrap.Modal.getInstance(document.getElementById('restoreConfirmModal'));
+            if (modal) modal.hide();
+        }
         for (const gname of Object.keys(GROUP_DEFAULTS)) {
             const card = document.querySelector(`.card[data-group="${gname}"]`);
             const def = GROUP_DEFAULTS[gname];
@@ -371,7 +438,7 @@
             card.querySelector('.retries-input').value = def.retries != null ? def.retries : 0;
         }
         if (document.getElementById('aiSearchEnabled')) document.getElementById('aiSearchEnabled').checked = true;
-        alert('已恢复为默认值，请点击「保存配置」或各组「保存」按钮生效');
+        showToast('已恢复为默认值，请点击「保存配置」后生效');
     }
 </script>
 {% endblock %}
