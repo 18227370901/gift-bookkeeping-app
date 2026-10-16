@@ -55,6 +55,30 @@ except Exception:
 
 from _daemon_lock import try_acquire_daemon_lock
 
+# V10.11.20 外部接口服务配置（企微长连接地址多端点 + 故障转移），见 service_config.py
+import service_config
+
+
+async def _pick_wecom_ws_url_async():
+    """V10.11.20 企微长连接地址故障转移：
+    按配置顺序握手探测「启用」的端点，返回第一个可用的 wss 地址；
+    全部探测失败返回首个地址（由 SDK 内部重连机制兜底）；无配置返回空串（SDK 默认地址）。"""
+    urls = service_config.get_enabled_urls('wecom_ws')
+    if not urls:
+        return ''
+    timeout = service_config.get_timeout('wecom_ws')
+    try:
+        import websockets
+        for url in urls:
+            try:
+                async with websockets.connect(url, open_timeout=timeout, close_timeout=5):
+                    return url
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return urls[0]
+
 
 def _run_async(coro):
     """在同步线程中安全执行异步协程并返回结果"""
@@ -189,7 +213,7 @@ def validate_wecom_credentials(bot_id, bot_secret):
         return False, "Python 环境缺少 wecom-aibot-python-sdk 库"
 
     async def _test_auth():
-        options = WSClientOptions(bot_id=b_id, secret=b_sec)
+        options = WSClientOptions(bot_id=b_id, secret=b_sec, ws_url=await _pick_wecom_ws_url_async())
         client = WSClient(options)
         auth_future = asyncio.get_event_loop().create_future()
 
@@ -314,7 +338,7 @@ def send_wecom_long_connection_message(bot_id, bot_secret, title, details=None, 
         content = f"### {title}\n> **接入方式**：<font color=\"info\">企业微信智能机器人 (aibot SDK)</font>\n> **时间**：<font color=\"comment\">{now_str}</font>\n> **详情**：<font color=\"info\">{details or '无额外说明'}</font>"
 
     async def _async_send():
-        options = WSClientOptions(bot_id=bot_id.strip(), secret=bot_secret.strip())
+        options = WSClientOptions(bot_id=bot_id.strip(), secret=bot_secret.strip(), ws_url=await _pick_wecom_ws_url_async())
         client = WSClient(options)
         auth_future = asyncio.get_event_loop().create_future()
 
@@ -907,6 +931,7 @@ def _wecom_listener_worker():
                     options = WSClientOptions(
                         bot_id=b_id.strip(),
                         secret=b_sec.strip(),
+                        ws_url=await _pick_wecom_ws_url_async(),
                         max_reconnect_attempts=3,
                         reconnect_interval=2000,
                         heartbeat_interval=30000

@@ -24,6 +24,9 @@ import datetime
 import threading
 import requests
 
+# V10.11.20 外部接口服务配置（多端点 + 故障转移 + 重试参数），见 service_config.py
+import service_config
+
 # ===================== 常量 =====================
 GEOCODING_URL = 'https://geocoding-api.open-meteo.com/v1/search'
 FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
@@ -454,18 +457,46 @@ def _region_match(candidate_val, region_name):
 #       两种网络环境（直连可达 / 仅代理可达）均能覆盖。
 HTTP_TIMEOUT = (5, 8)
 
+# V10.11.20 端点默认值（与 service_config 默认一致；请求时以管理员配置为准）
+GEOCODING_URL = 'https://geocoding-api.open-meteo.com/v1/search'
+FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
+AIR_QUALITY_URL = 'https://air-quality-api.open-meteo.com/v1/air-quality'
 
-def _http_get(url, params):
-    """Open-Meteo GET 请求：① 禁代理直连（Session trust_env=False，彻底绕过异常本地代理与权限限制）；② 失败回落系统代理"""
+
+def _http_get(url, params, timeout=HTTP_TIMEOUT):
+    """GET 请求：① 禁代理直连（Session trust_env=False，绕过异常本地代理与权限限制）；② 失败回落系统代理"""
     try:
         with requests.Session() as s:
             s.trust_env = False
-            return s.get(url, params=params, timeout=HTTP_TIMEOUT)
+            return s.get(url, params=params, timeout=timeout)
     except (requests.Timeout, requests.RequestException, Exception):
         pass
     with requests.Session() as s:
         s.trust_env = True
-        return s.get(url, params=params, timeout=HTTP_TIMEOUT)
+        return s.get(url, params=params, timeout=timeout)
+
+
+def _http_get_endpoint(group, params):
+    """V10.11.20 多端点故障转移请求：
+    按配置顺序遍历该组「启用」的端点，任一返回 HTTP 200 即成功；
+    全部失败后按配置 retries 整轮重试（每轮重新遍历启用端点）；
+    返回第一个 HTTP 200 的 Response；全部失败返回 None（调用方走现有降级路径）。
+    超时：连接 5s + 读取 = 该组配置的 timeout（默认 8s）。
+    """
+    urls = service_config.get_enabled_urls(group)
+    if not urls:
+        return None
+    timeout = (5, service_config.get_timeout(group))
+    retries = service_config.get_retries(group)
+    for _round in range(retries + 1):
+        for url in urls:
+            try:
+                resp = _http_get(url, params, timeout=timeout)
+                if resp is not None and resp.status_code == 200:
+                    return resp
+            except Exception:
+                continue
+    return None
 
 
 def geocode_city(city_name, province=None, district_city=None):
@@ -494,8 +525,11 @@ def geocode_city(city_name, province=None, district_city=None):
             'format': 'json',
         }
         try:
-            resp = _http_get(GEOCODING_URL, params)
+            # V10.11.20 多端点故障转移（配置的启用端点依次尝试，失败自动切换）
+            resp = _http_get_endpoint('geocoding', params)
         except (requests.Timeout, requests.RequestException, Exception):
+            resp = None
+        if resp is None:
             if cached_hit:
                 return [cached_hit]
             fallback = _find_cached_or_builtin_city(name, province=province, district_city=district_city)
@@ -637,8 +671,9 @@ def fetch_forecast(latitude, longitude, timezone='auto', days=DEFAULT_FORECAST_D
     # 2. 尝试网络拉取
     network_data = None
     try:
-        resp = _http_get(FORECAST_URL, params)
-        if resp.status_code == 200:
+        # V10.11.20 多端点故障转移（配置的启用端点依次尝试，失败自动切换）
+        resp = _http_get_endpoint('forecast', params)
+        if resp is not None and resp.status_code == 200:
             parsed = resp.json()
             if not parsed.get('error'):
                 network_data = parsed
@@ -691,7 +726,10 @@ def fetch_air_quality(latitude, longitude):
         'timezone': 'auto',
     }
     try:
-        resp = _http_get(AIR_QUALITY_URL, params)
+        # V10.11.20 多端点故障转移（配置的启用端点依次尝试，失败自动切换）
+        resp = _http_get_endpoint('air_quality', params)
+        if resp is None:
+            return None
         data = resp.json()
         if data.get('error'):
             return None

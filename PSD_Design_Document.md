@@ -11,8 +11,8 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.11.18  
-> **生成日期**：2026-10-13  
+> **版本**：V10.11.20  
+> **生成日期**：2026-10-16  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
 > **文档定位**：以代码为实现真相（Ground Truth），历史文档为设计意图真相，显式揭露漂移，证据链闭环。
@@ -1304,8 +1304,10 @@ graph LR
 | 接口 | 请求 | 说明 |
 |---|---|---|
 | 地理编码 | `GET https://geocoding-api.open-meteo.com/v1/search?name={城市}&count=1&language=zh&format=json` | 取 `results[0]` 的 `latitude`/`longitude`/`timezone` |
-| 天气预报 | `GET https://api.open-meteo.com/v1/forecast` + `current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m` + `daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` + `timezone=auto` + `forecast_days=3` | **请求 daily 时必须携带 timezone**（优先地理编码返回值，缺省回落 `auto`），否则接口报错 |
+| 天气服务源 | `GET https://api.open-meteo.com/v1/forecast` + `current=temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m` + `daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max` + `timezone=auto` + `forecast_days=3` | **请求 daily 时必须携带 timezone**（优先地理编码返回值，缺省回落 `auto`），否则接口报错 |
 | 错误格式 | `{"error": true, "reason": "..."}` | 服务层检测后透传 reason 为中文提示 |
+
+> **V10.11.20 补充（外部接口服务配置）**：以上三个 Open-Meteo 端点地址不再硬编码，改由管理员在「系统管理 > 外部接口配置」页自定义（存储于 `system_settings` 的 `api_urls_geocoding` / `api_urls_forecast` / `api_urls_air_quality`，均支持**多端点 + 故障转移 + 重试参数 + 一键测试**），默认值即上表地址；`weather_service._http_get_endpoint()` 按配置顺序遍历启用端点，任一 HTTP 200 即成功，全败按 `retries` 整轮重试后走原有缓存/离线合成兜底。节假日班/休数据源（timor.tech，`api_urls_holiday`）与企微长连接（`api_urls_wecom_ws`）一并纳入，AI 联网搜索（`ai_search_urls`）支持总开关与多端点。详见第 11 部分 ADR-50。
 
 #### WMO weather_code → 中文映射（weather_service.py 内置）
 
@@ -1921,3 +1923,16 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   1. **天气权限去冗余归一**：单用户与批量权限配置弹窗移除「无天气访问权限」选项，仅保留「可查看实时天气」；权限完全由「天气」复选框控制，未勾选时后台自动归零 `menu_perms['weather'] = 0`，勾选时设为 `1`，实现交互认知与存储逻辑的自洽统一；
   2. **弹窗排版与折行治理**：在页面 `extra_css` 及弹窗容器显式声明 `.modal { white-space: normal; }`，切断操作列 `white-space: nowrap` 的污染；弹窗提示框添加 `word-break: break-word;`，提示语优雅自动折行并紧密贴合提示框边界；
   3. **弹窗自适应滚动适配**：单用户与批量弹窗升级为 `modal-dialog-scrollable` 并配置表单 flex 滚动容器，确保在任意分辨率屏幕下弹窗头部与底部操作按钮固定可见，内部自适应平滑滚动。
+
+### 11.12 ADR-50：外部接口服务配置（V10.11.20 落地）
+- **背景与根因**：
+  1. 历史遗留 6 组「内置默认调用地址却页面无配置入口」的外部服务：Open-Meteo 地理编码/预报/空气质量、timor.tech 节假日、企微长连接（`wss://openws.work.weixin.qq.com`）、DuckDuckGo 联网搜索；地址硬编码于模块顶层，管理员无法不改代码地配置/降级数据源（如同源镜像、代理网关、备用端点）；
+  2. 节假日接口为参数模板 `https://timor.tech/api/holiday/year/{year}`，直接暴露占位符给管理员有「误删变量 → 404」的维护负担；AI 联网搜索全自动触发（`needs_search` 关键词正则）无开关、无地址入口，端点不可达时无故障转移；
+  3. 需求要求：6 组全部支持「多端点 + 行内启用开关 + 排序 + 故障转移 + 重试参数 + 一键测试」，AI 搜索另有总开关。
+- **决策方案与实施结果**：
+  1. **统一配置模型**：新增 `service_config.py`，每组 = 有序端点列表 `[{url, enabled}]` + `timeout`（默认 8s，企微 10s）+ `retries`（默认 0）；存储复用 `system_settings` 表新增 19 个 key（`api_urls_{group}` / `api_urls_{group}_timeout` / `api_urls_{group}_retries` / `ai_search_enabled`），实时读库即存即生效（后台巡检线程每轮独立 app_context，读取异常兜底默认值）；故障转移统一语义：按序遍历启用端点 → 任一 HTTP 200 / WS 握手成功 / 解析出结果即返回 → 全败按 `retries` 整轮重试 → 走各模块既有降级（天气多级缓存/离线合成、节假日内置字典与 1 小时冷却、搜索空结果不影响 AI 本地回复、SDK 重连退避）。
+  2. **按组落地改造**：`weather_service._http_get_endpoint(group, params)` 替换 3 处硬编码 URL 调用（超时 = 连接 5s + 配置读取超时）；`holiday_service._fetch_from_timor` 遍历启用端点，请求前 `normalize_holiday_url(url_tpl).replace('{年份}', year)` 自动注入年份；`webhook_utils` 三处 `WSClientOptions` 增加 `ws_url=await _pick_wecom_ws_url_async()`（按序握手探测，SDK `ws_url or DEFAULT_WS_URL` 兼容空串=默认地址）；`web_search.py` 新增总开关（`ai_search_enabled`）与自定义端点请求（DuckDuckGo 兼容 HTML 格式 `GET {url}?q=...` + `result__a/result__snippet` 解析），默认端点保持官方库调用（行为零变化）。
+  3. **节假日地址参数自动适配**：保存时后端 `normalize_holiday_url()` 自动补全 `{年份}` 占位符（含 `{year}` 统一规范化、尾部 `/` 去重）；页面展示剥离占位符的最小可编辑地址（`display_holiday_url`）；请求时业务方 `replace` 注入最新年份，管理员零维护。
+  4. **一键测试**：`POST /admin/service-config/test`（仅管理员 + CSRF），入参 = 表单当前值（未保存也可测）；按组真实协议校验——Open-Meteo 三组校验 HTTP 200 + 关键 JSON 字段、节假日校验 `code==0`（timor.tech 反爬需模拟浏览器 UA，实测 UA 前 403 / UA 后 200）、企微 WS 握手连通（不做 bot 鉴权）、AI 搜索端点请求 + 结果结构解析；前端每行「测试」按钮与组级「测试全部启用」按钮，行内/结果区展示 ✓/✗、耗时、失败原因（403/超时/非 JSON/字段缺失等）。
+  5. **页面与权限**：新增 `templates/admin_service_config.html`（6 组卡片：端点行 [地址 + 启用勾选 + 上移/下移/删除 + 测试]、「＋ 添加端点」、请求超时/重试次数输入、AI 组总开关、「保存」「恢复默认」（二次确认）、黑夜模式 + CSRF）；`routes_ext.py` 新增 GET `/admin/service-config`、POST `/admin/service-config/save`（白名单分组、URL 前缀 `http/https/wss/ws` 校验、每组至少 1 条启用端点、节假日自动补全）、POST `/admin/service-config/test`；`base.html` 系统管理菜单新增「外部接口配置」；默认值 = 现状硬编码地址，输入框 `placeholder=默认值`，行为零变化。
+  6. **验证结论（浏览器逐项实测）**：默认配置下天气页、万年历班休、企微长连接、AI 搜索行为与改前一致；天气预报组首行配置不可达地址（`https://127.0.0.1:1/v1/forecast`）保存后，实际查询「北京市」仍返回完整天气数据（自动故障转移到第二行 open-meteo）；「测试全部启用」按序输出每行结果并提示「第 N 个端点可用，将优先使用」；节假日输入 `.../year/` 保存后库中自动存为 `https://timor.tech/api/holiday/year/{年份}`；企微 WS 握手测试成功（5249ms）；AI 搜索端点测试如实报错（国内 DuckDuckGo 不可达 ConnectTimeout）；测试配置已恢复默认并复核数据库零残留差异。

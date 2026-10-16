@@ -23,6 +23,9 @@ import time
 
 import requests
 
+# V10.11.20 外部接口服务配置（多端点 + 故障转移 + 重试参数），见 service_config.py
+import service_config
+
 # 支持范围（与万年历农历数据表一致）
 HOLIDAY_YEAR_MIN = 1900
 HOLIDAY_YEAR_MAX = 2100
@@ -93,30 +96,42 @@ def _save_disk_cache(year, holiday):
 
 
 def _fetch_from_timor(year):
-    """从 timor.tech 拉取某年班/休数据（双路径：禁代理直连优先 + 系统代理兜底）"""
-    url = TIMOR_API.format(year)
+    """从 timor.tech 拉取某年班/休数据
+    V10.11.20 多端点故障转移：按配置顺序依次尝试「启用」的端点（默认 timor.tech），
+    每端点双路径（禁代理直连优先 + 系统代理兜底），全部失败按配置重试轮数整轮重试；
+    {年份} 占位符由系统自动注入最新年份，管理员无需维护。"""
+    urls = service_config.get_enabled_urls('holiday')
+    if not urls:
+        return {}
+    timeout = service_config.get_timeout('holiday')
+    retries = service_config.get_retries('holiday')
     last_err = None
-    # 路径①：禁代理直连（国内环境 timor.tech 直连可达，系统代理故障时不被拖死）
-    try:
-        resp = requests.get(
-            url,
-            timeout=HOLIDAY_HTTP_TIMEOUT,
-            headers=HOLIDAY_HEADERS,
-            proxies={'http': None, 'https': None},
-        )
-        resp.raise_for_status()
-        return _parse_timor(resp)
-    except Exception as e:
-        last_err = e
-    # 路径②：回落系统代理（默认 trust_env 行为）
-    try:
-        resp = requests.get(url, timeout=HOLIDAY_HTTP_TIMEOUT, headers=HOLIDAY_HEADERS)
-        resp.raise_for_status()
-        return _parse_timor(resp)
-    except Exception as e:
-        last_err = e
-    # 双路径均失败：降级空字典（不抛异常，万年历主体不受影响）
-    print('[Holiday] 拉取 %d 年班/休数据失败（双路径均超时或异常）: %s' % (year, last_err))
+    for _round in range(retries + 1):
+        for url_tpl in urls:
+            # 变量自动适配：统一规范化后注入最新年份
+            url = service_config.normalize_holiday_url(url_tpl).replace(
+                service_config.HOLIDAY_PLACEHOLDER, str(year))
+            # 路径①：禁代理直连（国内环境 timor.tech 直连可达，系统代理故障时不被拖死）
+            try:
+                resp = requests.get(
+                    url,
+                    timeout=(5, timeout),
+                    headers=HOLIDAY_HEADERS,
+                    proxies={'http': None, 'https': None},
+                )
+                resp.raise_for_status()
+                return _parse_timor(resp)
+            except Exception as e:
+                last_err = e
+            # 路径②：回落系统代理（默认 trust_env 行为）
+            try:
+                resp = requests.get(url, timeout=(5, timeout), headers=HOLIDAY_HEADERS)
+                resp.raise_for_status()
+                return _parse_timor(resp)
+            except Exception as e:
+                last_err = e
+    # 全部端点均失败：降级空字典（不抛异常，万年历主体不受影响）
+    print('[Holiday] 拉取 %d 年班/休数据失败（全部端点均超时或异常）: %s' % (year, last_err))
     return {}
 
 
