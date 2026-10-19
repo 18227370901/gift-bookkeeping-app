@@ -45,9 +45,10 @@
 <div class="alert alert-info shadow-sm rounded-4 d-flex align-items-start gap-2">
     <i class="fa-solid fa-circle-info fa-lg mt-1"></i>
     <div class="small">
-        统一管理各模块内置默认的外部服务地址。每组支持<b>多个端点</b>（按顺序依次尝试，<b>启用中的端点不可用时自动向后切换</b>）、行内<b>启用开关</b>、<b>上移/下移</b>排序、<b>重试次数</b>与<b>请求超时</b>；
+        统一管理各模块内置默认的外部服务地址。每组支持<b>多个端点</b>（按顺序依次尝试，<b>启用中的端点不可用时自动向后切换</b>）、行内<b>启用开关</b>（滑动开关图标）、<b>上移/下移</b>排序、<b>重试次数</b>与<b>请求超时</b>；
         每行可<b>一键测试</b>当前填写值（未保存也可测）。输入框 <code>占位提示=默认值</code>，保存后即时生效。<br>
-        <span class="text-danger"><i class="fa-solid fa-lock me-1"></i>V10.11.23 安全锁：端点地址默认<b>只读锁定</b>，点击行内「<b>编辑</b>」按钮解锁后才能修改；启用开关为高频快捷操作，可随时直接切换（随保存入库）。</span>
+        <span class="text-danger"><i class="fa-solid fa-lock me-1"></i>V10.11.23 安全锁：端点地址默认<b>只读锁定</b>，点击行内「<b>编辑</b>」按钮解锁后才能修改；启用开关为高频快捷操作，可随时直接切换（随保存入库）。</span><br>
+        <span class="text-primary"><i class="fa-solid fa-list-check me-1"></i>V10.11.24 批量操作：每行最前方可勾选「选择框」支持<b>单选/多选</b>，每组上方「<b>全选本组</b>」一键全选；勾选后可「<b>批量启用/批量停用</b>」选中端点并整组保存即时生效。</span>
     </div>
 </div>
 
@@ -65,13 +66,34 @@
         </div>
         {% endif %}
 
+        {# V10.11.24 批量操作条：全选本组 + 批量启用/停用（勾选行级选择框后生效） #}
+        <div class="d-flex align-items-center flex-wrap gap-2 mb-2 endpoint-batch-bar">
+            <div class="form-check mb-0">
+                <input type="checkbox" class="form-check-input group-select-all" id="selectAll_{{ gname }}" onchange="toggleGroupSelectAll('{{ gname }}', this)">
+                <label class="form-check-label small fw-semibold" for="selectAll_{{ gname }}"><i class="fa-solid fa-check-double me-1 text-primary"></i>全选本组</label>
+            </div>
+            <button class="btn btn-outline-success btn-sm rounded-pill px-3 batch-enable-btn" type="button" disabled onclick="batchToggleEndpoints('{{ gname }}', true)">
+                <i class="fa-solid fa-toggle-on me-1"></i>批量启用选中 (<span class="batch-count">0</span>)
+            </button>
+            <button class="btn btn-outline-secondary btn-sm rounded-pill px-3 batch-disable-btn" type="button" disabled onclick="batchToggleEndpoints('{{ gname }}', false)">
+                <i class="fa-solid fa-toggle-off me-1"></i>批量停用选中 (<span class="batch-count">0</span>)
+            </button>
+            <span class="small text-muted"><i class="fa-solid fa-circle-info me-1"></i>勾选后批量切换开关并保存生效（全停用时该组服务将降级）</span>
+        </div>
+
         <div class="endpoint-list">
             {% for ep in gcfg.urls %}
             {# V10.11.23 行默认只读锁定：点「编辑」解锁地址输入框；启用开关可直接操作不受限 #}
+            {# V10.11.24 首列新增选择框（单选/多选）；启用开关升级为滑动开关图标（form-switch） #}
             <div class="input-group input-group-sm mb-2 endpoint-row">
+                <span class="input-group-text" title="勾选参与批量操作（可单选/多选）">
+                    <input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)">
+                </span>
                 <input type="text" class="form-control endpoint-url" value="{{ ep.url }}" placeholder="{{ gcfg.defaults[0].url if gcfg.defaults else '如：https://...' }}" readonly aria-label="端点地址">
-                <span class="input-group-text" title="启用该端点（停用则不参与故障转移；可随时直接切换）">
-                    <input type="checkbox" class="form-check-input mt-0 endpoint-enabled" {% if ep.enabled %}checked{% endif %}>
+                <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；开关可直接切换，随保存入库）">
+                    <div class="form-check form-switch mb-0">
+                        <input type="checkbox" class="form-check-input endpoint-enabled" role="switch" {% if ep.enabled %}checked{% endif %}>
+                    </div>
                 </span>
                 <button class="btn btn-outline-success text-nowrap" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
                 <button class="btn btn-outline-secondary btn-up text-nowrap" type="button" title="上移" onclick="moveRow(this, -1)" {% if loop.first %}disabled{% endif %}><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
@@ -261,12 +283,14 @@
     // V10.11.23 行状态机：所有行（含新增行）默认只读锁定（地址输入框 readonly），
     // 点「编辑」进入可编辑态（编辑/删除隐藏，保存/取消显示）；保存成功后经 renderSavedRows
     // 重渲染回只读态；启用开关为高频快捷操作，不受编辑按钮限制（任何时候可直接切换）
+    // V10.11.24：首列新增选择框（单选/多选参与批量）；启用开关升级为滑动开关图标（form-switch）
     function makeEndpointRow(url, enabled, placeholder, isNew) {
         const row = document.createElement('div');
         row.className = 'input-group input-group-sm mb-2 endpoint-row' + (isNew ? ' is-new-row' : '');
         row.innerHTML = `
+            <span class="input-group-text" title="勾选参与批量操作（可单选/多选）"><input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)"></span>
             <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}" readonly aria-label="端点地址">
-            <span class="input-group-text" title="启用该端点（停用则不参与故障转移；可随时直接切换）"><input type="checkbox" class="form-check-input mt-0 endpoint-enabled" ${enabled !== false ? 'checked' : ''}></span>
+            <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；开关可直接切换，随保存入库）"><div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input endpoint-enabled" role="switch" ${enabled !== false ? 'checked' : ''}></div></span>
             <button class="btn btn-outline-success text-nowrap" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
             <button class="btn btn-outline-secondary btn-up text-nowrap" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
             <button class="btn btn-outline-secondary btn-down text-nowrap" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
@@ -275,6 +299,59 @@
             <button class="btn btn-success btn-save text-nowrap d-none" type="button" title="保存此端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
             <button class="btn btn-outline-danger btn-cancel text-nowrap d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>`;
         return row;
+    }
+
+    // ===== V10.11.24 批量操作（行级单选/多选 + 组级全选 + 批量启用/停用） =====
+
+    // 行选择框变化：刷新所在组全选态与批量按钮计数
+    function onRowSelectChange(cb) {
+        const card = cb.closest('.card');
+        if (card) updateGroupBatchState(card.dataset.group);
+    }
+
+    // 刷新组批量状态：全选框三态（未选/半选/全选）+ 批量按钮计数与禁用
+    function updateGroupBatchState(gname) {
+        const card = document.querySelector(`.card[data-group="${gname}"]`);
+        if (!card) return;
+        const rows = card.querySelectorAll('.endpoint-row');
+        const count = card.querySelectorAll('.row-select-cb:checked').length;
+        const selectAll = card.querySelector('.group-select-all');
+        if (selectAll) {
+            if (count === 0) { selectAll.checked = false; selectAll.indeterminate = false; }
+            else if (count === rows.length && rows.length > 0) { selectAll.checked = true; selectAll.indeterminate = false; }
+            else { selectAll.checked = false; selectAll.indeterminate = true; }
+        }
+        card.querySelectorAll('.batch-enable-btn, .batch-disable-btn').forEach(b => {
+            b.disabled = count === 0;
+            const span = b.querySelector('.batch-count');
+            if (span) span.textContent = count;
+        });
+    }
+
+    // 全选/取消全选本组
+    function toggleGroupSelectAll(gname, masterCb) {
+        const card = document.querySelector(`.card[data-group="${gname}"]`);
+        if (!card) return;
+        card.querySelectorAll('.row-select-cb').forEach(cb => { cb.checked = masterCb.checked; });
+        updateGroupBatchState(gname);
+    }
+
+    // 批量启用/停用选中端点：置开关后整组保存即时生效（复用 saveGroup）
+    function batchToggleEndpoints(gname, enabled) {
+        const card = document.querySelector(`.card[data-group="${gname}"]`);
+        if (!card) return;
+        const checked = card.querySelectorAll('.row-select-cb:checked');
+        if (!checked.length) { showToast('请先勾选需要操作的端点', false); return; }
+        checked.forEach(cb => {
+            const row = cb.closest('.endpoint-row');
+            const sw = row ? row.querySelector('.endpoint-enabled') : null;
+            if (sw) sw.checked = enabled;
+        });
+        updateGroupBatchState(gname);
+        const btn = enabled ? card.querySelector('.batch-enable-btn') : card.querySelector('.batch-disable-btn');
+        const cnt = checked.length;
+        // 整组保存入库（含批量切换后的开关状态）；成功重渲染后选择自动清零
+        saveGroup(gname, btn, enabled ? `已批量启用 ${cnt} 个端点并保存生效` : `已批量停用 ${cnt} 个端点并保存生效（该组服务在无可用端点时将降级）`);
     }
 
     // 进入/退出编辑态：编辑 = 地址输入框解锁 + 编辑/删除隐藏 + 保存/取消显示
@@ -323,6 +400,7 @@
         const row = makeEndpointRow('', true, def, true);
         list.appendChild(row);
         refreshMoveButtons(gname);
+        updateGroupBatchState(gname);
         showToast('已添加端点行，请点击该行「编辑」按钮解锁后填写地址');
     }
 
@@ -340,6 +418,7 @@
         card.querySelector('.timeout-input').value = saved.timeout != null ? saved.timeout : 8;
         card.querySelector('.retries-input').value = saved.retries != null ? saved.retries : 0;
         refreshMoveButtons(gname);
+        updateGroupBatchState(gname);  // V10.11.24：重渲染后行选择清零，批量按钮复位
     }
 
     // 端点行「保存」按钮（新增行/编辑态通用）：校验后整组保存，成功后重渲染回只读态
@@ -357,9 +436,12 @@
         const row = btn.closest('.endpoint-row');
         if (!row) return;
         if (row.classList.contains('is-new-row')) {
-            row.remove();
+            // V10.11.24 修复：必须在 row.remove() 之前取 card——remove 后按钮随行脱管，
+            // btn.closest('.card') 将返回 null 导致刷新不生效（存量缺陷，删除行同病已一并修）
             const card = btn.closest('.card');
+            row.remove();
             if (card) refreshMoveButtons(card.dataset.group);
+            if (card) updateGroupBatchState(card.dataset.group);  // 行数变化后同步全选态与计数
             showToast('已放弃该新增端点');
             return;
         }
@@ -372,8 +454,8 @@
     }
 
     // 保存一组配置（只提交该组表单值；AI 组附带联网搜索总开关）
-    // triggerBtn 可选：行级「保存」按钮（加载态反馈）
-    function saveGroup(gname, triggerBtn) {
+    // triggerBtn 可选：行级「保存」/批量按钮（加载态反馈）；successMsg 可选：成功提示文案（批量操作定制）
+    function saveGroup(gname, triggerBtn, successMsg) {
         const card = document.querySelector(`.card[data-group="${gname}"]`);
         if (!card) return;
         const g = collectGroup(gname);
@@ -392,7 +474,7 @@
         postJSON('/admin/service-config/save', body)
             .then(data => {
                 if (data && data.success) {
-                    showToast(data.message || '保存成功');
+                    showToast(successMsg || data.message || '保存成功');
                     // 保存成功：刷新该组快照，并将新增行转为已保存行（保存/取消按钮消失）
                     GROUP_DEFAULTS[gname].urls = g.urls;
                     GROUP_DEFAULTS[gname].timeout = g.timeout;
@@ -408,6 +490,8 @@
             .catch(() => showToast('网络错误，保存失败', false))
             .finally(() => {
                 if (btn) { btn.disabled = false; btn.innerHTML = oldHtml; }
+                // V10.11.24：finally 恢复按钮 innerHTML 会覆盖 renderSavedRows 已清零的批量计数，末尾再同步一次
+                updateGroupBatchState(gname);
             });
     }
 
@@ -426,6 +510,7 @@
     }
 
     // 删除行
+    // V10.11.24 修复：card 引用必须在 row.remove() 之前获取（remove 后按钮脱管，closest 返回 null）
     function delRow(btn) {
         const row = btn.closest('.endpoint-row');
         const list = row.parentElement;
@@ -434,9 +519,10 @@
             showToast('至少保留 1 个端点', false);
             return;
         }
-        row.remove();
         const card = btn.closest('.card');
+        row.remove();
         if (card) refreshMoveButtons(card.dataset.group);
+        if (card) updateGroupBatchState(card.dataset.group);  // 被删行若已勾选，同步全选态与计数
     }
 
     // 保存全部
@@ -499,6 +585,7 @@
             card.querySelector('.timeout-input').value = def.timeout != null ? def.timeout : 8;
             card.querySelector('.retries-input').value = def.retries != null ? def.retries : 0;
             refreshMoveButtons(gname);
+            updateGroupBatchState(gname);  // V10.11.24：恢复默认重渲染后批量态复位
         }
         if (document.getElementById('aiSearchEnabled')) document.getElementById('aiSearchEnabled').checked = true;
         showToast('已恢复为默认值（行已只读锁定），请点击「保存配置」后生效');

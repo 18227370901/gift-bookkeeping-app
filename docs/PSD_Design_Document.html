@@ -114,7 +114,7 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.11.23</span>
+    <span><strong>版本</strong>：V10.11.24</span>
     <span><strong>生成日期</strong>：2026-10-19</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
@@ -1516,13 +1516,30 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 11 部分补充五：ADR-54 外部接口配置行级开关图标化与批量启用停用（V10.11.24） ==================== -->
+<div class="section">
+<h1>第 11 部分补充五：ADR-54 外部接口配置行级开关图标化与批量启用停用 + 行删除刷新失效存量缺陷修复（V10.11.24 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与用户需求</td><td>外部接口服务配置页每行端点的启用控件为小勾选框不够直观，且缺少批量操作能力——需①行级启用开关图标化；②每行可单选/多选、每组全选，实现批量启用或停用。</td></tr>
+<tr><td>行级开关图标化</td><td>启用控件升级为 Bootstrap <code>form-switch</code> 滑动开关（<code>role="switch"</code>），开/停状态一目了然；直接切换语义不变（随保存入库，不受 V10.11.23 行级编辑锁定限制）。</td></tr>
+<tr><td>行级选择框</td><td>每行首列新增 <code>.row-select-cb</code> 选择框（单选/多选），<code>onRowSelectChange</code> 联动刷新组批量态。</td></tr>
+<tr><td>组级批量操作条</td><td>每组端点列表上方新增批量条：「全选本组」（三态：未选/半选 indeterminate/全选自动同步）+「批量启用选中 (N)」/「批量停用选中 (N)」（未选时置灰、计数实时联动）；<code>batchToggleEndpoints</code> 置选中行开关后复用 <code>saveGroup(gname, btn, successMsg)</code> 整组保存即时生效（后端零改动，复用既有 <code>/admin/service-config/save</code> 接口）；停用提示含降级说明。</td></tr>
+<tr><td>saveGroup 扩展</td><td>新增第三参数 <code>successMsg</code>（批量操作定制成功文案）；finally 恢复按钮 innerHTML 后补调 <code>updateGroupBatchState</code>（修复恢复文本会覆盖 renderSavedRows 已清零计数的时序问题）。</td></tr>
+<tr><td>存量缺陷修复</td><td><code>cancelEndpointRow</code>/<code>delRow</code> 均先 <code>row.remove()</code> 后 <code>btn.closest('.card')</code>——按钮随行脱管后 closest 返回 null，上移/下移置灰与批量计数不刷新（静默失效）；改为 remove 之前先取 card 引用。</td></tr>
+<tr><td>状态联动全覆盖</td><td>添加端点/取消新增/删除行/行级保存/批量保存/恢复默认值后，<code>renderSavedRows</code> 或操作点内统一调 <code>updateGroupBatchState</code> 同步。</td></tr>
+<tr><td>全链路验证</td><td>浏览器逐项实测——初始态、单选（计数 1+半选）、多选（计数 2+全选自动勾）、取消全选、批量停用 1 端点（开关 true→false + toast + 数据库真实入库 + 重渲染批量态复位）、全选+批量启用（恢复基线且入库）、删除勾选行计数联动（1→0）、取消勾选中的新增行计数联动（2→1，修复后）、编辑状态机与开关直切回归通过；配置基线记录并还原。</td></tr>
+<tr><td>连带影响</td><td>仅 <code>templates/admin_service_config.html</code> 单文件（后端/数据库零改动）；Docker 版/APK 版本次未同步（待后续按共享文件 MD5 逐字一致约定同步）。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.23</td></tr>
-<tr><td>生成日期</td><td>2026-10-19（V10.11.23 告警推送真实反馈与渠道选择与列宽修复；承接 V10.11.22 根目录文档与配置分层治理）</td></tr>
+<tr><td>文档版本</td><td>V10.11.24</td></tr>
+<tr><td>生成日期</td><td>2026-10-19（V10.11.24 行级开关图标化与批量启用停用；承接 V10.11.23 告警推送真实反馈与渠道选择）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
