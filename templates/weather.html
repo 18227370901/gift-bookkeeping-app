@@ -529,6 +529,9 @@
     var compareSeq = 0;           // 对比请求序号
     var btnPending = { cascade: 0, text: 0 };  // 各按钮未完成请求计数（独立 loading，修复双按钮同闪「查询中」）
     var FETCH_TIMEOUT_MS = 30000; // 前端超时（AbortController）：后端直连+代理兜底最坏 26s，30s 兜住并防按钮永久卡死
+    // ===== V10.11.27 持久化缓存治理（免拉取秒开 + 请求频次治理） =====
+    var CACHE_TTL_MS = 30 * 60 * 1000;  // 缓存有效期 30 分钟（与后端 fetch_forecast 内存缓存 TTL 对齐）
+    var cachedMeta = null;              // 缓存元信息 {mode, label, city, lat, lon, fetchedAt}（随 lsKey('data') 持久化）
 
     // ===== 工具函数 =====
     function escapeHtml(str) {
@@ -583,6 +586,27 @@
     }
 
     function setStatus(html) { queryStatus.innerHTML = html; }
+
+    // ===== V10.11.27 「数据更新于 HH:MM + 刷新按钮」常驻状态条 =====
+    // 有缓存元信息时展示更新时间与离线徽标；noteHtml 为附加说明（自动更新/失败原因等）
+    function fmtHm(ts) {
+        var d = new Date(Number(ts) || 0);
+        return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    }
+    function renderFreshStatus(noteHtml) {
+        if (cachedData && cachedMeta && cachedMeta.fetchedAt) {
+            var badge = cachedData.offline_fallback ? ' <span class="badge bg-secondary ms-1"><i class="fa-solid fa-cloud-moon me-1"></i>离线预估</span>' : '';
+            // 有查询上下文才提供「刷新」按钮（无上下文时刷新无目标地点）
+            var btn = (queryContext || (cachedMeta.mode === 'coords' && cachedMeta.lat && cachedMeta.lon) ||
+                       (cachedMeta.mode === 'city' && cachedMeta.city))
+                ? ' <button type="button" class="btn btn-outline-primary btn-sm py-0 px-2 ms-2" id="btnWeatherRefresh" title="重新拉取最新天气数据（网络请求）"><i class="fa-solid fa-rotate me-1"></i>刷新</button>'
+                : '';
+            setStatus('<span class="text-muted"><i class="fa-solid fa-circle-check me-1 text-success"></i>数据更新于 ' + fmtHm(cachedMeta.fetchedAt) + badge + btn + '</span>' +
+                (noteHtml ? '<div class="small text-muted mt-1">' + noteHtml + '</div>' : ''));
+        } else if (noteHtml) {
+            setStatus(noteHtml);
+        }
+    }
 
     // ===== V10.11.8 行政区划名称归一化（与后端 _norm_region 同规则，供本地匹配用） =====
     function normName(s) {
@@ -897,12 +921,6 @@
         .then(function (data) {
             if (mySeq !== reqSeq) return;  // 请求序号保护：已有更新的请求，丢弃旧响应
             if (data.code === 200 && data.data) {
-                var offBadge = data.data.offline_fallback ? ' <span class="badge bg-secondary ms-1"><i class="fa-solid fa-cloud-moon me-1"></i>离线预估</span>' : '';
-                if (quiet) {
-                    setStatus('<span class="text-muted"><i class="fa-solid fa-rotate me-1"></i>已自动刷新「' + escapeHtml(displayName) + '」的天气' + offBadge + '</span>');
-                } else {
-                    setStatus('<span class="text-success"><i class="fa-solid fa-circle-check me-1"></i>' + escapeHtml(displayName) + ' 查询成功' + offBadge + '</span>');
-                }
                 if (queryContext) {
                     if (queryContext.mode === 'coords') {
                         lsSet('last_query_mode', 'coords');
@@ -914,14 +932,32 @@
                         lsSet('last_query_city', queryContext.city || '');
                     }
                 }
-                renderAll(data.data);
+                renderAll(data.data);  // 先渲染并更新缓存元信息（cachedMeta），状态条随后读取
+                var offBadge = data.data.offline_fallback ? ' <span class="badge bg-secondary ms-1"><i class="fa-solid fa-cloud-moon me-1"></i>离线预估</span>' : '';
+                if (quiet) {
+                    // V10.11.27 静默自动更新完成：常驻「数据更新于 HH:MM + 刷新」+ 弱提示
+                    renderFreshStatus('<i class="fa-solid fa-rotate me-1"></i>已自动更新至最新数据' + offBadge);
+                } else {
+                    renderFreshStatus('<span class="text-success"><i class="fa-solid fa-circle-check me-1"></i>' + escapeHtml(displayName) + ' 查询成功</span>' + offBadge);
+                }
             } else {
                 if (quiet) {
-                    setStatus('<span class="text-muted"><i class="fa-solid fa-circle-exclamation me-1"></i>自动刷新未生效：' + escapeHtml(data.message || '查询失败') + '（当前显示缓存数据）</span>');
+                    // V10.11.27 静默失败：保留缓存数据展示，常驻条 + 失败原因弱提示
+                    renderFreshStatus('<i class="fa-solid fa-circle-exclamation me-1"></i>自动更新未生效：' + escapeHtml(data.message || '查询失败') + '（当前显示缓存数据）');
                 } else {
                     setStatus('<div class="alert alert-warning shadow-sm py-2 mb-2"><i class="fa-solid fa-circle-exclamation me-2"></i>' +
                         escapeHtml(data.message || '查询失败，请稍后重试') + '</div>');
                 }
+            }
+        })
+        .catch(function (err) {
+            if (mySeq !== reqSeq) return;
+            var isAbort = err && err.name === 'AbortError';
+            if (quiet) {
+                renderFreshStatus('<i class="fa-solid fa-circle-exclamation me-1"></i>自动更新失败' + (isAbort ? '（超时）' : '（网络）') + '，当前显示缓存数据');
+            } else {
+                setStatus('<div class="alert alert-danger shadow-sm py-2 mb-2"><i class="fa-solid fa-circle-exclamation me-2"></i>' +
+                    (isAbort ? '查询超时，请稍后重试（可点击「重置记忆」恢复默认状态）' : '网络请求失败，请稍后重试') + '</div>');
             }
         })
         .catch(function (err) {
@@ -1739,15 +1775,38 @@
         if (weatherDailyGrid) weatherDailyGrid.innerHTML = renderDailyGrid(daily);
         if (weatherLifeSection) weatherLifeSection.innerHTML = renderLifeSection(cur, daily[0]);
         if (weatherCompareSection) weatherCompareSection.innerHTML = renderCompareSection();
+        renderCompareTags();  // 纯 DOM 渲染（无网络）：显示已保存对比城市标签
         initChartIfNeeded();
         renderCalendarView();
-        if (compareCities.length) fetchCompareData();
+        // V10.11.27 缓存秒开策略：不自动拉取对比城市数据（保持零网络请求）；
+        // 对比区提示待刷新——用户点「刷新」或多城市对比区增删城市时经 fetchCompareData 更新
+        var cmpStatus = document.getElementById('compareStatus');
+        if (compareCities.length && cmpStatus) {
+            cmpStatus.innerHTML = '<span class="text-muted"><i class="fa-solid fa-circle-info me-1"></i>当前为缓存数据（零流量），点上方「刷新」可同步更新对比城市曲线</span>';
+        }
     }
 
     function renderAll(data) {
         cachedData = data;
-        // V10.11.26 本地缓存：刷新页面后先回显上次成功数据（含时间戳），再自动静默刷新
-        try { lsSet('data', JSON.stringify({ ts: Date.now(), data: data })); } catch (e) {}
+        // V10.11.27 缓存结构升级：{mode, label, city, lat, lon, data, fetchedAt}（读取兼容旧 {ts, data}）
+        if (queryContext) {
+            cachedMeta = {
+                mode: queryContext.mode, label: queryContext.label || '',
+                city: queryContext.city || '', lat: queryContext.lat, lon: queryContext.lon,
+                fetchedAt: Date.now()
+            };
+        } else if (cachedMeta) {
+            cachedMeta.fetchedAt = Date.now();
+        } else {
+            cachedMeta = { mode: '', label: '', city: '', lat: '', lon: '', fetchedAt: Date.now() };
+        }
+        try {
+            lsSet('data', JSON.stringify({
+                mode: cachedMeta.mode, label: cachedMeta.label, city: cachedMeta.city,
+                lat: cachedMeta.lat, lon: cachedMeta.lon,
+                fetchedAt: cachedMeta.fetchedAt, data: data
+            }));
+        } catch (e) {}
         selectedDate = null;
         if (viewMode === 'almanac') {
             viewMode = lsGet('weather_view_pref') || 'list';
@@ -2374,6 +2433,14 @@
         }
         var backRangeBtn = e.target.closest('#backToForecastRange');
         if (backRangeBtn) { backToday(); return; }
+        // V10.11.27 主动刷新缓存数据（用户显式请求，正常 loading 反馈）
+        var rfBtn = e.target.closest('#btnWeatherRefresh');
+        if (rfBtn) {
+            if (queryContext) {
+                refreshQuery('正在刷新「' + (queryContext.label || queryContext.city || '') + '」的最新天气…', false);
+            }
+            return;
+        }
         var almCell = e.target.closest('.alm-cell[data-alm]');
         if (almCell) {
             var aKey = almCell.getAttribute('data-alm');
@@ -2463,25 +2530,37 @@
     switchSearchMode(savedSearchMode);
 
     // V10.11.16 交互优化：进入天气页面默认不做任何网络查询，仅展示权威万年历
-    // V10.11.26 体验优化：存在上次成功缓存数据时先回显（不空白），
-    // 且检测到上次查询记忆后自动静默刷新一次，显著减少手动拉取频率
+    // V10.11.27 缓存治理：读取 {mode,label,city,lat,lon,data,fetchedAt} 持久化缓存（兼容旧 {ts,data}），
+    //   ① 缓存有效（30 分钟内）且已有查询记忆 → 零网络请求秒开，常驻「数据更新于 HH:MM + 刷新」
+    //   ② 缓存过期 / 首次进入（有查询记忆）→ 自动静默拉取一次
+    //   ③ 无查询记忆但有过期缓存 → 回显缓存数据 + 手动刷新提示
+    //   ④ 全新用户 → 离线万年历模式（零流量）
     var savedDataRaw = lsGet('data');
-    var savedTs = 0;
+    var cacheFresh = false;
     if (savedDataRaw) {
         try {
             var savedObj = JSON.parse(savedDataRaw);
             if (savedObj && savedObj.data && savedObj.data.daily && savedObj.data.daily.length) {
                 cachedData = savedObj.data;
-                savedTs = savedObj.ts || 0;
+                var savedTs2 = Number(savedObj.fetchedAt || savedObj.ts || 0);
+                cachedMeta = {
+                    mode: savedObj.mode || '',
+                    label: savedObj.label || '',
+                    city: savedObj.city || '',
+                    lat: savedObj.lat || '',
+                    lon: savedObj.lon || '',
+                    fetchedAt: savedTs2
+                };
+                cacheFresh = !!savedTs2 && (Date.now() - savedTs2 < CACHE_TTL_MS);
             }
-        } catch (e) { cachedData = null; }
+        } catch (e) { cachedData = null; cachedMeta = null; }
     }
     var savedModule = lsGet('active_module') || 'almanac';
     setModule(savedModule);
     // V10.11.26 回显上次成功数据到各视图容器（forecast/calendar 模块立即可见；almanac 不依赖）
     if (cachedData) renderCachedOnly();
 
-    // V10.11.26 自动静默拉取：存在上次查询记忆 → 自动刷新一次（成功覆盖缓存，失败保留回显数据）
+    // 恢复上次查询上下文（供「刷新」按钮与自动拉取定位地点）
     var lqMode = lsGet('last_query_mode');
     var hasQueryMem = false;
     if (lqMode === 'coords') {
@@ -2492,13 +2571,19 @@
         if (city) { queryContext = { mode: 'city', city: city }; hasQueryMem = true; }
     }
 
-    if (hasQueryMem) {
-        var ageMin = savedTs ? Math.round((Date.now() - savedTs) / 60000) : -1;
-        var staleTxt = (savedTs && ageMin >= 0) ? ('（缓存于 ' + ageMin + ' 分钟前）') : '';
-        setStatus('<span class="text-muted"><i class="fa-solid fa-rotate me-1"></i>自动刷新「' + escapeHtml(queryContext.label || queryContext.city || '') + '」天气' + staleTxt + '…</span>');
+    if (hasQueryMem && cacheFresh) {
+        // 缓存有效：零请求秒开（常驻更新时间 + 主动刷新按钮），不打任何外部接口
+        renderFreshStatus('');
+    } else if (hasQueryMem) {
+        // 缓存过期 / 首次进入：自动静默拉取一次（成功覆盖缓存，失败保留回显数据）
+        var ageMin = (cachedMeta && cachedMeta.fetchedAt) ? Math.max(0, Math.round((Date.now() - cachedMeta.fetchedAt) / 60000)) : -1;
+        setStatus('<span class="text-muted"><i class="fa-solid fa-rotate me-1"></i>' +
+            (ageMin > 0 ? '缓存已过期（' + ageMin + ' 分钟前），自动更新「' : '首次进入，自动获取「') +
+            escapeHtml(queryContext.label || queryContext.city || '') + '」天气…</span>');
         refreshQuery(null, true);
     } else if (cachedData) {
-        setStatus('<span class="text-muted"><i class="fa-solid fa-circle-info me-1"></i>已回显上次成功数据（点击「查询天气」可手动刷新）</span>');
+        // 有缓存但无查询记忆（记忆被单独清理的边缘场景）：回显 + 手动刷新提示
+        renderFreshStatus('已回显上次成功数据（缓存地点记忆缺失，请手动查询恢复自动刷新）');
     } else {
         setStatus('<span class="text-muted"><i class="fa-solid fa-calendar-days me-1 text-primary"></i>当前展示本地权威万年历（离线免流量），如需天气预报请在上方选择地区后点击【查询天气】</span>');
     }

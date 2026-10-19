@@ -1571,13 +1571,31 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 11 部分补充八：ADR-57 自由搜索智能匹配双保险 + 缓存治理（V10.11.27） ==================== -->
+<div class="section">
+<h1>第 11 部分补充八：ADR-57 自由搜索智能匹配双保险 + 天气数据持久化缓存与请求频次治理（V10.11.27 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与需求</td><td>①自由搜索后端兜底缺口：非常规输入（如「峨眉山风景区」）未命中全路径时，宽松匹配按 dict 遍历顺序返回第一个命中键，可能错误降级至地级市；②V10.11.26 缓存仅 {ts, data} 缺地点元信息、进入页面回显后仍自动请求一次、无「数据更新于」常驻展示与刷新按钮、登出/会话失效未清理缓存。</td></tr>
+<tr><td>后端别名表</td><td><code>DISTRICT_ALIASES</code> 约 90 条：名胜古迹→所在区划（峨眉山→峨眉山市、布达拉宫→拉萨市、乐山大佛→乐山市、西湖→杭州西湖区、凤凰古城→凤凰县）；自治州俗称→州府（西双版纳→景洪市、延边→延吉市、甘孜→康定市、凉山→西昌市、黔东南→凯里市）；城市别称/历史旧称（羊城→广州市、长安→西安市、金陵→南京市、冰城→哈尔滨市）。</td></tr>
+<tr><td>景区后缀剥离</td><td><code>SCENIC_STRIP_SUFFIXES</code>（风景名胜区/风景区/国家公园/森林公园/地质公园/度假区/古城/古镇等）：『峨眉山风景区』→『峨眉山』，仅当剥离后能命中行政区划才采用；<code>_try_alias_match</code> 映射标准名后重走精确+归一化+全路径匹配。</td></tr>
+<tr><td>宽松匹配重写</td><td>旧实现按 dict 遍历顺序返回第一个命中键（非常规输入可能误配上级/无关区划）；新实现收集全部候选后按「层级（<code>_region_level</code>：区县0&gt;市1&gt;省2，依据索引条目 admin2 判定）优先、同层级命中键更长者优先」排序取最具体候选。</td></tr>
+<tr><td>缓存结构升级</td><td><code>gift_weather_&lt;uid&gt;_data</code> 由 {ts, data} 升级为 {mode, label, city, lat, lon, data, fetchedAt}（读取兼容旧结构）；<code>renderAll</code> 从 queryContext 提取地点元信息一并写入。</td></tr>
+<tr><td>免拉取秒开 + TTL</td><td><code>CACHE_TTL_MS</code>=30 分钟（与后端 fetch_forecast 内存缓存对齐）；缓存有效且有查询记忆 → 零网络请求秒开（对比城市区纯 DOM 标签渲染，不触发 fetchCompareData）；状态条常驻「数据更新于 HH:MM + 刷新」按钮（<code>renderFreshStatus</code>，无查询上下文时隐藏刷新按钮）。</td></tr>
+<tr><td>仅必要时拉取</td><td>手动新地点搜索 / 级联选择查询 / 主动点刷新（#btnWeatherRefresh 委托 → refreshQuery 带 loading）/ 缓存过期（自动静默拉取，quiet 成功弱提示、失败保留缓存）/ 首次进入——五类场景才产生请求；查询成功先 renderAll 再渲染状态条（cachedMeta 就绪顺序）。</td></tr>
+<tr><td>登出/会话失效清理</td><td><code>base.html</code>：①document 级点击委托捕获 /logout 链接 → 清除当前用户 gift_weather_&lt;uid&gt;_* 与 gift_weather_0_* 再跳转；②登录页（未认证）加载时清除全部 gift_weather_* 键（覆盖会话失效自动退出、登出后落地、直接访问）。</td></tr>
+<tr><td>全链路验证</td><td>Python 直连 15 组输入全部精确命中（峨眉山风景区→峨眉山市、西双版纳→景洪市、恩阳景区→恩阳区、多级地名回归等）；浏览器逐项——TTL 内刷新<strong>零天气请求</strong>秒开；「刷新」1 次请求并更新时间；伪造过期 31 分钟自动静默拉取；别名搜索页面正确（峨眉山市，四川省 / 景洪市，云南省）；退出登录后 11 个缓存键全清；验证操作日志 3 条已清理（用户自有 820 条完好）。</td></tr>
+<tr><td>连带影响</td><td><code>services/weather_service.py</code> + <code>templates/weather.html</code> + <code>templates/base.html</code> + <code>docs/CHANGELOG.md</code> + <code>README.md</code>；别名命中路径零网络零磁盘缓存写入；Docker 版/APK 版待同步。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.26</td></tr>
-<tr><td>生成日期</td><td>2026-10-19（V10.11.26 天气多级地名匹配修复 + 月/周视图缺陷修复 + 缓存回显自动刷新 + 服务停用明确报错 + 外部接口配置页布局显示优化；承接 V10.11.25 开关即时保存生效与全停用允许）</td></tr>
+<tr><td>文档版本</td><td>V10.11.27</td></tr>
+<tr><td>生成日期</td><td>2026-10-19（V10.11.27 自由搜索智能匹配双保险 + 天气数据持久化缓存与请求频次治理；承接 V10.11.26 多级地名匹配修复与服务停用明确报错）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
