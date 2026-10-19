@@ -47,7 +47,7 @@
     <div class="small">
         统一管理各模块内置默认的外部服务地址。每组支持<b>多个端点</b>（按顺序依次尝试，<b>启用中的端点不可用时自动向后切换</b>）、行内<b>启用开关</b>（滑动开关图标）、<b>上移/下移</b>排序、<b>重试次数</b>与<b>请求超时</b>；
         每行可<b>一键测试</b>当前填写值（未保存也可测）。输入框 <code>占位提示=默认值</code>，保存后即时生效。<br>
-        <span class="text-danger"><i class="fa-solid fa-lock me-1"></i>V10.11.23 安全锁：端点地址默认<b>只读锁定</b>，点击行内「<b>编辑</b>」按钮解锁后才能修改；启用开关为高频快捷操作，可随时直接切换（随保存入库）。</span><br>
+        <span class="text-danger"><i class="fa-solid fa-lock me-1"></i>V10.11.23 安全锁：端点地址默认<b>只读锁定</b>，点击行内「<b>编辑</b>」按钮解锁后才能修改；<b>V10.11.25 启用开关切换后即时保存生效</b>（停用的端点立即不参与故障转移，页面刷新/重新进入状态保持；组内全部停用时该组服务走降级兑底）。</span><br>
         <span class="text-primary"><i class="fa-solid fa-list-check me-1"></i>V10.11.24 批量操作：每行最前方可勾选「选择框」支持<b>单选/多选</b>，每组上方「<b>全选本组</b>」一键全选；勾选后可「<b>批量启用/批量停用</b>」选中端点并整组保存即时生效。</span>
     </div>
 </div>
@@ -78,7 +78,7 @@
             <button class="btn btn-outline-secondary btn-sm rounded-pill px-3 batch-disable-btn" type="button" disabled onclick="batchToggleEndpoints('{{ gname }}', false)">
                 <i class="fa-solid fa-toggle-off me-1"></i>批量停用选中 (<span class="batch-count">0</span>)
             </button>
-            <span class="small text-muted"><i class="fa-solid fa-circle-info me-1"></i>勾选后批量切换开关并保存生效（全停用时该组服务将降级）</span>
+            <span class="small text-muted"><i class="fa-solid fa-circle-info me-1"></i>勾选后批量切换开关并保存生效（全停用时该组服务将降级）；单行开关切换即即时保存入库</span>
         </div>
 
         <div class="endpoint-list">
@@ -90,7 +90,7 @@
                     <input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)">
                 </span>
                 <input type="text" class="form-control endpoint-url" value="{{ ep.url }}" placeholder="{{ gcfg.defaults[0].url if gcfg.defaults else '如：https://...' }}" readonly aria-label="端点地址">
-                <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；开关可直接切换，随保存入库）">
+                <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；V10.11.25 切换后即时保存生效）">
                     <div class="form-check form-switch mb-0">
                         <input type="checkbox" class="form-check-input endpoint-enabled" role="switch" {% if ep.enabled %}checked{% endif %}>
                     </div>
@@ -165,13 +165,13 @@
         return div.innerHTML;
     }
 
-    // 轻量提示（右上角 toast，替代原生 alert）
-    function showToast(msg, ok = true) {
+    // 轻量提示（右上角 toast，替代原生 alert）；V10.11.25 支持 warning 第三态（全停用降级警示）
+    function showToast(msg, ok = true, warn = false) {
         const t = document.getElementById('pageToast');
         if (!t) return;
         document.getElementById('pageToastBody').textContent = msg || (ok ? '操作成功' : '操作失败');
-        t.classList.remove('text-bg-success', 'text-bg-danger');
-        t.classList.add(ok ? 'text-bg-success' : 'text-bg-danger');
+        t.classList.remove('text-bg-success', 'text-bg-danger', 'text-bg-warning');
+        t.classList.add(warn ? 'text-bg-warning' : (ok ? 'text-bg-success' : 'text-bg-danger'));
         if (window.bootstrap && bootstrap.Toast) {
             const inst = bootstrap.Toast.getOrCreateInstance(t, { delay: 2600 });
             inst.show();
@@ -290,7 +290,7 @@
         row.innerHTML = `
             <span class="input-group-text" title="勾选参与批量操作（可单选/多选）"><input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)"></span>
             <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}" readonly aria-label="端点地址">
-            <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；开关可直接切换，随保存入库）"><div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input endpoint-enabled" role="switch" ${enabled !== false ? 'checked' : ''}></div></span>
+            <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；V10.11.25 切换后即时保存生效）"><div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input endpoint-enabled" role="switch" ${enabled !== false ? 'checked' : ''}></div></span>
             <button class="btn btn-outline-success text-nowrap" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
             <button class="btn btn-outline-secondary btn-up text-nowrap" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
             <button class="btn btn-outline-secondary btn-down text-nowrap" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
@@ -367,13 +367,13 @@
         });
     }
 
-    // 编辑：记录进入编辑时的原值（取消时还原），解锁地址输入框并聚焦
+    // 编辑：记录进入编辑时的原地址（取消时还原）；V10.11.25 不再记录开关状态——
+    // 开关即时保存生效后，取消编辑只回滚地址，不得撤销已入库的启停状态
     function editEndpointRow(btn) {
         const row = btn.closest('.endpoint-row');
         if (!row) return;
         if (row.dataset.origUrl === undefined) {
             row.dataset.origUrl = row.querySelector('.endpoint-url').value;
-            row.dataset.origEnabled = row.querySelector('.endpoint-enabled').checked ? '1' : '0';
         }
         setRowEditMode(row, true);
         row.querySelector('.endpoint-url').focus();
@@ -446,26 +446,49 @@
             return;
         }
         row.querySelector('.endpoint-url').value = row.dataset.origUrl || '';
-        row.querySelector('.endpoint-enabled').checked = row.dataset.origEnabled === '1';
+        // V10.11.25: 仅还原地址，不回滚开关（开关已即时入库，取消编辑不得撤销启停状态）
         delete row.dataset.origUrl;
         delete row.dataset.origEnabled;
         setRowEditMode(row, false);
-        showToast('已取消编辑并还原该行');
+        showToast('已取消编辑并还原该行地址');
     }
 
     // 保存一组配置（只提交该组表单值；AI 组附带联网搜索总开关）
     // triggerBtn 可选：行级「保存」/批量按钮（加载态反馈）；successMsg 可选：成功提示文案（批量操作定制）
-    function saveGroup(gname, triggerBtn, successMsg) {
+    // mode='switch'（V10.11.25 开关即时保存专用）：
+    //   - 收集规则：新增行跳过（地址未确认不入库）；编辑中的行地址取进入编辑时原值
+    //     （地址改动仍须走行内保存/取消，不得被开关保存顺带半成品入库）；开关取当前值
+    //   - timeout/retries 用最近保存快照（数字框改动仍走「保存配置」）
+    //   - 不带 ai_search_enabled（保持库值）；成功后只更新快照不重渲染（保留编辑态/新增行/选中态）
+    //   - 失败回滚切换前的开关状态（epSwitchBackup 快照）
+    function saveGroup(gname, triggerBtn, successMsg, mode) {
         const card = document.querySelector(`.card[data-group="${gname}"]`);
         if (!card) return;
-        const g = collectGroup(gname);
-        if (!g || !g.urls.length) {
-            showToast('端点列表为空，无法保存', false);
-            return;
+        const isSwitchSave = (mode === 'switch');
+        let g;
+        if (isSwitchSave) {
+            const urls = [];
+            card.querySelectorAll('.endpoint-row').forEach(row => {
+                if (row.classList.contains('is-new-row')) return;
+                const url = row.classList.contains('is-editing')
+                    ? (row.dataset.origUrl || '').trim()
+                    : row.querySelector('.endpoint-url').value.trim();
+                const enabled = row.querySelector('.endpoint-enabled').checked;
+                if (url) urls.push({ url, enabled });
+            });
+            const snap = GROUP_DEFAULTS[gname] || {};
+            g = { urls, timeout: snap.timeout != null ? snap.timeout : 8, retries: snap.retries != null ? snap.retries : 0 };
+            if (!g.urls.length) { showToast('该组没有已保存的端点，请先添加并保存', false); return; }
+        } else {
+            g = collectGroup(gname);
+            if (!g || !g.urls.length) {
+                showToast('端点列表为空，无法保存', false);
+                return;
+            }
         }
         const body = { groups: {} };
         body.groups[gname] = g;
-        if (gname === 'ai_search' && document.getElementById('aiSearchEnabled')) {
+        if (!isSwitchSave && gname === 'ai_search' && document.getElementById('aiSearchEnabled')) {
             body.ai_search_enabled = document.getElementById('aiSearchEnabled').checked;
         }
         const btn = triggerBtn || null;
@@ -474,25 +497,75 @@
         postJSON('/admin/service-config/save', body)
             .then(data => {
                 if (data && data.success) {
-                    showToast(successMsg || data.message || '保存成功');
-                    // 保存成功：刷新该组快照，并将新增行转为已保存行（保存/取消按钮消失）
+                    if (isSwitchSave) {
+                        // 开关即时保存：全停用时给降级警示（其余正常提示）
+                        const anyOn = g.urls.some(u => u.enabled);
+                        if (successMsg) showToast(successMsg);
+                        else if (anyOn) showToast('端点开关已保存并即时生效（停用的端点立即不参与故障转移）');
+                        else showToast('已保存：该组已无启用端点，相关服务将降级直至重新启用', true, true);
+                    } else {
+                        showToast(successMsg || data.message || '保存成功');
+                    }
+                    // 同步快照（开关模式只动 urls；timeout/retries 本就取自快照无需回写）
                     GROUP_DEFAULTS[gname].urls = g.urls;
-                    GROUP_DEFAULTS[gname].timeout = g.timeout;
-                    GROUP_DEFAULTS[gname].retries = g.retries;
-                    if (gname === 'ai_search') AI_SEARCH_ENABLED = body.ai_search_enabled !== false;
-                    renderSavedRows(gname);
+                    if (!isSwitchSave) {
+                        GROUP_DEFAULTS[gname].timeout = g.timeout;
+                        GROUP_DEFAULTS[gname].retries = g.retries;
+                        if (gname === 'ai_search') AI_SEARCH_ENABLED = body.ai_search_enabled !== false;
+                        renderSavedRows(gname);
+                    }
+                    if (epSwitchBackup && epSwitchBackup.gname === gname) epSwitchBackup = null;
                     const box = card.querySelector('.test-results');
-                    if (box) box.innerHTML = '';
+                    if (box && !isSwitchSave) box.innerHTML = '';
                 } else {
+                    if (isSwitchSave) rollbackSwitches(card, gname);
                     showToast(data.message || '保存失败', false);
                 }
             })
-            .catch(() => showToast('网络错误，保存失败', false))
+            .catch(() => {
+                if (isSwitchSave) rollbackSwitches(card, gname);
+                showToast('网络错误，开关状态保存失败已还原', false);
+            })
             .finally(() => {
                 if (btn) { btn.disabled = false; btn.innerHTML = oldHtml; }
                 // V10.11.24：finally 恢复按钮 innerHTML 会覆盖 renderSavedRows 已清零的批量计数，末尾再同步一次
                 updateGroupBatchState(gname);
             });
+    }
+
+    // ===== V10.11.25 开关即时保存：切换即入库生效（停用端点立即不参与故障转移） =====
+    // 防抖 250ms 合并连续切换；首次排队时快照本组开关状态，保存失败时回滚
+    let epSwitchSaveTimer = null;
+    let epSwitchBackup = null;  // {gname, states: [bool...]}：排队保存前的开关态快照
+
+    document.addEventListener('change', function (e) {
+        const cb = e.target;
+        if (!cb || !cb.classList || !cb.classList.contains('endpoint-enabled')) return;
+        const card = cb.closest('.card');
+        const gname = card ? card.dataset.group : '';
+        if (!gname) return;
+        if (epSwitchSaveTimer === null) {
+            epSwitchBackup = {
+                gname,
+                states: Array.from(card.querySelectorAll('.endpoint-row:not(.is-new-row) .endpoint-enabled')).map(s => s.checked)
+            };
+        }
+        if (epSwitchSaveTimer) clearTimeout(epSwitchSaveTimer);
+        epSwitchSaveTimer = setTimeout(function () {
+            epSwitchSaveTimer = null;
+            saveGroup(gname, null, null, 'switch');
+        }, 250);
+    });
+
+    // 开关保存失败回滚：行数一致时按序还原（行数已变则不冒险，提示用户手动检查）
+    function rollbackSwitches(card, gname) {
+        if (!epSwitchBackup || epSwitchBackup.gname !== gname) return;
+        const switches = card.querySelectorAll('.endpoint-row:not(.is-new-row) .endpoint-enabled');
+        if (switches.length === epSwitchBackup.states.length) {
+            switches.forEach((s, i) => { s.checked = epSwitchBackup.states[i]; });
+            updateGroupBatchState(gname);
+        }
+        epSwitchBackup = null;
     }
 
     // 上移 / 下移

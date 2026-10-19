@@ -3405,8 +3405,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     # 管理员只需填到 .../year/，系统自动补全 {年份} 变量
                     u = normalize_holiday_url(u)
                 cleaned.append({'url': u, 'enabled': bool(item.get('enabled', True))})
-            if not cleaned or not any(x['enabled'] for x in cleaned):
-                return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」至少需要 1 条启用中的端点'}), 400
+            # V10.11.25: 放开「至少 1 条启用端点」强制校验——允许全部停用，运行时各业务模块
+            # （天气/节假日/AI搜索/企微长连接均为即用即读 get_enabled_urls）按设计走降级兜底；
+            # 端点为空行导致的空列表仍拒绝（端点记录不能整组丢失）。前端对全停用给出降级提示。
+            if not cleaned:
+                return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」端点列表不能为空'}), 400
             try:
                 timeout = max(1, min(60, int(timeout)))
             except Exception:

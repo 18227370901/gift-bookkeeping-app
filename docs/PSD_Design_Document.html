@@ -114,7 +114,7 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.11.24</span>
+    <span><strong>版本</strong>：V10.11.25</span>
     <span><strong>生成日期</strong>：2026-10-19</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
@@ -1533,13 +1533,30 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 11 部分补充六：ADR-55 开关即时保存生效与全停用允许（V10.11.25） ==================== -->
+<div class="section">
+<h1>第 11 部分补充六：ADR-55 外部接口配置开关即时保存生效与全停用允许及业务降级闭环（V10.11.25 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与根因</td><td>用户反馈：点击关闭后刷新页面/重新进入按钮自动开启；并要求关闭后端点业务上真正不可用。根因三层：①V10.11.24 开关仅前端状态，静待下一次保存才入库，刷新读回旧库值；②后端「至少 1 条启用端点」强制校验便单端点组即使保存也 400 拒绝；③业务层本已闭环（get_urls 实时读库无缓存，四模块即用即读 get_enabled_urls），缺前端入库与全停用放行。</td></tr>
+<tr><td>开关即时保存链路</td><td>document 级 change 事件委托（动态行自动覆盖）→ 防抖 250ms 合并连续切换 → <code>saveGroup(gname, null, null, 'switch')</code> 专属模式。</td></tr>
+<tr><td>switch 模式安全收集</td><td>新增行跳过（地址未确认不入库）；编辑中行地址取 <code>dataset.origUrl</code>（进编辑前已保存值，半成品不得顺带入库）、开关取当前值；timeout/retries 取最近保存快照（数字框仍走「保存配置」）；不带 ai_search_enabled（保持库值）。</td></tr>
+<tr><td>成功不重渲染</td><td>只更新 GROUP_DEFAULTS 快照 urls，不 renderSavedRows——编辑态/新增行/勾选态完整保留；全停用时黄色警示（页面 showToast 新增 warning 第三态）。</td></tr>
+<tr><td>失败回滚</td><td>首次排队时快照本组开关态（epSwitchBackup），保存失败/网络异常按序还原（行数一致时）+ 提示。</td></tr>
+<tr><td>后端放开全停用</td><td><code>admin_service_config_save</code> 移除「至少 1 条启用」校验（仅保留列表非空校验），允许整组停用；运行时各模块走各自降级兑底（天气/节假日离线兑底、搜索空结果、WS 不连接）。</td></tr>
+<tr><td>取消编辑语义修正</td><td>不再回滚启用开关（只还原地址）——开关已即时入库，取消编辑不得撤销库中启停状态。</td></tr>
+<tr><td>全链路验证</td><td>切开关即时保存 + 刷新页面状态保持（用户报告场景修复）；单端点组全停用保存成功+黄标；业务层 Python 直连 <code>get_enabled_urls</code> 停用项消失、空组空列表（天气服务地理编码环节即用即读 PASS）；编辑态切开关不破坏编辑且库中地址仍原值；取消编辑只还原地址；配置基线已还原。</td></tr>
+<tr><td>连带影响</td><td><code>templates/admin_service_config.html</code> + <code>routes/routes_ext.py</code>（单校验行放宽）；批量启用/停用与全局保存路径行为不变；Docker 版/APK 版待同步。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.24</td></tr>
-<tr><td>生成日期</td><td>2026-10-19（V10.11.24 行级开关图标化与批量启用停用；承接 V10.11.23 告警推送真实反馈与渠道选择）</td></tr>
+<tr><td>文档版本</td><td>V10.11.25</td></tr>
+<tr><td>生成日期</td><td>2026-10-19（V10.11.25 开关即时保存生效与全停用允许；承接 V10.11.24 行级开关图标化与批量操作）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
