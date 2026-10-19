@@ -1144,6 +1144,7 @@ class AlertPushConfig(db.Model):
     管理员菜单权限 ↔ WebDAV 页告警推送配置联调：
       - 总开关关闭 / 权限全部回收时，后台巡检线程自动停用推送（配置保留不生效）
       - 静默期：同类型告警在 silence_minutes 内不重复推送，避免告警风暴
+    V10.11.23 渠道选择：channels 存指定推送通道 ID 的 JSON 数组；空 = 全部启用通道（兼容存量）
     """
     __tablename__ = 'alert_push_configs'
     id = db.Column(db.Integer, primary_key=True)                 # 固定 1（单行全局）
@@ -1155,6 +1156,7 @@ class AlertPushConfig(db.Model):
     silence_minutes = db.Column(db.Integer, default=30)          # 静默期（分钟）
     merge_push = db.Column(db.Boolean, default=True)             # 一次巡检多告警合并为一条推送
     alert_cities = db.Column(db.String(200), default='北京')      # 天气预警巡检城市（逗号/顿号分隔，上限 5 个）
+    channels = db.Column(db.Text, default='')                    # V10.11.23 指定推送渠道（JSON: [通道ID,...]；空=全部启用通道）
     last_push_at = db.Column(db.Text, default='{}')              # 各类型上次推送时间 JSON：{"weather_alert": "...", ...}
     last_inspect_time = db.Column(db.DateTime, nullable=True)    # 上次巡检时间（前端展示用）
     updated_at = db.Column(db.DateTime, default=datetime.now, onupdate=datetime.now)

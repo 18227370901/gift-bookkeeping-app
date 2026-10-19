@@ -114,8 +114,8 @@
 <div class="doc-header">
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
-    <span><strong>版本</strong>：V10.11.21</span>
-    <span><strong>生成日期</strong>：2026-10-16</span>
+    <span><strong>版本</strong>：V10.11.23</span>
+    <span><strong>生成日期</strong>：2026-10-19</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
     <span class="badge">代码是实现真相</span>
@@ -1498,13 +1498,31 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 11 部分补充四：ADR-53 Webhook 告警推送真实反馈与渠道选择与列宽双缺陷修复（V10.11.23） ==================== -->
+<div class="section">
+<h1>第 11 部分补充四：ADR-53 Webhook 告警推送真实反馈与渠道选择 + 表格列宽双缺陷修复 + 交互局部更新与行级安全锁（V10.11.23 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景（六项用户反馈）</td><td>① 告警测试/巡检「假成功」：<code>trigger_webhook_event</code> 为 fire-and-forget 后台线程异步推送，真实失败（企微凭证 invalid bot_id or secret、chatid 未绑定）仅静默写库不反馈前端；② 告警推送无法选择渠道，固定推全部启用通道；③ 「重置列宽」按钮重复：告警操作授权表与推送日志表同属 <code>#alertPushCard</code> 一张卡片，各向同一卡片头注入按钮；④ 隐藏 Tab 中表格首进宽度异常/无法拖拽：隐藏时测宽为 0 被固化且幂等标记阻断重初始化；⑤ 通道启停/测试后整页刷新；⑥ 外部接口配置行默认可编辑，误触即改值。</td></tr>
+<tr><td>同步收集推送</td><td><code>trigger_webhook_event</code> 新增 <code>sync_collect</code> 参数（默认 False，全站既有异步调用行为零变化）；True 时不开线程、当前线程逐通道推送并返回 <code>[{channel_id, channel_name, success, status_code, message}]</code>（原 <code>_worker</code> 循环体抽离为 <code>_push_rendered_item</code> 复用）；<code>send_test_alert</code>/<code>push_alert</code>/<code>run_inspection_once</code> 全部改同步，响应与巡检 Summary 逐通道列出真实成败与原因；前端补 60 秒 AbortController 超时保护。</td></tr>
+<tr><td>渠道选择数据链</td><td><code>AlertPushConfig.channels</code>（JSON 通道 ID 数组；空 = 全部启用通道兼容存量）；<code>get_config_webhooks()</code> 按所选渠道过滤；<code>GET/POST /admin/alerts/config</code> 返回/校验/保存通道清单；前端「推送渠道」复选框组（通道名 + 类型徽标 + 停用置灰）+ 全选/清空 + 权限三态联动，测试与巡检严格按所选渠道推送。</td></tr>
+<tr><td>迁移版本机制适配</td><td>重要发现：V10.10.16 引入的 <code>_SCHEMA_VERSION</code> 幂等短路会使新增 ALTER 在已标记最新版本的库上静默跳过（本次 500 复现根因）；<code>_SCHEMA_VERSION</code> 升至 <strong>1021</strong> + 启动前置防御检查补齐 <code>alert_push_configs.channels</code> 列（SQLite/PG 双适配，沿用 V10.11.18 <code>users.webhook_authorized</code> 双保险模式）。</td></tr>
+<tr><td>列宽注入作用域化</td><td><code>injectResetBtn</code> 注入点优先 <code>table.closest('.colw-scope')</code> 内的 <code>.colw-header-actions</code> 槽位（两模块标题行新增作用域容器），无则回退原卡片头逻辑，同卡片多表按钮各归各模块、存量页面零变化。</td></tr>
+<tr><td>可见性感知初始化</td><td><code>initTable</code> 对不可见表格（<code>getClientRects()</code> 为空或 0 尺寸）跳过初始化并挂 <code>IntersectionObserver</code>，首次真正可见时正常初始化（真实默认宽度、分隔条、重置按钮）；老浏览器降级监听 Bootstrap shown 事件统一补扫；<code>teardown</code> 同步断开 observer；全局覆盖所有隐藏容器表格场景。</td></tr>
+<tr><td>启停/测试局部更新</td><td>启停改 fetch AJAX（后端识别 <code>X-Requested-With</code> 返回 JSON，非 AJAX 保持 redirect 兼容），行内更新状态徽标与启停图标 + toast + 双延时（1.5s/4.5s 适配标准 Webhook 秒级与企微长连接认证 3~5 秒）局部刷新日志；「测试」按钮移除整页 reload，成败均局部刷新（fetch 本页 HTML 解析替换 tbody）；顺带修复 <code>showToast</code> 缺失 <code>info</code> 色分支。</td></tr>
+<tr><td>端点行只读状态机</td><td>全部端点行（含新增行/恢复默认值行）默认 <code>readonly</code>，行内「编辑」按钮解锁（编辑/删除↔保存/取消切换、聚焦地址框），取消精确还原进入编辑时原值（新增行移除），保存成功重渲染回只读；启用开关为高频快捷操作不受编辑按钮限制；与「萌芽」平台同款交互规范统一。</td></tr>
+<tr><td>全链路验证</td><td>py_compile 全过；浏览器逐项实测——启停行内切换无刷新、隐藏 Tab 表格首次可见正常展开（904px/5+4 分隔条）、列宽拖拽 +60px 精确且持久化、重置恢复默认、渠道单选保存持久化 <code>[4]</code>、测试推送真实反馈凭证失败原因（旧版此处假成功）、立即巡检同步反馈 0/4 失败详情、行编辑状态机全通过；验证测试数据已清理（推送日志 17 条 + 操作日志 12 条，用户自有 199+897 条完好，通道状态还原）。</td></tr>
+<tr><td>连带影响</td><td>全站其余 <code>trigger_webhook_event</code> 调用点行为零变化；Docker 版/APK 版本次未同步（待后续按共享文件 MD5 逐字一致约定同步，注意 <code>_SCHEMA_VERSION=1021</code> 机制差异）；移动端 <768px 列宽降级保持。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.22</td></tr>
-<tr><td>生成日期</td><td>2026-10-16（V10.11.21 根目录文件架构重组；承接 V10.11.20 外部接口服务配置）</td></tr>
+<tr><td>文档版本</td><td>V10.11.23</td></tr>
+<tr><td>生成日期</td><td>2026-10-19（V10.11.23 告警推送真实反馈与渠道选择与列宽修复；承接 V10.11.22 根目录文档与配置分层治理）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>

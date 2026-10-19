@@ -3726,6 +3726,15 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             )
         except Exception:
             pass
+        # V10.11.23: AJAX 请求返回 JSON（前端行内更新状态徽标 + toast 轻提示，不再整页刷新）；
+        # 非 AJAX 请求保持 flash + redirect 兼容
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return jsonify({
+                'success': True,
+                'enabled': bool(hook.is_enabled),
+                'channel_name': hook.channel_name,
+                'message': f"Webhook [{hook.channel_name}] 状态已更新！"
+            })
         flash(f"Webhook [{hook.channel_name}] 状态已更新！", 'success')
         return redirect(url_for('admin_webhooks'))
 

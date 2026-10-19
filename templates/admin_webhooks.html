@@ -111,7 +111,7 @@
                 {% if w.notify_on_status_change %}<span class="badge bg-light text-dark border small" title="状态变更">状态</span>{% endif %}
               </div>
             </td>
-            <td>
+            <td id="whStatus{{ w.id }}">
               {% if w.is_enabled %}
                 <span class="badge bg-success rounded-pill px-2 py-1"><i class="fa-solid fa-circle-check me-1"></i>启用中</span>
               {% else %}
@@ -148,18 +148,11 @@
                title="编辑配置">
                 <i class="fa-solid fa-pen-to-square"></i>
               </button>
-              <form action="{{ url_for('admin_toggle_webhook', webhook_id=w.id) }}" method="POST" class="d-inline">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                {% if w.is_enabled %}
-                <button type="submit" class="btn btn-sm btn-outline-warning me-1" title="停用通道">
-                  <i class="fa-solid fa-pause"></i>
-                </button>
-                {% else %}
-                <button type="submit" class="btn btn-sm btn-outline-success me-1" title="启用通道">
-                  <i class="fa-solid fa-play"></i>
-                </button>
-                {% endif %}
-              </form>
+              {# V10.11.23 启停改 AJAX：行内更新状态徽标 + toast 轻提示，不再整页刷新 #}
+              <button type="button" class="btn btn-sm {% if w.is_enabled %}btn-outline-warning{% else %}btn-outline-success{% endif %} me-1 btn-toggle-webhook"
+                      data-id="{{ w.id }}" title="{% if w.is_enabled %}停用通道{% else %}启用通道{% endif %}">
+                <i class="fa-solid {% if w.is_enabled %}fa-pause{% else %}fa-play{% endif %}"></i>
+              </button>
               <form action="{{ url_for('admin_delete_webhook', webhook_id=w.id) }}" method="POST" class="d-inline" onsubmit="return confirm('确定要删除此 Webhook 通道配置吗？');">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="btn btn-sm btn-outline-danger" title="删除通道">
@@ -429,6 +422,20 @@
             <input type="text" class="form-control form-control-sm" id="alertCities" value="北京" maxlength="200" placeholder="多个城市用逗号分隔，最多 5 个，如：北京，成都">
             <div class="form-text small text-muted">按行政区划库匹配（支持省/市/区县名），巡检时逐城检测预警规则</div>
           </div>
+          <!-- V10.11.23 推送渠道选择：单选 / 多选 / 全选；不勾选任何渠道 = 全部启用通道（默认） -->
+          <div class="col-md-12">
+            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+              <div class="small fw-bold"><i class="fa-solid fa-satellite-dish text-warning me-1"></i>推送渠道</div>
+              <div class="btn-group btn-group-sm">
+                <button type="button" class="btn btn-outline-success py-0 px-2" onclick="alertChannelsSelectAll()"><i class="fa-solid fa-check-double me-1"></i>全选</button>
+                <button type="button" class="btn btn-outline-secondary py-0 px-2" onclick="alertChannelsClearAll()"><i class="fa-solid fa-eraser me-1"></i>清空</button>
+              </div>
+            </div>
+            <div id="alertChannelList" class="border rounded-3 p-2 bg-light-subtle d-flex flex-wrap gap-3" style="min-height: 42px;">
+              <span class="small text-muted">加载中…</span>
+            </div>
+            <div class="form-text small text-muted mt-1"><i class="fa-solid fa-circle-info me-1"></i>勾选后告警仅向指定渠道推送（可单选 / 多选）；<b>不勾选任何渠道 = 推送至全部启用通道（默认）</b>；已停用渠道不参与推送。</div>
+          </div>
         </div>
 
         <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
@@ -439,9 +446,12 @@
         </div>
         <div id="alertStatus" class="small"></div>
 
-        <!-- 操作授权管理（仅超级管理员可见） -->
-        <div id="alertGrantArea" class="d-none mt-4">
-          <h6 class="fw-bold mb-2"><i class="fa-solid fa-user-gear text-success me-1"></i>操作授权（按用户；超级管理员默认全部权限）</h6>
+        <!-- 操作授权管理（仅超级管理员可见）V10.11.23 colw-scope：重置列宽按钮落位本模块标题行 -->
+        <div id="alertGrantArea" class="d-none mt-4 colw-scope">
+          <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <h6 class="fw-bold mb-0"><i class="fa-solid fa-user-gear text-success me-1"></i>操作授权（按用户；超级管理员默认全部权限）</h6>
+            <div class="colw-header-actions d-flex align-items-center gap-2"></div>
+          </div>
           <div class="table-responsive">
             <table class="table table-hover align-middle mb-0" data-resizable="admin_alert_grants">
               <thead class="table-light">
@@ -459,9 +469,12 @@
           <div class="form-text small text-muted mt-1"><i class="fa-solid fa-circle-info me-1"></i>权限全部回收后，告警推送任务自动停用（配置保留不生效，不产生孤儿任务）；授权保存后立即生效</div>
         </div>
 
-        <!-- 推送日志（需查看日志权限） -->
-        <div id="alertLogArea" class="d-none mt-4">
-          <h6 class="fw-bold mb-2"><i class="fa-solid fa-list-check text-primary me-1"></i>推送日志（记录时间/类型/结果，与配置变更时间线可对应）</h6>
+        <!-- 推送日志（需查看日志权限）V10.11.23 colw-scope：重置列宽按钮落位本模块标题行 -->
+        <div id="alertLogArea" class="d-none mt-4 colw-scope">
+          <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <h6 class="fw-bold mb-0"><i class="fa-solid fa-list-check text-primary me-1"></i>推送日志（记录时间/类型/结果，与配置变更时间线可对应）</h6>
+            <div class="colw-header-actions d-flex align-items-center gap-2"></div>
+          </div>
           <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
             <select id="alertLogType" class="form-select form-select-sm" style="width:auto">
               <option value="">全部类型</option>
@@ -1355,7 +1368,7 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   });
 
-  // 测试 Webhook 发送（V8: 增加超时保护 + toast 提示替换 alert）
+  // 测试 Webhook 发送（V8: 增加超时保护 + toast 提示替换 alert；V10.11.23 局部刷新推送日志，不再整页 reload）
   document.querySelectorAll('.btn-test-webhook').forEach(btn => {
     btn.addEventListener('click', function() {
       const id = this.dataset.id;
@@ -1386,11 +1399,11 @@ document.addEventListener('DOMContentLoaded', function() {
       .then(data => {
         if (data.success && (data.code === 200 || data.status_code === 200)) {
           showToast('【测试成功】' + (data.message || 'Webhook / 机器人通道测试响应正常！') + '（状态码 ' + (data.status_code || data.code || 200) + '）', 'success');
-          // V10: 延迟 2 秒刷新页面，确保 toast 提示可见后再刷新
-          setTimeout(() => { window.location.reload(); }, 2000);
         } else {
           showToast('【测试失败】' + (data.message || '连接失败，请检查企业微信机器人凭证或目标地址') + '（状态码 ' + (data.status_code || data.code || '?') + '）', 'danger');
         }
+        // V10.11.23: 成败均局部刷新推送日志（测试无论成败都会产生日志记录），替代原 2 秒后整页刷新
+        refreshLogsTable();
       })
       .catch(err => {
         if (err && err.name === 'AbortError') {
@@ -1407,7 +1420,86 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     });
   });
+
+  // V10.11.23: 启停通道改 AJAX——行内更新状态徽标与按钮图标 + toast 轻提示，不刷新页面
+  document.querySelectorAll('.btn-toggle-webhook').forEach(btn => {
+    btn.addEventListener('click', function() {
+      const id = this.dataset.id;
+      const btnEl = this;
+      const origHtml = btnEl.innerHTML;
+      btnEl.disabled = true;
+      btnEl.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+      fetch('/admin/webhooks/toggle/' + id, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': '{{ csrf_token }}',
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      })
+      .then(res => res.json())
+      .then(data => {
+        btnEl.disabled = false;
+        btnEl.innerHTML = origHtml;
+        if (data.success) {
+          updateWebhookRowState(id, data.enabled);
+          showToast('通道[' + (data.channel_name || ('#' + id)) + ']已' + (data.enabled ? '启用' : '停用'), data.enabled ? 'success' : 'warning');
+          // 启停产生 status_change 推送日志（后台异步写入，企微认证约 3~5 秒），
+          // 延迟 1.5 秒先刷一次（标准 Webhook 通道秒级写入），4.5 秒再补刷一次（长连接认证完成后）
+          setTimeout(refreshLogsTable, 1500);
+          setTimeout(refreshLogsTable, 4500);
+        } else {
+          showToast(data.message || '操作失败', 'danger');
+        }
+      })
+      .catch(() => {
+        btnEl.disabled = false;
+        btnEl.innerHTML = origHtml;
+        showToast('网络请求异常，请稍后重试', 'danger');
+      });
+    });
+  });
 });
+
+// V10.11.23: 行内更新通道启停状态（状态徽标 + 启停按钮图标）
+function updateWebhookRowState(id, enabled) {
+  const statusTd = document.getElementById('whStatus' + id);
+  if (statusTd) {
+    statusTd.innerHTML = enabled
+      ? '<span class="badge bg-success rounded-pill px-2 py-1"><i class="fa-solid fa-circle-check me-1"></i>启用中</span>'
+      : '<span class="badge bg-secondary rounded-pill px-2 py-1"><i class="fa-solid fa-circle-pause me-1"></i>已停用</span>';
+  }
+  const btn = document.querySelector('.btn-toggle-webhook[data-id="' + id + '"]');
+  if (btn) {
+    btn.title = enabled ? '停用通道' : '启用通道';
+    btn.innerHTML = enabled
+      ? '<i class="fa-solid fa-pause"></i>'
+      : '<i class="fa-solid fa-play"></i>';
+    btn.classList.toggle('btn-outline-warning', !!enabled);
+    btn.classList.toggle('btn-outline-success', !enabled);
+  }
+}
+
+// V10.11.23: 局部刷新「最新推送日志」表格（fetch 本页 HTML 解析替换 tbody，不再整页 reload）
+function refreshLogsTable() {
+  fetch(window.location.href, {
+    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+    credentials: 'same-origin'
+  })
+  .then(r => r.text())
+  .then(html => {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const newBody = doc.getElementById('webhookLogsTbody');
+    const oldBody = document.getElementById('webhookLogsTbody');
+    if (!newBody || !oldBody) return;
+    oldBody.innerHTML = newBody.innerHTML;
+    const badge = document.getElementById('totalLogsBadge');
+    const newBadge = doc.getElementById('totalLogsBadge');
+    if (badge && newBadge) badge.innerText = newBadge.innerText;
+    onLogFilterChange();  // 重跑筛选/分页渲染（同步全选状态与计数）
+  })
+  .catch(() => { /* 静默：局部刷新失败不影响主流程，可手动刷新页面 */ });
+}
 
 // --- Webhook Logs Pagination & Filter Management ---
 let currentLogPage = 1;
@@ -1694,7 +1786,8 @@ function ensureToastContainer() {
 }
 
 function showToast(message, type) {
-  const cls = type === 'success' ? 'text-bg-success' : (type === 'warning' ? 'text-bg-warning' : 'text-bg-danger');
+  // V10.11.23: 补充 info 色分支（原实现未知类型落入 danger，导致等待提示误显红色）
+  const cls = type === 'success' ? 'text-bg-success' : (type === 'warning' ? 'text-bg-warning' : (type === 'info' ? 'text-bg-info' : 'text-bg-danger'));
   const container = ensureToastContainer();
   const toastEl = document.createElement('div');
   toastEl.className = 'toast align-items-center border-0 ' + cls;
@@ -1713,6 +1806,47 @@ function showToast(message, type) {
 // 权限三态渲染依据：alertPerms（后端实时校验，前端不硬编码）
 var alertPerms = { edit: false, test: false, view_log: false, is_admin: false };
 var alertLogPageNum = 1, alertLogTotalPages = 1;
+
+// ==================== V10.11.23 推送渠道选择（单选/多选/全选；不勾选 = 全部） ====================
+
+// 渲染可选渠道清单（available_channels 由 GET /admin/alerts/config 返回；含已停用渠道，置灰标注）
+function renderAlertChannels(channels, selected) {
+  var box = document.getElementById('alertChannelList');
+  if (!box) return;
+  if (!channels || !channels.length) {
+    box.innerHTML = '<span class="small text-muted">暂无可用通道，请先在「通知渠道与机器人」页配置</span>';
+    return;
+  }
+  var sel = (selected && selected.length) ? selected : [];
+  box.innerHTML = channels.map(function (ch) {
+    var typeBadge = (ch.connection_type === 'long_connection')
+      ? '<span class="badge bg-primary-subtle text-primary border border-primary-subtle ms-1">企微长连接</span>'
+      : '<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle ms-1">标准Webhook</span>';
+    var disBadge = ch.is_enabled ? '' : ' <span class="badge bg-warning-subtle text-warning border border-warning-subtle">已停用</span>';
+    var checked = (sel.indexOf(ch.id) !== -1) ? ' checked' : '';
+    return '<div class="form-check mb-0">' +
+      '<input class="form-check-input alert-channel-cb" type="checkbox" value="' + ch.id + '" id="alertCh_' + ch.id + '"' + checked +
+      (alertPerms.edit ? '' : ' disabled') + '>' +
+      '<label class="form-check-label small" for="alertCh_' + ch.id + '">' + ch.name + typeBadge + disBadge + '</label></div>';
+  }).join('');
+}
+
+// 收集勾选的渠道 ID（空数组 = 全部，由后端按默认语义处理）
+function getSelectedAlertChannels() {
+  var ids = [];
+  document.querySelectorAll('.alert-channel-cb:checked').forEach(function (cb) {
+    ids.push(parseInt(cb.value, 10));
+  });
+  return ids;
+}
+
+function alertChannelsSelectAll() {
+  document.querySelectorAll('.alert-channel-cb:not(:disabled)').forEach(function (cb) { cb.checked = true; });
+}
+
+function alertChannelsClearAll() {
+  document.querySelectorAll('.alert-channel-cb:not(:disabled)').forEach(function (cb) { cb.checked = false; });
+}
 
 function alertCsrfHeaders() {
   return {
@@ -1759,6 +1893,7 @@ function loadAlertConfig() {
       document.getElementById('alertSilence').value = c.silence_minutes;
       document.getElementById('alertMerge').checked = !!c.merge_push;
       document.getElementById('alertCities').value = c.alert_cities || '北京';
+      renderAlertChannels(d.available_channels, c.channels);  // V10.11.23 渠道选择渲染
       var meta = [];
       if (c.last_inspect_time) meta.push('上次巡检：' + c.last_inspect_time);
       if (c.updated_at) meta.push('配置更新：' + c.updated_at);
@@ -1795,6 +1930,8 @@ function applyAlertPerms() {
   if (logArea) logArea.classList.toggle('d-none', !alertPerms.view_log);
   var grantArea = document.getElementById('alertGrantArea');
   if (grantArea) grantArea.classList.toggle('d-none', !alertPerms.is_admin);
+  // V10.11.23: 渠道复选框随编辑权限联动置灰/解锁
+  document.querySelectorAll('.alert-channel-cb').forEach(function (cb) { cb.disabled = !alertPerms.edit; });
 }
 
 // 保存配置（后端逐项校验；失败保留原配置）
@@ -1814,7 +1951,8 @@ function saveAlertConfig() {
     task_failed_on: document.getElementById('alertTaskOn').checked,
     silence_minutes: parseInt(document.getElementById('alertSilence').value, 10) || 0,
     merge_push: document.getElementById('alertMerge').checked,
-    alert_cities: document.getElementById('alertCities').value
+    alert_cities: document.getElementById('alertCities').value,
+    channels: getSelectedAlertChannels()  // V10.11.23 指定推送渠道（空数组 = 全部启用通道）
   };
   fetch('/admin/alerts/config', { method: 'POST', headers: alertCsrfHeaders(), body: JSON.stringify(payload) })
     .then(function (r) {
@@ -1831,6 +1969,7 @@ function saveAlertConfig() {
         if (c.last_inspect_time) meta.push('上次巡检：' + c.last_inspect_time);
         if (c.updated_at) meta.push('配置更新：' + c.updated_at);
         document.getElementById('alertMeta').textContent = meta.join(' ｜ ');
+        renderAlertChannels(res.data.available_channels, c.channels);  // V10.11.23 保存成功后同步渠道选中态
       }
     })
     .catch(function () {
@@ -1839,7 +1978,7 @@ function saveAlertConfig() {
     });
 }
 
-// 发送测试推送（走真实渠道，成败即时反馈）
+// 发送测试推送（V10.11.23 后端同步逐通道真实推送，前端 60s 超时保护 + 逐通道结果反馈）
 function sendAlertTest() {
   if (!alertPerms.test) return;
   var btn = document.getElementById('alertTestBtn');
@@ -1848,7 +1987,10 @@ function sendAlertTest() {
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>发送中…';
   }
-  fetch('/admin/alerts/test', { method: 'POST', headers: alertCsrfHeaders(), body: '{}' })
+  var controller = new AbortController();
+  var timeoutId = setTimeout(function () { controller.abort(); }, 60000);
+  setAlertStatus(true, '正在同步推送并等待各通道真实结果，请稍候…');
+  fetch('/admin/alerts/test', { method: 'POST', headers: alertCsrfHeaders(), body: '{}', signal: controller.signal })
     .then(function (r) {
       return r.json().catch(function () { return { success: false, message: '服务响应异常' }; })
         .then(function (d) { return { status: r.status, data: d }; });
@@ -1857,14 +1999,16 @@ function sendAlertTest() {
       if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
       if (handleAlertDeny(res.status, res.data)) return;
       setAlertStatus(!!res.data.success, res.data.message);
+      loadAlertLogs(1);  // 同步推送后刷新推送日志
     })
     .catch(function () {
       if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
-      setAlertStatus(false, '网络请求失败');
-    });
+      setAlertStatus(false, '网络请求失败或等待超时（超过 60 秒），请稍后重试');
+    })
+    .finally(function () { clearTimeout(timeoutId); });
 }
 
-// 立即巡检（配置后立即验证，无需等待自动巡检）
+// 立即巡检（配置后立即验证，无需等待自动巡检；V10.11.23 同步收集真实推送结果 + 60s 超时保护）
 function runAlertInspection() {
   if (!alertPerms.edit) return;
   var btn = document.getElementById('alertRunBtn');
@@ -1873,8 +2017,10 @@ function runAlertInspection() {
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>巡检中…';
   }
-  setAlertStatus(true, '巡检执行中，请稍候…');
-  fetch('/admin/alerts/run', { method: 'POST', headers: alertCsrfHeaders(), body: '{}' })
+  setAlertStatus(true, '巡检执行中（含真实推送），请稍候…');
+  var controller = new AbortController();
+  var timeoutId = setTimeout(function () { controller.abort(); }, 60000);
+  fetch('/admin/alerts/run', { method: 'POST', headers: alertCsrfHeaders(), body: '{}', signal: controller.signal })
     .then(function (r) {
       return r.json().catch(function () { return { success: false, message: '服务响应异常' }; })
         .then(function (d) { return { status: r.status, data: d }; });
@@ -1887,8 +2033,9 @@ function runAlertInspection() {
     })
     .catch(function () {
       if (btn) { btn.disabled = false; btn.innerHTML = origHtml; }
-      setAlertStatus(false, '网络请求失败');
-    });
+      setAlertStatus(false, '网络请求失败或等待超时（超过 60 秒）');
+    })
+    .finally(function () { clearTimeout(timeoutId); });
 }
 
 // ===== 推送日志（筛选 + 分页 + 导出） =====

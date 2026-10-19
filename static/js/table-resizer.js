@@ -15,6 +15,11 @@
  *   - 双击分隔条：自动适应该列内容最大宽度（同帧切换布局测量，无闪烁）
  *   - 持久化：localStorage 键 gift_colw_{用户ID}_{表格ID}，按「用户+表格」隔离
  *   - 重置入口：容器右上角自动注入「重置列宽」小按钮，清除存储恢复默认
+ *     V10.11.23：注入点优先取模块级作用域容器 .colw-scope 内的 .colw-header-actions 槽位，
+ *     同一卡片多张表格时重置按钮各归各模块；无作用域容器则回退卡片头逻辑（兼容存量页面）
+ *   - 可见性感知（V10.11.23）：隐藏容器（隐藏 Tab/折叠区）中的表格延迟初始化——隐藏时
+ *     测量宽度为 0 会导致列宽固化异常、分隔条无法拖拽；首次可见时（IntersectionObserver）
+ *     再执行正常初始化；老浏览器降级监听 Bootstrap shown 事件统一补扫
  *   - 响应式降级：屏宽 < 768px 不启用（不拖拽、不恢复存储、自然布局）
  */
 (function () {
@@ -40,11 +45,62 @@
         return window.innerWidth < MOBILE_MAX || window.matchMedia('(pointer: coarse) and (max-width: 767.98px)').matches;
     }
 
+    // ===== 可见性感知（V10.11.23） =====
+    function isVisibleTable(table) {
+        if (!table || !table.isConnected) return false;
+        // display:none 的元素 getClientRects() 为空列表（标准判定）；同时排除 0 尺寸场景
+        if (table.getClientRects && table.getClientRects().length === 0) return false;
+        var rect = table.getBoundingClientRect();
+        return rect.width > 0 && rect.height > 0;
+    }
+
+    // 兜底补扫：老浏览器（无 IntersectionObserver）在 Bootstrap 展开/切换事件后统一扫描未初始化表格
+    function retryPendingTables() {
+        document.querySelectorAll('table[data-resizable]').forEach(function (t) {
+            if (!t.__colwInit && isVisibleTable(t)) {
+                t.__colwPending = false;
+                initTable(t);
+            }
+        });
+    }
+
+    // 不可见表格挂可见性监听：首次真正可见时执行正常初始化（期间不设幂等标记）
+    function watchVisibility(table) {
+        if (table.__colwObserver || table.__colwPending) return;   // 防重复挂监听
+        if ('IntersectionObserver' in window) {
+            var ob = new IntersectionObserver(function (entries) {
+                for (var i = 0; i < entries.length; i++) {
+                    if (entries[i].isIntersecting) {
+                        ob.disconnect();
+                        table.__colwObserver = null;
+                        initTable(table);
+                        break;
+                    }
+                }
+            }, { threshold: 0.01 });
+            ob.observe(table);
+            table.__colwObserver = ob;
+        } else {
+            table.__colwPending = true;
+            document.addEventListener('shown.bs.tab', retryPendingTables);
+            document.addEventListener('shown.bs.collapse', retryPendingTables);
+            document.addEventListener('shown.bs.modal', retryPendingTables);
+        }
+    }
+
     // ===== 单表控制器 =====
     function initTable(table) {
         if (!table || table.__colwInit) return;            // 幂等
         var tableId = table.getAttribute('data-resizable');
         if (!tableId) return;
+
+        // V10.11.23 可见性感知：隐藏容器中的表格不初始化（隐藏时测宽为 0 会导致列宽固化
+        // 异常、分隔条无法拖拽），待首次可见时再执行；可见后不再进入此分支
+        if (!isVisibleTable(table)) {
+            watchVisibility(table);
+            return;
+        }
+
         var headRow = table.querySelector('thead tr');
         if (!headRow) return;
         var ths = Array.prototype.slice.call(headRow.querySelectorAll('th[data-col]'));
@@ -234,9 +290,10 @@
     }
 
     // 注入「重置列宽」按钮（优雅置于卡片标题栏右侧或独立工具条，绝不遮挡操作列表头）
+    // V10.11.23：优先挂载到模块级作用域容器 .colw-scope 内的 .colw-header-actions 槽位——
+    // 解决「同一卡片内多张表格（如告警操作授权表与推送日志表）重复注入两个按钮」的缺陷；
+    // 无作用域容器时回退原有卡片头逻辑，存量页面行为零变化
     function injectResetBtn(table) {
-        var card = table.closest('.card');
-        var cardHeader = card ? card.querySelector('.card-header') : null;
         var wrap = table.closest('.table-responsive') || table.parentElement;
         if (!wrap) return;
 
@@ -262,6 +319,19 @@
             refreshCellTitles(table);
         });
 
+        // 优先：模块级作用域槽位（同卡片多表时重置按钮各归各模块）
+        var scope = table.closest('.colw-scope');
+        if (scope) {
+            var scopeBox = scope.querySelector('.colw-header-actions');
+            if (scopeBox) {
+                scopeBox.appendChild(btn);
+                return;
+            }
+        }
+
+        // 回退：卡片头逻辑（存量页面）
+        var card = table.closest('.card');
+        var cardHeader = card ? card.querySelector('.card-header') : null;
         if (cardHeader) {
             var targetBox = cardHeader.querySelector('.colw-header-actions') || cardHeader.querySelector('.d-flex.gap-2');
             if (targetBox) {
@@ -281,6 +351,11 @@
     function teardown(table) {
         if (!table) return;
         table.__colwInit = false;
+        // V10.11.23：同步清理可见性监听，避免降级后残留 observer
+        if (table.__colwObserver) {
+            try { table.__colwObserver.disconnect(); } catch (e) {}
+            table.__colwObserver = null;
+        }
         table.style.removeProperty('table-layout');
         table.style.removeProperty('width');
         table.style.removeProperty('min-width');

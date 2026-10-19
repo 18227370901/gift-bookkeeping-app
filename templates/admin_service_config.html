@@ -46,7 +46,8 @@
     <i class="fa-solid fa-circle-info fa-lg mt-1"></i>
     <div class="small">
         统一管理各模块内置默认的外部服务地址。每组支持<b>多个端点</b>（按顺序依次尝试，<b>启用中的端点不可用时自动向后切换</b>）、行内<b>启用开关</b>、<b>上移/下移</b>排序、<b>重试次数</b>与<b>请求超时</b>；
-        每行可<b>一键测试</b>当前填写值（未保存也可测）。输入框 <code>占位提示=默认值</code>，保存后即时生效。
+        每行可<b>一键测试</b>当前填写值（未保存也可测）。输入框 <code>占位提示=默认值</code>，保存后即时生效。<br>
+        <span class="text-danger"><i class="fa-solid fa-lock me-1"></i>V10.11.23 安全锁：端点地址默认<b>只读锁定</b>，点击行内「<b>编辑</b>」按钮解锁后才能修改；启用开关为高频快捷操作，可随时直接切换（随保存入库）。</span>
     </div>
 </div>
 
@@ -66,15 +67,19 @@
 
         <div class="endpoint-list">
             {% for ep in gcfg.urls %}
+            {# V10.11.23 行默认只读锁定：点「编辑」解锁地址输入框；启用开关可直接操作不受限 #}
             <div class="input-group input-group-sm mb-2 endpoint-row">
-                <input type="text" class="form-control endpoint-url" value="{{ ep.url }}" placeholder="{{ gcfg.defaults[0].url if gcfg.defaults else '如：https://...' }}" aria-label="端点地址">
-                <span class="input-group-text" title="启用该端点（停用则不参与故障转移）">
+                <input type="text" class="form-control endpoint-url" value="{{ ep.url }}" placeholder="{{ gcfg.defaults[0].url if gcfg.defaults else '如：https://...' }}" readonly aria-label="端点地址">
+                <span class="input-group-text" title="启用该端点（停用则不参与故障转移；可随时直接切换）">
                     <input type="checkbox" class="form-check-input mt-0 endpoint-enabled" {% if ep.enabled %}checked{% endif %}>
                 </span>
                 <button class="btn btn-outline-success text-nowrap" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
                 <button class="btn btn-outline-secondary btn-up text-nowrap" type="button" title="上移" onclick="moveRow(this, -1)" {% if loop.first %}disabled{% endif %}><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
                 <button class="btn btn-outline-secondary btn-down text-nowrap" type="button" title="下移" onclick="moveRow(this, 1)" {% if loop.last %}disabled{% endif %}><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
-                <button class="btn btn-outline-danger text-nowrap" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
+                <button class="btn btn-outline-primary btn-edit text-nowrap" type="button" title="编辑此端点（解锁地址输入框）" onclick="editEndpointRow(this)"><i class="fa-solid fa-pen-to-square me-1"></i>编辑</button>
+                <button class="btn btn-outline-danger btn-del text-nowrap" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
+                <button class="btn btn-success btn-save text-nowrap d-none" type="button" title="保存此端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
+                <button class="btn btn-outline-danger btn-cancel text-nowrap d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>
             </div>
             {% endfor %}
         </div>
@@ -253,23 +258,48 @@
     }
 
     // 端点行构造函数（新增/恢复/取消共用）
-    // isNew=true（添加端点时）：显示「保存」「取消」按钮（保存入库后转为已保存行，按钮消失）；
-    // isNew=false（已保存行）：仅测试/上移/下移/删除
+    // V10.11.23 行状态机：所有行（含新增行）默认只读锁定（地址输入框 readonly），
+    // 点「编辑」进入可编辑态（编辑/删除隐藏，保存/取消显示）；保存成功后经 renderSavedRows
+    // 重渲染回只读态；启用开关为高频快捷操作，不受编辑按钮限制（任何时候可直接切换）
     function makeEndpointRow(url, enabled, placeholder, isNew) {
         const row = document.createElement('div');
         row.className = 'input-group input-group-sm mb-2 endpoint-row' + (isNew ? ' is-new-row' : '');
-        const extraBtns = isNew
-            ? `<button class="btn btn-success text-nowrap" type="button" title="保存此新增端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
-               <button class="btn btn-outline-danger text-nowrap" type="button" title="放弃此新增端点" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>`
-            : `<button class="btn btn-outline-danger text-nowrap" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>`;
         row.innerHTML = `
-            <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}">
-            <span class="input-group-text"><input type="checkbox" class="form-check-input mt-0 endpoint-enabled" ${enabled !== false ? 'checked' : ''}></span>
+            <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}" readonly aria-label="端点地址">
+            <span class="input-group-text" title="启用该端点（停用则不参与故障转移；可随时直接切换）"><input type="checkbox" class="form-check-input mt-0 endpoint-enabled" ${enabled !== false ? 'checked' : ''}></span>
             <button class="btn btn-outline-success text-nowrap" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
             <button class="btn btn-outline-secondary btn-up text-nowrap" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
             <button class="btn btn-outline-secondary btn-down text-nowrap" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
-            ${extraBtns}`;
+            <button class="btn btn-outline-primary btn-edit text-nowrap" type="button" title="编辑此端点（解锁地址输入框）" onclick="editEndpointRow(this)"><i class="fa-solid fa-pen-to-square me-1"></i>编辑</button>
+            <button class="btn btn-outline-danger btn-del text-nowrap" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
+            <button class="btn btn-success btn-save text-nowrap d-none" type="button" title="保存此端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
+            <button class="btn btn-outline-danger btn-cancel text-nowrap d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>`;
         return row;
+    }
+
+    // 进入/退出编辑态：编辑 = 地址输入框解锁 + 编辑/删除隐藏 + 保存/取消显示
+    function setRowEditMode(row, editing) {
+        const urlInput = row.querySelector('.endpoint-url');
+        if (editing) urlInput.removeAttribute('readonly');
+        else urlInput.setAttribute('readonly', 'readonly');
+        row.classList.toggle('is-editing', editing);
+        const btnMap = { '.btn-edit': editing, '.btn-del': editing, '.btn-save': !editing, '.btn-cancel': !editing };
+        Object.keys(btnMap).forEach(sel => {
+            const b = row.querySelector(sel);
+            if (b) b.classList.toggle('d-none', btnMap[sel]);
+        });
+    }
+
+    // 编辑：记录进入编辑时的原值（取消时还原），解锁地址输入框并聚焦
+    function editEndpointRow(btn) {
+        const row = btn.closest('.endpoint-row');
+        if (!row) return;
+        if (row.dataset.origUrl === undefined) {
+            row.dataset.origUrl = row.querySelector('.endpoint-url').value;
+            row.dataset.origEnabled = row.querySelector('.endpoint-enabled').checked ? '1' : '0';
+        }
+        setRowEditMode(row, true);
+        row.querySelector('.endpoint-url').focus();
     }
 
     // 刷新该组上移/下移按钮置灰状态：首行「上移」置灰、末行「下移」置灰
@@ -285,15 +315,15 @@
         });
     }
 
-    // 添加端点行（新增态：带保存/取消按钮）
+    // 添加端点行（V10.11.23 与已保存行同构：默认只读锁定，点行内「编辑」解锁后填写）
     function addEndpointRow(gname) {
         const card = document.querySelector(`.card[data-group="${gname}"]`);
         const list = card.querySelector('.endpoint-list');
         const def = (GROUP_DEFAULTS[gname] && GROUP_DEFAULTS[gname].defaults && GROUP_DEFAULTS[gname].defaults[0]) ? GROUP_DEFAULTS[gname].defaults[0].url : '';
         const row = makeEndpointRow('', true, def, true);
         list.appendChild(row);
-        row.querySelector('.endpoint-url').focus();
         refreshMoveButtons(gname);
+        showToast('已添加端点行，请点击该行「编辑」按钮解锁后填写地址');
     }
 
     // 按已保存快照重渲染该组端点列表（消除新增行的保存/取消按钮）
@@ -312,7 +342,7 @@
         refreshMoveButtons(gname);
     }
 
-    // 新增端点行：保存（将该组当前表单值整体保存，新增行入库后转为已保存行）
+    // 端点行「保存」按钮（新增行/编辑态通用）：校验后整组保存，成功后重渲染回只读态
     function saveEndpointRow(btn) {
         const card = btn.closest('.card');
         const gname = card.dataset.group;
@@ -322,13 +352,23 @@
         saveGroup(gname, btn);
     }
 
-    // 新增端点行：取消（放弃该行，不入库）
+    // 取消：新增行 = 移除该行（不入库）；已保存行 = 还原进入编辑时的原值并退出编辑态
     function cancelEndpointRow(btn) {
         const row = btn.closest('.endpoint-row');
-        const card = btn.closest('.card');
-        const gname = card ? card.dataset.group : '';
-        if (row) row.remove();
-        if (gname) refreshMoveButtons(gname);
+        if (!row) return;
+        if (row.classList.contains('is-new-row')) {
+            row.remove();
+            const card = btn.closest('.card');
+            if (card) refreshMoveButtons(card.dataset.group);
+            showToast('已放弃该新增端点');
+            return;
+        }
+        row.querySelector('.endpoint-url').value = row.dataset.origUrl || '';
+        row.querySelector('.endpoint-enabled').checked = row.dataset.origEnabled === '1';
+        delete row.dataset.origUrl;
+        delete row.dataset.origEnabled;
+        setRowEditMode(row, false);
+        showToast('已取消编辑并还原该行');
     }
 
     // 保存一组配置（只提交该组表单值；AI 组附带联网搜索总开关）
@@ -461,7 +501,7 @@
             refreshMoveButtons(gname);
         }
         if (document.getElementById('aiSearchEnabled')) document.getElementById('aiSearchEnabled').checked = true;
-        showToast('已恢复为默认值，请点击「保存配置」后生效');
+        showToast('已恢复为默认值（行已只读锁定），请点击「保存配置」后生效');
     }
 </script>
 {% endblock %}

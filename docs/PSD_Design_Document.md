@@ -11,8 +11,8 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.11.22  
-> **生成日期**：2026-10-16  
+> **版本**：V10.11.23  
+> **生成日期**：2026-10-19  
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
 > **文档定位**：以代码为实现真相（Ground Truth），历史文档为设计意图真相，显式揭露漂移，证据链闭环。
@@ -1959,3 +1959,21 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   4. **临时与敏感数据本地化防护**：本地构建产物 `wecom_aibot_python_sdk-1.0.2.dist-info/` 移入 `.temp/`；`.gitignore` 强化对 `config/config.local.sh` 与 `config/*.local.*` 等本地敏感配置的防提交保护，严防密钥泄露。
   5. **验证（编译+服务运行+Shell语法全链路）**：22 个 Python 模块 py_compile 全过；后台进程平滑重启且 `/login` 返回 200 OK；Shell 脚本 `sh -n run.sh bin/*.sh` 语法与模板定位检测 100% 通过。
 - **连带影响**：全库 Python 核心业务逻辑与数据模型零修改；Shell 脚本双路径兼容；所有文档相对路径交叉引用保持闭环。
+
+### 11.15 ADR-53：Webhook 告警推送真实反馈与渠道选择 + 表格列宽双缺陷修复 + 交互局部更新与行级安全锁（V10.11.23 落地）
+- **背景与根因**（六项用户反馈问题）：
+  1. **告警测试/巡检「假成功」**：`trigger_webhook_event` 为 fire-and-forget 后台线程异步推送，`send_test_alert` 调用后立即返回「已发送至 N 个通道」，真实失败（企微凭证 invalid bot_id or secret、chatid 未绑定等）仅静默写入推送日志、永不反馈前端——用户「提示成功但企业微信收不到消息」；
+  2. **告警推送无法选择渠道**：`get_active_webhooks()` 固定取全部启用通道，无渠道选择设计与配置入口；
+  3. **「重置列宽」按钮重复**：`table-resizer.js` 的 `injectResetBtn` 以 `table.closest('.card')` 卡片头为注入点，告警操作授权表与推送日志表同属 `#alertPushCard` 一张卡片，两表各注入一个按钮到同一卡片头按钮区；
+  4. **隐藏 Tab 表格首进宽度异常/无法拖拽**：`DOMContentLoaded` 全页扫描初始化时隐藏 `tab-pane` 中表格 `getBoundingClientRect()` 测宽为 0，被固化为列默认宽（钳至最小值）并强制 `table-layout:fixed` 窄表；`__colwInit` 幂等标记使 Tab 显示后不再重初始化，分隔条无法正常命中拖拽；
+  5. **通道启停/测试后整页刷新**：启停为 form POST + flash + redirect；测试按钮成功后 `setTimeout(reload, 2000)` 整页刷新；
+  6. **外部接口服务配置行默认可编辑**：端点地址输入框始终可写，误触键盘即改值，缺少「编辑按钮解锁」防护。
+- **决策方案与实施结果**：
+  1. **同步收集推送模式**：`trigger_webhook_event` 新增 `sync_collect` 参数（默认 False 保持全站既有异步行为零变化），True 时不开线程、当前线程逐通道推送并返回 `[{channel_id, channel_name, success, status_code, message}]`（原 `_worker` 循环体抽离为 `_push_rendered_item` 复用）；`send_test_alert`/`push_alert`/`run_inspection_once` 全部改走同步模式，响应与巡检 Summary 逐通道列出真实成败与原因；`record_webhook_log` 原生连接线程安全，同步路径无障碍；
+  2. **渠道选择数据链**：`AlertPushConfig.channels`（TEXT，JSON 通道 ID 数组；空 = 全部启用通道兼容存量）+ `app.py` 迁移 SQL + `_SCHEMA_VERSION` 升 **1021** + 启动前置防御检查补列（**重要机制发现**：V10.10.16 的版本标记幂等短路会使新增 ALTER 在已标记库上静默跳过，本次 500 复现根因，新列必须「版本号升级 + 前置防御」双保险）；`get_config_webhooks()` 按所选渠道过滤启用通道；`GET/POST /admin/alerts/config` 返回/校验/保存通道清单；前端「推送渠道」复选框组 + 全选/清空 + 权限三态联动；
+  3. **列宽注入点作用域化**：注入点优先 `table.closest('.colw-scope')` 内的 `.colw-header-actions` 槽位（本次为操作授权/推送日志两模块标题行新增作用域容器），无则回退原卡片头逻辑——同卡片多表按钮各归各模块，存量页面零变化；
+  4. **可见性感知初始化**：`initTable` 对不可见表格（`getClientRects()` 为空或 0 尺寸）跳过初始化并挂 `IntersectionObserver`，首次真正可见时执行正常初始化（测量真实默认宽度、注入分隔条与重置按钮）；老浏览器降级监听 Bootstrap `shown.bs.tab/collapse/modal` 事件统一补扫；`teardown` 同步断开 observer；全局覆盖所有隐藏容器表格场景；
+  5. **启停/测试 AJAX 局部更新**：`admin_toggle_webhook` 识别 `X-Requested-With` 返回 JSON（enabled/channel_name），前端行内更新状态徽标与按钮图标 + toast + 双延时（1.5s/4.5s 适配标准 Webhook 秒级与企微长连接认证 3~5 秒）局部刷新日志；测试按钮移除整页 reload、成败均局部刷新（`refreshLogsTable` fetch 本页 HTML 解析替换 tbody）；顺带修复 `showToast` 缺失 `info` 色分支；
+  6. **端点行只读状态机**：所有行（含新增/恢复默认值）默认 `readonly`，行内「编辑」按钮进入可编辑态（编辑/删除↔保存/取消切换、聚焦地址框），取消精确还原进入编辑时原值（新增行移除），保存成功经 `renderSavedRows` 回只读；启用开关为高频快捷操作不受编辑按钮限制（任何时候可直接切换）。
+- **验证**：py_compile 6 个后端文件全过；浏览器逐项实测——启停行内切换无刷新、隐藏 Tab 表格首次可见正常展开（904px/5+4 分隔条）、列宽拖拽 +60px 精确且 localStorage 持久化、重置恢复默认、渠道单选保存持久化 `[4]`、测试推送真实反馈「✗ [asfd] 凭证校验失败: invalid bot_id or secret」（旧版此处假成功）、立即巡检同步反馈 0/4 失败详情、行编辑状态机全通过；验证测试数据清理（推送日志 17 条 + 操作日志 12 条删除，用户自有 199+897 条完好，通道启停状态还原）。
+- **连带影响**：`trigger_webhook_event` 全站其余调用点（记账事件/广播/编辑通知/启停广播等）行为零变化（参数默认关闭）；Docker 版/APK 版本次未同步（待后续按共享文件 MD5 逐字一致约定同步，同步时需注意 `_SCHEMA_VERSION=1021` 机制差异）；<768px 移动端列宽降级逻辑保持。

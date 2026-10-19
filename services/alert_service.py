@@ -87,6 +87,7 @@ def get_alert_config_dict():
         'silence_minutes': cfg.silence_minutes or 30,
         'merge_push': bool(cfg.merge_push),
         'alert_cities': cfg.alert_cities or '北京',
+        'channels': _parse_channels(cfg.channels),
         'last_inspect_time': cfg.last_inspect_time.strftime('%Y-%m-%d %H:%M:%S') if cfg.last_inspect_time else '',
         'updated_at': cfg.updated_at.strftime('%Y-%m-%d %H:%M:%S') if cfg.updated_at else '',
     }
@@ -125,8 +126,33 @@ def has_any_alert_permission():
 
 
 def get_active_webhooks():
-    """已启用的 Webhook 通道（告警推送目标；告警为系统级通知，取全部启用通道）"""
+    """已启用的 Webhook 通道（全量，供兼容调用）"""
     return WebhookConfig.query.filter_by(is_enabled=True).all()
+
+
+def _parse_channels(raw):
+    """解析告警配置中指定推送渠道（JSON 数组字符串）；异常/空返回空列表（=全部）"""
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return [int(x) for x in data if str(x).strip().isdigit()]
+    except Exception:
+        pass
+    return []
+
+
+def get_config_webhooks():
+    """V10.11.23 按告警配置所选渠道过滤启用通道（渠道选择：单选/多选/全选）
+    规则：配置为空 = 全部启用通道（兼容存量默认行为）；
+          勾选指定渠道 = 仅推这些渠道；被停用/删除的渠道自动跳过
+    """
+    hooks = WebhookConfig.query.filter_by(is_enabled=True).all()
+    selected = set(_parse_channels(get_alert_config().channels))
+    if not selected:
+        return hooks
+    return [w for w in hooks if w.id in selected]
 
 
 def parse_alert_cities(raw):
@@ -179,9 +205,25 @@ def mark_pushed(cfg, alert_type):
 
 # ===================== 推送执行 =====================
 
+def _format_channel_results(results):
+    """V10.11.23 汇总同步推送结果为可读文案（逐通道列出真实成败与原因）"""
+    ok_items = [r for r in results if r.get('success')]
+    fail_items = [r for r in results if not r.get('success')]
+    lines = []
+    if ok_items:
+        names = '、'.join('[{0}]'.format(r.get('channel_name') or ('#' + str(r.get('channel_id')))) for r in ok_items)
+        lines.append('✓ 已成功推送: {0}（请到对应群/客户端查收）'.format(names))
+    if fail_items:
+        for r in fail_items:
+            name = r.get('channel_name') or ('#' + str(r.get('channel_id')))
+            reason = str(r.get('message') or '未知原因').replace(chr(10), ' ')[:120]
+            lines.append('✗ [{0}] 推送失败: {1}'.format(name, reason))
+    return lines
+
+
 def push_alert(alert_type, title, details, operator_id=None, skip_silence=False):
-    """推送单条告警
-    返回 (ok: bool, message: str)
+    """推送单条告警（V10.11.23 改为同步收集真实结果，杜绝「假成功」）
+    返回 (ok: bool, message: str)——ok 仅在至少一个通道真实推送成功时为 True
     """
     from services.webhook_utils import trigger_webhook_event
 
@@ -191,42 +233,57 @@ def push_alert(alert_type, title, details, operator_id=None, skip_silence=False)
     if not skip_silence and not should_push(cfg, alert_type):
         return False, '该类型告警处于静默期内，本次不重复推送'
 
-    webhooks = get_active_webhooks()
+    webhooks = get_config_webhooks()
     if not webhooks:
-        return False, '无已启用的 Webhook 通道，请先在「Webhook通知」页配置并启用'
+        return False, '无可用推送渠道：请先在「通知渠道与机器人」页配置并启用通道，或检查告警配置中勾选的推送渠道'
 
     try:
         # force_channels=True：系统告警为强制推送，跳过事件开关/页面矩阵/用户监控过滤
-        trigger_webhook_event(
+        # sync_collect=True：同步逐通道推送并收集真实结果（V10.11.23）
+        results = trigger_webhook_event(
             webhooks, alert_type, title, details,
-            force_channels=True, operator_id=operator_id,
+            force_channels=True, operator_id=operator_id, sync_collect=True,
         )
     except Exception as e:
         return False, '推送执行异常: {0}'.format(e)
-    if not skip_silence:
+    if not results:
+        return False, '推送未实际执行（请检查通道启用状态与所选推送渠道）'
+
+    ok_count = sum(1 for r in results if r.get('success'))
+    if not skip_silence and ok_count > 0:
         mark_pushed(cfg, alert_type)
-    return True, '已推送至 {0} 个启用通道'.format(len(webhooks))
+    lines = _format_channel_results(results)
+    summary = '推送 {0}/{1} 个通道：{2}'.format(ok_count, len(results), ' ｜ '.join(lines))
+    return ok_count > 0, summary
 
 
 def send_test_alert(user):
-    """测试推送（仅测试权限角色可见入口；走真实渠道，即时反馈成败）"""
-    webhooks = get_active_webhooks()
+    """测试推送（仅测试权限角色可见入口；V10.11.23 同步走真实渠道，逐通道即时反馈真实成败）"""
+    from services.webhook_utils import trigger_webhook_event
+
+    webhooks = get_config_webhooks()
     if not webhooks:
-        return False, '无已启用的 Webhook 通道，请先在「Webhook通知」页配置并启用'
+        return False, '无可用推送渠道：请先在「通知渠道与机器人」页配置并启用通道，或检查告警配置中勾选的推送渠道'
     title = '【系统告警·测试推送】'
     details = ('测试触发人: {0} | 测试时间: {1} | 说明: 本消息为告警推送配置测试，'
                '收到即表示通道正常。').format(
         getattr(user, 'username', 'admin'),
         datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     try:
-        from services.webhook_utils import trigger_webhook_event
-        trigger_webhook_event(
+        results = trigger_webhook_event(
             webhooks, 'alert_test', title, details,
             force_channels=True, operator_id=getattr(user, 'id', None),
+            sync_collect=True,
         )
     except Exception as e:
         return False, '测试推送异常: {0}'.format(e)
-    return True, '测试消息已发送至 {0} 个启用通道，请到对应群/客户端查收'.format(len(webhooks))
+    if not results:
+        return False, '测试推送未实际执行（请检查通道启用状态与所选推送渠道）'
+
+    ok_count = sum(1 for r in results if r.get('success'))
+    lines = _format_channel_results(results)
+    message = '测试推送完成（成功 {0}/{1} 个通道）：{2}'.format(ok_count, len(results), ' ｜ '.join(lines))
+    return ok_count > 0, message
 
 
 # ===================== 四类触发条件检测 =====================
@@ -394,29 +451,42 @@ def run_inspection_once():
 
     # 推送执行：按类型分组，同类型多条在 merge_push 开启时合并为一条消息
     # （跨类型分别推送，保证推送日志 event_type 分类准确、静默期按类型独立记录）
+    # V10.11.23: push_alert 同步收集真实结果，失败详情逐通道反馈（不再「假成功」）
     by_type = {}
     for alert_type, msg in audible:
         by_type.setdefault(alert_type, []).append(msg)
 
     success_count, total_msgs = 0, 0
+    push_fail_notes = []
     for alert_type, msgs in by_type.items():
         cn = ALERT_TYPE_NAMES.get(alert_type, alert_type)
         if cfg.merge_push and len(msgs) > 1:
             title = '【系统告警·{0}】巡检发现 {1} 条告警'.format(cn, len(msgs))
             details = '\n'.join('- {0}'.format(m) for m in msgs)
-            ok, _ = push_alert(alert_type, title, details, skip_silence=True)
+            ok, note = push_alert(alert_type, title, details, skip_silence=True)
             if ok:
                 mark_pushed(cfg, alert_type)
                 success_count += len(msgs)
+            else:
+                push_fail_notes.append('[{0}] {1}'.format(cn, note))
             total_msgs += len(msgs)
         else:
             for msg in msgs:
-                ok, _ = push_alert(alert_type, '【系统告警·{0}】'.format(cn), msg, skip_silence=True)
+                ok, note = push_alert(alert_type, '【系统告警·{0}】'.format(cn), msg, skip_silence=True)
                 if ok:
                     mark_pushed(cfg, alert_type)
                     success_count += 1
+                else:
+                    push_fail_notes.append('[{0}] {1}'.format(cn, note))
                 total_msgs += 1
-    return True, '推送完成：{0}/{1} 条告警成功（其余为通道异常或无启用通道）'.format(success_count, total_msgs)
+
+    summary = '推送完成：{0}/{1} 条告警成功'.format(success_count, total_msgs)
+    if push_fail_notes:
+        # 失败详情最多附 5 条，防止巡检消息过长刷屏
+        summary += '；失败详情：' + ' ｜ '.join(push_fail_notes[:5])
+        if len(push_fail_notes) > 5:
+            summary += '（等共 {0} 条失败，详见推送日志）'.format(len(push_fail_notes))
+    return success_count > 0, summary
 
 
 def start_alert_inspector(app):

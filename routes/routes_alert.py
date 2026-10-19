@@ -16,11 +16,12 @@
 """
 import csv
 import io
+import json
 
 from flask import (request, jsonify, current_app, Response)
 from flask_login import login_required, current_user
 
-from services.models import db, AlertPushConfig, AlertPushGrant, WebhookLog, User
+from services.models import db, AlertPushConfig, AlertPushGrant, WebhookConfig, WebhookLog, User
 from services.alert_service import (
     get_alert_config, get_alert_config_dict, has_alert_permission,
     has_any_alert_permission, send_test_alert, run_inspection_once,
@@ -52,10 +53,21 @@ def register_alert_routes(app):
             return _alert_api_deny('权限不足：无 Webhook 通知访问权限')
         # 区块可见性：超级管理员或存在任意告警授权的用户可见完整区块
         visible = has_alert_permission(current_user, 'view')
+        # V10.11.23 渠道选择：返回全部通道清单（含停用通道，前端置灰标注；停用渠道推送时自动跳过）
+        available_channels = [
+            {
+                'id': w.id,
+                'name': w.channel_name,
+                'connection_type': w.connection_type or 'webhook_url',
+                'is_enabled': bool(w.is_enabled),
+            }
+            for w in WebhookConfig.query.order_by(WebhookConfig.id).all()
+        ]
         return jsonify({
             'success': True,
             'visible': visible,
             'config': get_alert_config_dict(),
+            'available_channels': available_channels,
             'perms': {
                 'edit': has_alert_permission(current_user, 'edit'),
                 'test': has_alert_permission(current_user, 'test'),
@@ -99,6 +111,22 @@ def register_alert_routes(app):
                 if not cities:
                     return jsonify({'success': False, 'message': '请至少填写一个天气预警巡检城市'}), 400
                 cfg.alert_cities = '，'.join(cities)
+            # V10.11.23 渠道选择：保存指定推送渠道（单选/多选/全选）；空列表 = 全部启用通道
+            if 'channels' in payload:
+                raw_channels = payload['channels']
+                if not isinstance(raw_channels, list):
+                    return jsonify({'success': False, 'message': '推送渠道参数格式不正确'}), 400
+                channel_ids = []
+                for cid in raw_channels:
+                    try:
+                        cid_int = int(cid)
+                    except (TypeError, ValueError):
+                        return jsonify({'success': False, 'message': '推送渠道 ID 必须为整数'}), 400
+                    if db.session.get(WebhookConfig, cid_int) is None:
+                        return jsonify({'success': False, 'message': '推送渠道 #{0} 不存在（可能已被删除）'.format(cid_int)}), 400
+                    channel_ids.append(cid_int)
+                # 勾选的渠道允许为停用状态（前端已置灰标注，推送时自动跳过）；空 = 全部
+                cfg.channels = json.dumps(sorted(set(channel_ids))) if channel_ids else ''
             db.session.commit()
         except Exception as e:
             # 保存失败：整体回滚，保留原配置，不影响菜单权限状态
@@ -106,10 +134,21 @@ def register_alert_routes(app):
             current_app.logger.exception('告警配置保存失败')
             return jsonify({'success': False, 'message': '保存失败：{0}（原配置已保留）'.format(e)}), 500
 
+        # V10.11.23: 响应附带通道清单，前端保存成功后同步渠道选中态渲染
+        available_channels = [
+            {
+                'id': w.id,
+                'name': w.channel_name,
+                'connection_type': w.connection_type or 'webhook_url',
+                'is_enabled': bool(w.is_enabled),
+            }
+            for w in WebhookConfig.query.order_by(WebhookConfig.id).all()
+        ]
         return jsonify({
             'success': True,
             'message': '告警配置已保存并立即生效（巡检线程下一轮按新配置执行）',
             'config': get_alert_config_dict(),
+            'available_channels': available_channels,
         })
 
     @app.route('/admin/alerts/test', methods=['POST'])

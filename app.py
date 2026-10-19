@@ -671,7 +671,8 @@ def num2cn_filter(num):
 # V10.10.17: 支持 PostgreSQL（用 schema_version 表替代 PRAGMA user_version）
 # V10.11.8: 新增 alert_push_configs / alert_push_grants 两张告警推送表
 # V10.11.18: 新增 users.webhook_authorized 字段与相关索引
-_SCHEMA_VERSION = 1020
+# V10.11.23: 新增 alert_push_configs.channels 告警推送渠道选择字段
+_SCHEMA_VERSION = 1021
 
 def _is_db_schema_current():
     """检查数据库结构版本是否已标记为当前版本（SQLite 用 PRAGMA user_version，PG 用 schema_version 表）"""
@@ -844,6 +845,26 @@ def init_database():
                     _pre_pg.commit()
         except Exception as _pre_err:
             print(f"[Init] 前置字段防御检查跳过: {_pre_err}")
+
+        # V10.11.23: 启动前置防御性结构检查，保证告警渠道选择字段 alert_push_configs.channels 存在
+        # （防 ORM 加载崩溃；版本号已标记最新的库不会再跑完整迁移流程，新列必须前置补齐）
+        try:
+            if db_url.startswith('sqlite:'):
+                _raw_db2 = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
+                if _raw_db2 and os.path.exists(_raw_db2):
+                    import sqlite3 as _pre_sq2
+                    with _pre_sq2.connect(_raw_db2) as _pre_cn2:
+                        _apc_cols = [r[1] for r in _pre_cn2.execute("PRAGMA table_info(alert_push_configs)").fetchall()]
+                        if _apc_cols and 'channels' not in _apc_cols:
+                            _pre_cn2.execute("ALTER TABLE alert_push_configs ADD COLUMN channels TEXT DEFAULT ''")
+                            _pre_cn2.commit()
+                            print("[Init] 已补齐 alert_push_configs.channels 渠道选择字段")
+            elif db_url.startswith('postgresql:'):
+                with db.engine.connect() as _pre_pg2:
+                    _pre_pg2.execute(db.text("ALTER TABLE alert_push_configs ADD COLUMN IF NOT EXISTS channels TEXT DEFAULT ''"))
+                    _pre_pg2.commit()
+        except Exception as _pre_err2:
+            print(f"[Init] 告警渠道字段防御检查跳过: {_pre_err2}")
 
         # V10.10.16: 幂等快速跳过——已标记最新版本的库跳过完整迁移流程
         if _is_db_schema_current():
@@ -1068,6 +1089,11 @@ def init_database():
                 can_view_log BOOLEAN DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )""",
+        ])
+
+        # --- V10.11.23 新增：告警推送渠道选择（channels 存指定通道 ID 的 JSON 数组；空 = 全部启用通道） ---
+        migration_sqls.extend([
+            "ALTER TABLE alert_push_configs ADD COLUMN channels TEXT DEFAULT ''",
         ])
 
         # V10.9: 数据迁移 — 将现有 Webhook 的空监控范围预填为全选

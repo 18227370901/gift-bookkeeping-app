@@ -746,8 +746,8 @@ def _sanitize_details(page_key, event_type, user_name, details):
     return details
 
 
-def trigger_webhook_event(webhooks, event_type, record_title, details=None, force_channels=False, page_key=None, user_name=None, operator_id=None):
-    """异步多线程触发 Webhook 与长连接机器人通知
+def trigger_webhook_event(webhooks, event_type, record_title, details=None, force_channels=False, page_key=None, user_name=None, operator_id=None, sync_collect=False):
+    """触发 Webhook 与长连接机器人通知（默认异步多线程；V10.11.23 支持同步收集）
     
     参数:
         webhooks: WebhookConfig 对象列表
@@ -758,9 +758,13 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
         page_key: 来源页面标识（ledger/banquets/reminders 等），用于页面级过滤
         user_name: 操作人用户名，用于消息内容
         operator_id: 操作发起人ID，用于推送日志记录
+        sync_collect: V10.11.23 同步收集模式——不启后台线程，当前线程逐通道推送，
+                      返回每通道真实结果列表 [{channel_id, channel_name, success, status_code, message}]；
+                      默认 False 保持原有 fire-and-forget 异步行为（返回 None），
+                      解决告警测试/巡检「提示成功但实际推送失败不反馈」的假成功缺陷
     """
     if not webhooks:
-        return
+        return [] if sync_collect else None
 
     hook_data_list = []
     for w in webhooks:
@@ -781,6 +785,7 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
         hook_data_list.append({
             "id": w.id,
             "user_id": w.user_id,
+            "channel_name": getattr(w, "channel_name", "") or "",
             "url": getattr(w, "webhook_url", "") or "",
             "secret": getattr(w, "secret_token", None),
             "connection_type": getattr(w, "connection_type", "webhook_url") or "webhook_url",
@@ -791,7 +796,7 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
         })
 
     if not hook_data_list:
-        return
+        return [] if sync_collect else None
 
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
@@ -802,101 +807,126 @@ def trigger_webhook_event(webhooks, event_type, record_title, details=None, forc
         title, msg_details = _render_message(wh, event_type, page_key, record_title, details, user_name or '系统')
         rendered_items.append({**item, "title": title, "details": msg_details})
 
+    # V10.11.23: 单通道推送执行体（原 _worker 循环体抽离），返回该通道真实结果
+    # 结果格式: {channel_id, channel_name, success, status_code, message}
+    def _push_rendered_item(item):
+        result = {
+            'channel_id': item.get('id'),
+            'channel_name': item.get('channel_name') or '',
+            'success': False,
+            'status_code': 0,
+            'message': '',
+        }
+        try:
+            conn_type = item.get("connection_type", "webhook_url")
+            title = item.get("title", record_title)
+            msg_details = item.get("details", details)
+            if conn_type == "long_connection":
+                b_id = item.get("bot_id", "")
+                b_sec = item.get("bot_secret", "")
+                c_id = extract_chatid_from_url(item.get("url", "")) or _cached_chatids.get(b_id)
+                if not (b_id and b_sec):
+                    result['message'] = '长连接通道缺少 Bot ID 或 Secret 凭证，无法推送'
+                    return result
+                s, c, b = send_wecom_long_connection_message(b_id, b_sec, title, msg_details, now_str, event_type, chatid=c_id)
+                record_webhook_log(item.get("user_id"), item.get("id"), event_type, {"title": title, "bot_id": b_id, "chatid": c_id, "details": msg_details}, c, b, s, operator_id=operator_id)
+                result.update({'success': bool(s), 'status_code': c, 'message': b})
+                return result
+
+            url = item.get("url", "")
+            if not url:
+                result['message'] = '标准 Webhook 通道缺少目标 URL，无法推送'
+                return result
+
+            if "dingtalk.com" in url:
+                payload = {
+                    "msgtype": "markdown",
+                    "markdown": {
+                        "title": title,
+                        "text": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {msg_details or '无'}\n\n> 礼金记账系统通知"
+                    }
+                }
+            elif "feishu.cn" in url or "larksuite.com" in url:
+                payload = {
+                    "msg_type": "text",
+                    "content": {
+                        "text": f"{title}\n时间: {now_str}\n\n{msg_details or '无'}"
+                    }
+                }
+            elif "qyapi.weixin.qq.com" in url:
+                if msg_details and ("\\n" in msg_details or chr(10) in msg_details):
+                    md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n\n{msg_details}"
+                else:
+                    md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n> 详情：<font color=\"info\">{msg_details or '无'}</font>"
+                payload = {
+                    "msgtype": "markdown",
+                    "markdown": {"content": md_cnt}
+                }
+            elif "pushplus.plus" in url:
+                token = item.get("secret")
+                if not token and "token=" in url:
+                    parsed = urllib.parse.urlparse(url)
+                    qs = urllib.parse.parse_qs(parsed.query)
+                    token = qs.get("token", [""])[0]
+                html_details = msg_details.replace(chr(10), "<br>").replace("\\n", "<br>") if msg_details else "无"
+                payload = {
+                    "token": token,
+                    "title": title,
+                    "content": f"<h3>{title}</h3><p>时间：{now_str}</p><div>{html_details}</div>",
+                    "template": "html"
+                }
+            elif "ftqq.com" in url:
+                payload = {
+                    "title": title,
+                    "desp": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {msg_details or '无'}"
+                }
+            elif "api.day.app" in url:
+                payload = {
+                    "title": title,
+                    "body": f"{msg_details or '无'}\n时间: {now_str}",
+                    "group": "礼金记账"
+                }
+            else:
+                payload = {
+                    "event": event_type,
+                    "title": title,
+                    "time": now_str,
+                    "details": msg_details,
+                    "source": "gift_bookkeeping_app"
+                }
+
+            headers = {}
+            if item.get("secret"):
+                headers["Authorization"] = f"Bearer {item.get('secret')}"
+
+            s, c, b = _send_payload(url, payload, headers, timeout=12)
+            record_webhook_log(item.get("user_id"), item.get("id"), event_type, payload, c, b, s, operator_id=operator_id)
+            result.update({'success': bool(s), 'status_code': c, 'message': b})
+            return result
+        except Exception as e:
+            logger.error("[Webhook] 推送失败: channel_id=%s, event_type=%s, url=%s, 错误: %s",
+                         item.get("id"), event_type, item.get("url", "")[:100], e, exc_info=True)
+            # 尝试记录失败日志到数据库
+            try:
+                record_webhook_log(item.get("user_id"), item.get("id"), event_type,
+                                   {"title": item.get("title", record_title), "error": str(e)},
+                                   0, f"推送异常: {e}", False, operator_id=operator_id)
+            except Exception:
+                pass
+            result.update({'success': False, 'status_code': 0, 'message': '推送异常: {0}'.format(e)})
+            return result
+
+    # V10.11.23 同步收集模式：当前线程逐通道推送并返回真实结果列表（告警测试/巡检专用）
+    if sync_collect:
+        return [_push_rendered_item(item) for item in rendered_items]
+
     def _worker():
         for item in rendered_items:
-            try:
-                conn_type = item.get("connection_type", "webhook_url")
-                title = item.get("title", record_title)
-                msg_details = item.get("details", details)
-                if conn_type == "long_connection":
-                    b_id = item.get("bot_id", "")
-                    b_sec = item.get("bot_secret", "")
-                    c_id = extract_chatid_from_url(item.get("url", "")) or _cached_chatids.get(b_id)
-                    if b_id and b_sec:
-                        s, c, b = send_wecom_long_connection_message(b_id, b_sec, title, msg_details, now_str, event_type, chatid=c_id)
-                        record_webhook_log(item.get("user_id"), item.get("id"), event_type, {"title": title, "bot_id": b_id, "chatid": c_id, "details": msg_details}, c, b, s, operator_id=operator_id)
-                    continue
-
-                url = item.get("url", "")
-                if not url:
-                    continue
-
-                if "dingtalk.com" in url:
-                    payload = {
-                        "msgtype": "markdown",
-                        "markdown": {
-                            "title": title,
-                            "text": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {msg_details or '无'}\n\n> 礼金记账系统通知"
-                        }
-                    }
-                elif "feishu.cn" in url or "larksuite.com" in url:
-                    payload = {
-                        "msg_type": "text",
-                        "content": {
-                            "text": f"{title}\n时间: {now_str}\n\n{msg_details or '无'}"
-                        }
-                    }
-                elif "qyapi.weixin.qq.com" in url:
-                    if msg_details and ("\\n" in msg_details or chr(10) in msg_details):
-                        md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n\n{msg_details}"
-                    else:
-                        md_cnt = f"### {title}\n> 时间：<font color=\"comment\">{now_str}</font>\n> 详情：<font color=\"info\">{msg_details or '无'}</font>"
-                    payload = {
-                        "msgtype": "markdown",
-                        "markdown": {"content": md_cnt}
-                    }
-                elif "pushplus.plus" in url:
-                    token = item.get("secret")
-                    if not token and "token=" in url:
-                        parsed = urllib.parse.urlparse(url)
-                        qs = urllib.parse.parse_qs(parsed.query)
-                        token = qs.get("token", [""])[0]
-                    html_details = msg_details.replace(chr(10), "<br>").replace("\\n", "<br>") if msg_details else "无"
-                    payload = {
-                        "token": token,
-                        "title": title,
-                        "content": f"<h3>{title}</h3><p>时间：{now_str}</p><div>{html_details}</div>",
-                        "template": "html"
-                    }
-                elif "ftqq.com" in url:
-                    payload = {
-                        "title": title,
-                        "desp": f"### {title}\n\n- **时间**: {now_str}\n- **说明**: {msg_details or '无'}"
-                    }
-                elif "api.day.app" in url:
-                    payload = {
-                        "title": title,
-                        "body": f"{msg_details or '无'}\n时间: {now_str}",
-                        "group": "礼金记账"
-                    }
-                else:
-                    payload = {
-                        "event": event_type,
-                        "title": title,
-                        "time": now_str,
-                        "details": msg_details,
-                        "source": "gift_bookkeeping_app"
-                    }
-
-                headers = {}
-                if item.get("secret"):
-                    headers["Authorization"] = f"Bearer {item.get('secret')}"
-
-                s, c, b = _send_payload(url, payload, headers, timeout=12)
-                record_webhook_log(item.get("user_id"), item.get("id"), event_type, payload, c, b, s, operator_id=operator_id)
-            except Exception as e:
-                logger.error("[Webhook] 推送失败: channel_id=%s, event_type=%s, url=%s, 错误: %s",
-                             item.get("id"), event_type, item.get("url", "")[:100], e, exc_info=True)
-                # 尝试记录失败日志到数据库
-                try:
-                    record_webhook_log(item.get("user_id"), item.get("id"), event_type,
-                                       {"title": item.get("title", record_title), "error": str(e)},
-                                       0, f"推送异常: {e}", False, operator_id=operator_id)
-                except Exception:
-                    pass
+            _push_rendered_item(item)
 
     t = threading.Thread(target=_worker, daemon=True)
     t.start()
+    return None
 
 
 _listener_thread = None
