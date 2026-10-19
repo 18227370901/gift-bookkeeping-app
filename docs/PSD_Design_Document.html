@@ -1550,13 +1550,34 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 11 部分补充七：ADR-56 天气多级匹配与页面体验 + 配置页显示优化（V10.11.26） ==================== -->
+<div class="section">
+<h1>第 11 部分补充七：ADR-56 天气多级地名匹配修复 + 月/周视图缺陷修复 + 缓存回显自动刷新 + 服务停用明确报错 + 外部接口配置页布局显示优化（V10.11.26 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>多级地名误配根因</td><td>「四川省巴中市恩阳区」显示四川省、「巴中市恩阳区」显示巴中市、仅「恩阳区」正确——后端 <code>_find_cached_or_builtin_city</code> 宽松匹配 <code>k in raw</code> 按遍历顺序返回第一个命中键（长全名先命中「四川省」返回省级坐标）；前端 <code>localMatchCity</code> 只支持单级精确名。</td></tr>
+<tr><td>全路径匹配修复</td><td>新增 <code>_norm_region_all()</code> 去除串内全部行政后缀拼纯地名串；<code>_load_regional_cities</code> 构建<strong>全路径索引</strong>（省/省市/省市县 纯地名键 → 坐标，首次写入保留、直辖市同层 d===c 只留省+区路径）；<code>_find_cached_or_builtin_city</code> 在宽松匹配前优先精确命中；前端 <code>localMatchPath()</code> 同规则（label 拼接与级联一致）。三种写法均精确返回恩阳区（31.8163,106.4865）。</td></tr>
+<tr><td>月/周视图按钮高亮修复</td><td>根因：<code>setCalMode()</code> 与 <code>renderCalendarView()</code>（实际渲染路径）均不更新 <code>.cal-seg</code> active 类，唯一更新点在已不参与渲染的旧版 <code>renderView()</code>；新增 <code>syncCalSegs()</code> 三处调用统一同步（setCalMode / renderCalendarView / 初始化恢复记忆）。</td></tr>
+<tr><td>backToday 缺陷修复</td><td>原实现仅当 selectedDate 不属于当前月时才重选今天（选中同月其他日期时「回到今天」静默失效）——改为显式选中今天。</td></tr>
+<tr><td>超出预报范围提示</td><td>动态显示预报截止日期（本期预报至 YYYY-MM-DD）+「回到今天」快捷按钮（document 事件委托直达 backToday）。</td></tr>
+<tr><td>缓存回显 + 自动静默刷新</td><td><code>renderAll</code> 将 cachedData（含时间戳）持久化 localStorage（用户级 <code>gift_weather_&lt;uid&gt;_data</code>）；页面打开先回显（新增 <code>renderCachedOnly()</code> 轻量渲染：不写缓存时间戳、不切模块、不触发对比请求），再按上次查询记忆自动静默拉取（quiet 模式：成功弱提示、失败保留缓存并提示原因）；<code>execQuery</code> fetch 加 <code>cache:'no-store'</code>；<code>resetMemory</code> 清理缓存键。</td></tr>
+<tr><td>服务停用明确报错（A1）</td><td>新增 <code>ServiceDisabled</code> 异常——<code>_http_get_endpoint</code> 组内无启用端点即抛，与网络故障（返回 None）严格区分；<code>fetch_forecast</code> 停用 → 抛 <code>WeatherError('外部天气预报服务已停用…', 503)</code> 不走缓存/离线合成；<code>geocode_city</code> 停用时本地索引/缓存命中仍零网络兜底、未命中报 503；<code>fetch_air_quality</code> 停用静默 None；断网场景保持原缓存/离线合成降级链。</td></tr>
+<tr><td>配置页只读置灰</td><td><code>.endpoint-url[readonly]</code> 灰底灰字 + 禁用光标（<code>--bs-secondary-bg</code>），点「编辑」恢复白底可编辑（is-editing 清除 readonly），取消编辑还原。</td></tr>
+<tr><td>批量按钮智能映射</td><td><code>updateGroupBatchState</code> 统计勾选行启用/停用数：全启用 → 仅「批量停用」可用（批量启用置灰 + title 提示）；全停用 → 反之；混合 → 两组均可用；未勾选 → 全置灰。</td></tr>
+<tr><td>toast 文案点名</td><td><code>buildSwitchToast</code>：开关/批量保存点名组名与启停数量（「天气·天气预报」已启用 2 个：故障转移实时生效）；全停用黄色降级警示；失败回滚点名组名与原因。</td></tr>
+<tr><td>F1~F6 附加优化</td><td>F1 组卡头状态徽章（启用 N/总数 / 全停用红色警示）；F2 停用行弱化（.is-off + 地址删除线 + 「已停用」标记）；F3 未保存更改提醒（markDirty/clearDirty/isAllClean，规范化比较：对象键序统一 + 节假日 {年份} 剥离；开关即时保存不计入）；F4 组业务影响说明（GROUP_HINTS 每卡一行）；F5 批量停用二次确认（Bootstrap modal）；F6 行按钮图标化（.btn-icon 紧凑图标 + title）。</td></tr>
+<tr><td>全链路验证</td><td>py_compile 通过；浏览器逐项——三种地名写法 network 坐标均 31.8163,106.4865；月/周视图切换高亮同步、刷新记忆恢复；超范围提示动态日期 + 回到今天；刷新缓存回显 + 自动刷新；forecast 全停用后天气页报「外部天气预报服务已停用…（当前显示缓存数据）」、恢复后正常；配置页全套交互（置灰/映射/toast/徽章/确认框/未保存提醒/业务提示/图标按钮）；配置基线还原；验证操作日志 15 条已清理（用户自有 807 条完好）。</td></tr>
+<tr><td>连带影响</td><td><code>services/weather_service.py</code> + <code>templates/weather.html</code> + <code>templates/admin_service_config.html</code> + <code>docs/CHANGELOG.md</code>；<code>/api/weather/query</code> 与首页横幅行为不变（横幅失败仍降级 None）；Docker 版/APK 版待同步。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.25</td></tr>
-<tr><td>生成日期</td><td>2026-10-19（V10.11.25 开关即时保存生效与全停用允许；承接 V10.11.24 行级开关图标化与批量操作）</td></tr>
+<tr><td>文档版本</td><td>V10.11.26</td></tr>
+<tr><td>生成日期</td><td>2026-10-19（V10.11.26 天气多级地名匹配修复 + 月/周视图缺陷修复 + 缓存回显自动刷新 + 服务停用明确报错 + 外部接口配置页布局显示优化；承接 V10.11.25 开关即时保存生效与全停用允许）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>

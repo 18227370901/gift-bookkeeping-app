@@ -2004,3 +2004,20 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   6. **取消编辑语义修正**：不再回滚启用开关（只还原地址），取消编辑不得撤销已入库的启停状态。
 - **验证**：浏览器逐项——切开关即时保存 + 刷新页面状态保持（用户报告场景修复）；单端点组全停用保存成功 + 黄标警示；业务层 Python 直连 `get_enabled_urls` 停用项消失、空组空列表（天气服务地理编码环节即用即读验证 PASS）；编辑态切开关不破坏编辑且库中地址仍原值；取消编辑只还原地址；配置基线还原（全组全启用）。
 - **连带影响**：`templates/admin_service_config.html` + `routes/routes_ext.py`（单校验行放宽）；批量启用/停用与全局保存路径行为不变（仍走显式保存语义）；Docker 版/APK 版待同步。
+
+### 11.18 ADR-56：天气页多级地名匹配修复 + 月/周视图缺陷修复 + 缓存回显自动刷新 + 服务停用明确报错 + 外部接口配置页布局显示优化（V10.11.26 落地）
+- **背景与根因**（用户反馈四项 + 新增需求两项）：
+  1. **自由搜索多级地名误配**：「四川省巴中市恩阳区」显示四川省、「巴中市恩阳区」显示巴中市，仅「恩阳区」正确——后端 `_find_cached_or_builtin_city` 的宽松匹配 `k in raw` 按遍历顺序返回第一个命中键（「四川省巴中市恩阳区」先命中「四川省」）；前端 `localMatchCity` 只支持单级精确匹配；
+  2. **月/周视图按钮高亮不同步**：`setCalMode()`/`renderCalendarView()`（实际渲染路径）均不更新 `.cal-seg` active 类，唯一更新点在已不参与渲染的旧版 `renderView()`；初始化恢复 `calMode` 记忆也不同步按钮 → 按钮永远停在 HTML 默认「月视图」；
+  3. **服务停用后天气页仍出数据**：`fetch_forecast` 网络失败后静默走 30 分钟内存缓存 → 磁盘缓存 → 季节离线合成，系统把「组内无启用端点（明确停用）」与「端点启用但网络不可达（故障）」混为一谈；
+  4. **每次进入需手动拉取**：V10.11.16 设计「进入默认不查询」，刷新后 `cachedData` 丢失；
+  5. **配置页布局/显示需求**：端点地址只读态与可编辑态视觉区分不明显；批量启停按钮不随勾选状态智能映射；toast 文案笼统不点名。
+- **决策方案与实施结果**：
+  1. **多级地名全路径匹配**（前端 `localMatchPath` + 后端 `_match_path`）：后端 `_norm_region_all()` 去除串内全部行政后缀拼纯地名串，`_load_regional_cities` 构建**全路径索引**（省/省市/省市县 纯地名键 → 坐标，首次写入保留、直辖市同层 d===c 时只留省+区路径），`_find_cached_or_builtin_city` 在宽松匹配前优先精确命中；前端同规则实现（label 拼接与级联一致）；「四川省巴中市恩阳区」「巴中市恩阳区」「恩阳区」均精确返回恩阳区坐标；
+  2. **月/周视图高亮同步 + backToday 修复**：新增 `syncCalSegs()` 在 `setCalMode()`/`renderCalendarView()`/初始化恢复记忆三处调用；`backToday` 改为显式选中今天（原实现仅在 selectedDate 不属于当前月时重选，「回到今天」在选中同月其他日期时无效）；
+  3. **超出预报范围提示优化**：动态显示预报截止日期（`本期预报至 YYYY-MM-DD`）+「回到今天」快捷按钮（事件委托）；
+  4. **缓存回显 + 自动静默刷新**：`renderAll` 把 `cachedData`（含时间戳）写入 localStorage（用户级 `gift_weather_<uid>_data`）；页面初始化先回显（新增 `renderCachedOnly()` 轻量渲染——不写缓存时间戳、不切模块、不触发对比请求），再按上次查询记忆（`last_query_mode/lat/lon/label` 或 `last_query_city`）自动静默拉取（`refreshQuery(..., true)` 静默模式：成功弱提示、失败保留缓存并提示原因）；`execQuery` fetch 加 `cache:'no-store'` 消除浏览器 HTTP 缓存陈旧天气；`resetMemory` 清理 `data` 缓存键；
+  5. **服务停用明确报错（A1）**：新增 `ServiceDisabled` 异常（`_http_get_endpoint` 组内无启用端点时抛），与网络故障（返回 None）严格区分；`fetch_forecast` 停用 → 抛 `WeatherError('外部天气预报服务已停用…', 503)` 不走缓存/离线合成；`geocode_city` 停用时本地索引/缓存命中仍零网络兜底（不依赖外部）、未命中报 503；`fetch_air_quality` 停用静默 None（增强信息）；断网场景保持原降级链；
+  6. **配置页布局显示优化**：a) 只读置灰（`.endpoint-url[readonly]` 灰底灰字 + 禁用光标，编辑态白底）；b) 批量按钮智能映射（`updateGroupBatchState` 统计勾选行启用/停用数：全启用 → 仅停用可用、全停用 → 仅启用可用、混合 → 均可用，title 提示无效操作原因）；c) toast 文案点名组名与启停数量（`buildSwitchToast`，全停用给黄色降级警示，失败回滚点名组名）；d) F1 组卡头徽章（`renderGroupStatusBadge`：启用 N/总数 / 全停用红色警示）；e) F2 停用行弱化（`.is-off` 行淡化 + 地址删除线 + `input-group-text off-tag`「已停用」标记）；f) F3 未保存提醒（`markDirty/clearDirty/isAllClean`：地址/超时/重试/AI 总开关变化 → 按钮高亮「保存配置（有未保存更改）」，规范化比较（对象键序统一 + 节假日 `{年份}` 占位符剥离）与快照一致自动清除，开关即时保存不计入）；g) F4 组业务影响说明（Jinja `GROUP_HINTS` 每卡一行）；h) F5 批量停用二次确认（`batchConfirmModal`，批量启用不打扰）；i) F6 行按钮图标化（`.btn-icon` 紧凑图标 + title）。
+- **验证**：py_compile 通过；浏览器逐项——三种地名写法 network 核实坐标均 31.8163,106.4865（恩阳区）；月/周视图切换高亮即时同步、刷新记忆恢复高亮正确；超出范围提示动态日期 + 回到今天跳转选中；刷新缓存回显 + 自动刷新成功提示；forecast 全停用后天气页报「外部天气预报服务已停用…（当前显示缓存数据）」、恢复启用后正常；配置页只读置灰/编辑白底/取消还原、勾选映射三态、toast 点名、组徽章与停用行标记、批量确认框、未保存提醒出现与自动清除、业务影响提示、图标按钮；配置基线还原（全组全启用）；验证操作日志 15 条已清理（用户自有 807 条完好）。
+- **连带影响**：`services/weather_service.py`（路径索引 + ServiceDisabled）+ `templates/weather.html`（路径匹配/月周视图/回显/自动刷新）+ `templates/admin_service_config.html`（布局显示全套）+ `docs/CHANGELOG.md`；`/api/weather/query` 与首页横幅行为不变（横幅失败仍降级 None）；Docker 版/APK 版待同步。

@@ -2,13 +2,42 @@
 {% block title %}外部接口服务配置 - 系统管理{% endblock %}
 
 {% set ICONS = {'geocoding':'fa-map-location-dot','forecast':'fa-cloud-sun','air_quality':'fa-wind','holiday':'fa-calendar-check','wecom_ws':'fa-comments','ai_search':'fa-magnifying-glass'} %}
+{# V10.11.26 F4 各组停用后果说明（让管理员预见服务停用对业务的影响） #}
+{% set GROUP_HINTS = {
+    'geocoding': '停用后：小地名无法在线解析（内置城市/区县坐标仍可用）；',
+    'forecast': '停用后：天气页将提示「服务已停用」，不再展示缓存/离线预估数据；',
+    'air_quality': '停用后：空气质量徽章不再显示（不影响天气主查询）；',
+    'holiday': '停用后：万年历无班/休角标（公农历主体不受影响）；',
+    'wecom_ws': '停用后：企微消息推送连接不可用；',
+    'ai_search': '停用后：AI 助手完全不做联网搜索。'
+} %}
 
 {% block content %}
+<style>
+    /* V10.11.26 布局显示优化 */
+    /* 端点地址只读态置灰：默认灰底灰字不可编辑外观，点「编辑」后恢复正常白底 */
+    .endpoint-row .endpoint-url[readonly] {
+        background-color: var(--bs-secondary-bg, #e9ecef);
+        color: var(--bs-secondary-color, #6c757d);
+        cursor: not-allowed;
+    }
+    .endpoint-row.is-editing .endpoint-url { background-color: #fff; color: var(--bs-body-color); cursor: text; }
+    /* 停用端点行视觉弱化（F2） */
+    .endpoint-row.is-off { opacity: .72; }
+    .endpoint-row.is-off .endpoint-url { text-decoration: line-through; text-decoration-color: rgba(108,117,125,.35); }
+    .off-tag { flex: 0 0 auto; font-size: .68rem; padding: .15rem .45rem; }
+    /* 行内图标按钮紧凑化（F6） */
+    .btn-icon { padding: .22rem .45rem; }
+    .btn-icon i { font-size: .8rem; }
+    /* 未保存更改时「保存配置」按钮的强调态（F3） */
+    #saveAllBtn.has-unsaved { border-color: #fd7e14; color: #fd7e14; }
+    #saveAllBtn.has-unsaved:hover { background-color: #fd7e14; color: #fff; }
+</style>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h4 class="mb-0"><i class="fa-solid fa-network-wired me-2 text-primary"></i>外部接口服务配置</h4>
     <div>
         <button class="btn btn-outline-secondary rounded-pill px-3" onclick="restoreDefaults()"><i class="fa-solid fa-rotate-left me-1"></i>恢复默认值</button>
-        <button class="btn btn-primary rounded-pill px-4 shadow-sm" onclick="saveAllConfig()"><i class="fa-solid fa-floppy-disk me-1"></i>保存配置</button>
+        <button class="btn btn-primary rounded-pill px-4 shadow-sm" id="saveAllBtn" onclick="saveAllConfig()"><i class="fa-solid fa-floppy-disk me-1"></i>保存配置</button>
     </div>
 </div>
 
@@ -34,11 +63,28 @@
                 确定将全部外部接口配置恢复为默认值吗？<br>
                 <span class="text-muted small">表单将重置为默认值，需点击「保存配置」后生效。</span>
             </div>
+<div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-warning rounded-pill px-3" id="restoreConfirmBtn" onclick="doRestoreDefaults()">确定恢复</button>
+    </div>
+</div>
+
+<!-- V10.11.26 F5 批量停用二次确认（批量启用的恢复操作无需确认） -->
+<div class="modal fade" id="batchConfirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fa-solid fa-triangle-exclamation me-2 text-warning"></i>批量停用确认</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body" id="batchConfirmBody">确定批量停用选中的端点吗？</div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">取消</button>
-                <button type="button" class="btn btn-warning rounded-pill px-3" id="restoreConfirmBtn" onclick="doRestoreDefaults()">确定恢复</button>
+                <button type="button" class="btn btn-danger rounded-pill px-3" id="batchConfirmBtn">确定停用</button>
             </div>
         </div>
+    </div>
+</div>
     </div>
 </div>
 
@@ -55,7 +101,7 @@
 {% for gname, gcfg in cfg.groups.items() %}
 <div class="card shadow-sm rounded-4 mb-4" data-group="{{ gname }}">
     <div class="card-header d-flex justify-content-between align-items-center rounded-top-4">
-        <span><i class="fa-solid {{ ICONS[gname] }} me-2 text-primary"></i><b>{{ gcfg.label }}</b></span>
+        <span><i class="fa-solid {{ ICONS[gname] }} me-2 text-primary"></i><b>{{ gcfg.label }}</b><span class="group-status-badge ms-2"></span></span>
         <button class="btn btn-outline-info btn-sm rounded-pill" onclick="testGroup('{{ gname }}')"><i class="fa-solid fa-vial me-1"></i>测试全部启用</button>
     </div>
     <div class="card-body">
@@ -89,19 +135,19 @@
                 <span class="input-group-text" title="勾选参与批量操作（可单选/多选）">
                     <input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)">
                 </span>
-                <input type="text" class="form-control endpoint-url" value="{{ ep.url }}" placeholder="{{ gcfg.defaults[0].url if gcfg.defaults else '如：https://...' }}" readonly aria-label="端点地址">
+                <input type="text" class="form-control endpoint-url" value="{{ ep.url }}" placeholder="{{ gcfg.defaults[0].url if gcfg.defaults else '如：https://...' }}" readonly aria-label="端点地址" title="默认只读锁定，点击「编辑」解锁">
                 <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；V10.11.25 切换后即时保存生效）">
                     <div class="form-check form-switch mb-0">
                         <input type="checkbox" class="form-check-input endpoint-enabled" role="switch" {% if ep.enabled %}checked{% endif %}>
                     </div>
                 </span>
-                <button class="btn btn-outline-success text-nowrap" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
-                <button class="btn btn-outline-secondary btn-up text-nowrap" type="button" title="上移" onclick="moveRow(this, -1)" {% if loop.first %}disabled{% endif %}><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
-                <button class="btn btn-outline-secondary btn-down text-nowrap" type="button" title="下移" onclick="moveRow(this, 1)" {% if loop.last %}disabled{% endif %}><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
-                <button class="btn btn-outline-primary btn-edit text-nowrap" type="button" title="编辑此端点（解锁地址输入框）" onclick="editEndpointRow(this)"><i class="fa-solid fa-pen-to-square me-1"></i>编辑</button>
-                <button class="btn btn-outline-danger btn-del text-nowrap" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
-                <button class="btn btn-success btn-save text-nowrap d-none" type="button" title="保存此端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
-                <button class="btn btn-outline-danger btn-cancel text-nowrap d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>
+                <button class="btn btn-outline-success btn-icon" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial"></i></button>
+                <button class="btn btn-outline-secondary btn-icon btn-up" type="button" title="上移" onclick="moveRow(this, -1)" {% if loop.first %}disabled{% endif %}><i class="fa-solid fa-arrow-up"></i></button>
+                <button class="btn btn-outline-secondary btn-icon btn-down" type="button" title="下移" onclick="moveRow(this, 1)" {% if loop.last %}disabled{% endif %}><i class="fa-solid fa-arrow-down"></i></button>
+                <button class="btn btn-outline-primary btn-icon btn-edit" type="button" title="编辑此端点（解锁地址输入框）" onclick="editEndpointRow(this)"><i class="fa-solid fa-pen-to-square"></i></button>
+                <button class="btn btn-outline-danger btn-icon btn-del" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can"></i></button>
+                <button class="btn btn-success btn-icon btn-save text-nowrap d-none" type="button" title="保存此端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk"></i></button>
+                <button class="btn btn-outline-danger btn-icon btn-cancel text-nowrap d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark"></i></button>
             </div>
             {% endfor %}
         </div>
@@ -120,6 +166,10 @@
                 <span class="small text-muted"><i class="fa-regular fa-lightbulb me-1"></i>全部端点失败后按重试次数整轮重试；每次请求超时按上值。</span>
             </div>
         </div>
+
+        {% if GROUP_HINTS.get(gname) %}
+        <div class="small text-muted mt-2"><i class="fa-solid fa-circle-exclamation me-1"></i>{{ GROUP_HINTS[gname] }}</div>
+        {% endif %}
 
         {% if gname == 'holiday' %}
         <div class="small text-success mt-2"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>地址末尾的 <b>{年份}</b> 变量由系统自动补全（如输入到 <code>.../year/</code> 即可），无需手工填写年份。</div>
@@ -289,15 +339,15 @@
         row.className = 'input-group input-group-sm mb-2 endpoint-row' + (isNew ? ' is-new-row' : '');
         row.innerHTML = `
             <span class="input-group-text" title="勾选参与批量操作（可单选/多选）"><input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)"></span>
-            <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}" readonly aria-label="端点地址">
+            <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}" readonly aria-label="端点地址" title="默认只读锁定，点击「编辑」解锁">
             <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；V10.11.25 切换后即时保存生效）"><div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input endpoint-enabled" role="switch" ${enabled !== false ? 'checked' : ''}></div></span>
-            <button class="btn btn-outline-success text-nowrap" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
-            <button class="btn btn-outline-secondary btn-up text-nowrap" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
-            <button class="btn btn-outline-secondary btn-down text-nowrap" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
-            <button class="btn btn-outline-primary btn-edit text-nowrap" type="button" title="编辑此端点（解锁地址输入框）" onclick="editEndpointRow(this)"><i class="fa-solid fa-pen-to-square me-1"></i>编辑</button>
-            <button class="btn btn-outline-danger btn-del text-nowrap" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
-            <button class="btn btn-success btn-save text-nowrap d-none" type="button" title="保存此端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
-            <button class="btn btn-outline-danger btn-cancel text-nowrap d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>`;
+            <button class="btn btn-outline-success btn-icon" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial"></i></button>
+            <button class="btn btn-outline-secondary btn-icon btn-up" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
+            <button class="btn btn-outline-secondary btn-icon btn-down" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down"></i></button>
+            <button class="btn btn-outline-primary btn-icon btn-edit" type="button" title="编辑此端点（解锁地址输入框）" onclick="editEndpointRow(this)"><i class="fa-solid fa-pen-to-square"></i></button>
+            <button class="btn btn-outline-danger btn-icon btn-del" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can"></i></button>
+            <button class="btn btn-success btn-icon btn-save d-none" type="button" title="保存此端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk"></i></button>
+            <button class="btn btn-outline-danger btn-icon btn-cancel d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark"></i></button>`;
         return row;
     }
 
@@ -310,21 +360,79 @@
     }
 
     // 刷新组批量状态：全选框三态（未选/半选/全选）+ 批量按钮计数与禁用
+    // V10.11.26 批量按钮按勾选状态智能映射：
+    //   勾选全为启用 → 仅「批量停用」可用（「批量启用」置灰）；全为停用 → 反之；混合 → 两组均可
     function updateGroupBatchState(gname) {
         const card = document.querySelector(`.card[data-group="${gname}"]`);
         if (!card) return;
         const rows = card.querySelectorAll('.endpoint-row');
-        const count = card.querySelectorAll('.row-select-cb:checked').length;
+        const checked = card.querySelectorAll('.row-select-cb:checked');
+        const count = checked.length;
+        let enableCount = 0, disableCount = 0;
+        checked.forEach(cb => {
+            const row = cb.closest('.endpoint-row');
+            const sw = row ? row.querySelector('.endpoint-enabled') : null;
+            if (sw && sw.checked) enableCount++; else disableCount++;
+        });
         const selectAll = card.querySelector('.group-select-all');
         if (selectAll) {
             if (count === 0) { selectAll.checked = false; selectAll.indeterminate = false; }
             else if (count === rows.length && rows.length > 0) { selectAll.checked = true; selectAll.indeterminate = false; }
             else { selectAll.checked = false; selectAll.indeterminate = true; }
         }
+        const enableBtn = card.querySelector('.batch-enable-btn');
+        const disableBtn = card.querySelector('.batch-disable-btn');
+        if (enableBtn) {
+            enableBtn.disabled = count === 0 || enableCount === count;
+            enableBtn.title = count === 0 ? '请先勾选需要操作的端点' : (enableCount === count ? '勾选端点均已启用，无需批量启用' : '批量启用选中的端点');
+        }
+        if (disableBtn) {
+            disableBtn.disabled = count === 0 || disableCount === count;
+            disableBtn.title = count === 0 ? '请先勾选需要操作的端点' : (disableCount === count ? '勾选端点均已停用，无需批量停用' : '批量停用选中的端点');
+        }
         card.querySelectorAll('.batch-enable-btn, .batch-disable-btn').forEach(b => {
-            b.disabled = count === 0;
             const span = b.querySelector('.batch-count');
             if (span) span.textContent = count;
+        });
+        // V10.11.26 同步组状态徽标与停用端点视觉
+        refreshRowOffStyle(card);
+        renderGroupStatusBadge(gname);
+    }
+
+    // V10.11.26 F1 组卡头状态徽章：启用 N / 总数；全停用红色警示
+    function renderGroupStatusBadge(gname) {
+        const card = document.querySelector(`.card[data-group="${gname}"]`);
+        if (!card) return;
+        const rows = card.querySelectorAll('.endpoint-row:not(.is-new-row)');
+        const on = Array.from(rows).filter(r => {
+            const sw = r.querySelector('.endpoint-enabled');
+            return sw && sw.checked;
+        }).length;
+        const total = rows.length;
+        const badge = card.querySelector('.group-status-badge');
+        if (!badge) return;
+        if (total === 0) { badge.innerHTML = '<span class="badge bg-secondary-subtle text-secondary border">暂无端点</span>'; return; }
+        badge.innerHTML = on === 0
+            ? '<span class="badge bg-danger-subtle text-danger border"><i class="fa-solid fa-triangle-exclamation me-1"></i>已全部停用·服务降级</span>'
+            : '<span class="badge bg-success-subtle text-success border"><i class="fa-solid fa-circle-check me-1"></i>启用 ' + on + '/' + total + '</span>';
+    }
+
+    // V10.11.26 F2 停用端点行视觉弱化 + 「已停用」标记
+    function refreshRowOffStyle(card) {
+        card.querySelectorAll('.endpoint-row').forEach(row => {
+            const sw = row.querySelector('.endpoint-enabled');
+            const off = sw && !sw.checked;
+            row.classList.toggle('is-off', off);
+            let tag = row.querySelector('.off-tag');
+            if (off && !tag) {
+                tag = document.createElement('span');
+                tag.className = 'input-group-text off-tag';
+                tag.textContent = '已停用';
+                const url = row.querySelector('.endpoint-url');
+                if (url) url.parentElement.insertBefore(tag, url.nextSibling);
+            } else if (!off && tag) {
+                tag.remove();
+            }
         });
     }
 
@@ -337,22 +445,54 @@
     }
 
     // 批量启用/停用选中端点：置开关后整组保存即时生效（复用 saveGroup）
+    // V10.11.26 增强：F5 批量停用走二次确认（批量启用为恢复操作无需确认）；toast 点名组名
+    let batchConfirmPending = null;   // 挂起的批量停用回调（等用户确认）
+
     function batchToggleEndpoints(gname, enabled) {
         const card = document.querySelector(`.card[data-group="${gname}"]`);
         if (!card) return;
         const checked = card.querySelectorAll('.row-select-cb:checked');
         if (!checked.length) { showToast('请先勾选需要操作的端点', false); return; }
-        checked.forEach(cb => {
-            const row = cb.closest('.endpoint-row');
-            const sw = row ? row.querySelector('.endpoint-enabled') : null;
-            if (sw) sw.checked = enabled;
-        });
-        updateGroupBatchState(gname);
-        const btn = enabled ? card.querySelector('.batch-enable-btn') : card.querySelector('.batch-disable-btn');
-        const cnt = checked.length;
-        // 整组保存入库（含批量切换后的开关状态）；成功重渲染后选择自动清零
-        saveGroup(gname, btn, enabled ? `已批量启用 ${cnt} 个端点并保存生效` : `已批量停用 ${cnt} 个端点并保存生效（该组服务在无可用端点时将降级）`);
+        const label = (GROUP_DEFAULTS[gname] && GROUP_DEFAULTS[gname].label) ? GROUP_DEFAULTS[gname].label : gname;
+        const doBatch = function () {
+            checked.forEach(cb => {
+                const row = cb.closest('.endpoint-row');
+                const sw = row ? row.querySelector('.endpoint-enabled') : null;
+                if (sw) sw.checked = enabled;
+            });
+            updateGroupBatchState(gname);
+            const btn = enabled ? card.querySelector('.batch-enable-btn') : card.querySelector('.batch-disable-btn');
+            const cnt = checked.length;
+            // 整组保存入库（含批量切换后的开关状态）；成功重渲染后选择自动清零
+            saveGroup(gname, btn, enabled
+                ? `已批量启用 ${cnt} 个端点（「${label}」）并保存生效`
+                : `已批量停用 ${cnt} 个端点（「${label}」），停用端点立即不参与故障转移`);
+        };
+        if (!enabled) {
+            const modalEl = document.getElementById('batchConfirmModal');
+            if (modalEl && window.bootstrap && bootstrap.Modal) {
+                document.getElementById('batchConfirmBody').innerHTML =
+                    `确定批量停用选中的 <b>${checked.length}</b> 个端点吗？<br>` +
+                    `<span class="text-muted small">停用后这些端点立即不参与故障转移；若「${label}」全部停用，该组服务将降级（可在卡片内重新启用恢复）。</span>`;
+                batchConfirmPending = doBatch;
+                bootstrap.Modal.getOrCreateInstance(modalEl).show();
+                return;
+            }
+        }
+        doBatch();
     }
+
+    // 批量停用确认按钮（确认后执行挂起的批量停用）
+    document.getElementById('batchConfirmBtn').addEventListener('click', function () {
+        const fn = batchConfirmPending;
+        batchConfirmPending = null;
+        const modalEl = document.getElementById('batchConfirmModal');
+        if (modalEl && window.bootstrap && bootstrap.Modal) {
+            const inst = bootstrap.Modal.getInstance(modalEl);
+            if (inst) inst.hide();
+        }
+        if (fn) fn();
+    });
 
     // 进入/退出编辑态：编辑 = 地址输入框解锁 + 编辑/删除隐藏 + 保存/取消显示
     function setRowEditMode(row, editing) {
@@ -453,6 +593,18 @@
         showToast('已取消编辑并还原该行地址');
     }
 
+    // V10.11.26 toast 文案细化：开关/批量保存成功时点名组名与启停数量，全停用给降级警示
+    function buildSwitchToast(gname, urls) {
+        const label = (GROUP_DEFAULTS[gname] && GROUP_DEFAULTS[gname].label) ? GROUP_DEFAULTS[gname].label : gname;
+        const on = (urls || []).filter(u => u.enabled).length;
+        const off = (urls || []).length - on;
+        if (on === 0) return { msg: `「${label}」已全部停用：该组服务将降级直至重新启用`, warn: true };
+        const parts = [];
+        if (on) parts.push('启用 ' + on + ' 个');
+        if (off) parts.push('停用 ' + off + ' 个');
+        return { msg: `「${label}」已${parts.join('、')}：故障转移实时生效`, warn: false };
+    }
+
     // 保存一组配置（只提交该组表单值；AI 组附带联网搜索总开关）
     // triggerBtn 可选：行级「保存」/批量按钮（加载态反馈）；successMsg 可选：成功提示文案（批量操作定制）
     // mode='switch'（V10.11.25 开关即时保存专用）：
@@ -498,11 +650,12 @@
             .then(data => {
                 if (data && data.success) {
                     if (isSwitchSave) {
-                        // 开关即时保存：全停用时给降级警示（其余正常提示）
-                        const anyOn = g.urls.some(u => u.enabled);
+                        // 开关即时保存：V10.11.26 文案点名组名与启停数量（全停用给降级警示）
                         if (successMsg) showToast(successMsg);
-                        else if (anyOn) showToast('端点开关已保存并即时生效（停用的端点立即不参与故障转移）');
-                        else showToast('已保存：该组已无启用端点，相关服务将降级直至重新启用', true, true);
+                        else {
+                            const m = buildSwitchToast(gname, g.urls);
+                            showToast(m.msg, true, m.warn);
+                        }
                     } else {
                         showToast(successMsg || data.message || '保存成功');
                     }
@@ -519,17 +672,21 @@
                     if (box && !isSwitchSave) box.innerHTML = '';
                 } else {
                     if (isSwitchSave) rollbackSwitches(card, gname);
-                    showToast(data.message || '保存失败', false);
+                    const gLabel = (GROUP_DEFAULTS[gname] && GROUP_DEFAULTS[gname].label) ? GROUP_DEFAULTS[gname].label : gname;
+                    showToast(`「${gLabel}」保存失败：${data.message || '未知原因'}`, false);
                 }
             })
             .catch(() => {
                 if (isSwitchSave) rollbackSwitches(card, gname);
-                showToast('网络错误，开关状态保存失败已还原', false);
+                const gLabel = (GROUP_DEFAULTS[gname] && GROUP_DEFAULTS[gname].label) ? GROUP_DEFAULTS[gname].label : gname;
+                showToast(`「${gLabel}」保存失败（网络错误）${isSwitchSave ? '，开关状态已还原' : ''}`, false);
             })
             .finally(() => {
                 if (btn) { btn.disabled = false; btn.innerHTML = oldHtml; }
                 // V10.11.24：finally 恢复按钮 innerHTML 会覆盖 renderSavedRows 已清零的批量计数，末尾再同步一次
                 updateGroupBatchState(gname);
+                // V10.11.26 F3：全部组与快照一致时清除「有未保存更改」提醒
+                if (isAllClean()) clearDirty();
             });
     }
 
@@ -622,6 +779,8 @@
                     }
                     AI_SEARCH_ENABLED = aiEnabled;
                     showToast(data.message || '保存成功');
+                    // V10.11.26 F3：全部保存成功后清除「有未保存更改」提醒
+                    clearDirty();
                 } else {
                     showToast(data.message || '保存失败', false);
                 }
@@ -661,7 +820,64 @@
             updateGroupBatchState(gname);  // V10.11.24：恢复默认重渲染后批量态复位
         }
         if (document.getElementById('aiSearchEnabled')) document.getElementById('aiSearchEnabled').checked = true;
+        // V10.11.26 F3：恢复默认后表单与库不一致，标记「有未保存更改」（需点击保存配置生效）
+        markDirty();
         showToast('已恢复为默认值（行已只读锁定），请点击「保存配置」后生效');
     }
+
+    // ===== V10.11.26 F3 未保存更改提醒（开关即时保存不计入） =====
+    let configDirty = false;
+    function markDirty() {
+        if (configDirty) return;
+        configDirty = true;
+        const btn = document.getElementById('saveAllBtn');
+        if (btn) {
+            btn.classList.add('has-unsaved');
+            btn.innerHTML = '<i class="fa-solid fa-floppy-disk me-1"></i>保存配置（有未保存更改）';
+        }
+    }
+    function clearDirty() {
+        configDirty = false;
+        const btn = document.getElementById('saveAllBtn');
+        if (btn) {
+            btn.classList.remove('has-unsaved');
+            btn.innerHTML = '<i class="fa-solid fa-floppy-disk me-1"></i>保存配置';
+        }
+    }
+    // 全部组表单值与已保存快照一致？
+    function isAllClean() {
+        // 规范化比较：① 统一对象键序（url/enabled）；② 剥离节假日 {年份} 占位符（展示态与库态差异）
+        const normU = (list) => (list || []).map(u => ({
+            url: String((u && u.url) || '').replace(/\/?\{年份\}\/?$/, ''),
+            enabled: !!(u && u.enabled)
+        }));
+        for (const gname of Object.keys(GROUP_DEFAULTS)) {
+            const g = collectGroup(gname);
+            const snap = GROUP_DEFAULTS[gname];
+            if (!g || !snap) continue;
+            if (JSON.stringify(normU(g.urls)) !== JSON.stringify(normU(snap.urls))) return false;
+            if (Number(g.timeout) !== Number(snap.timeout) || Number(g.retries) !== Number(snap.retries)) return false;
+        }
+        return true;
+    }
+    // 监听编辑性输入变化（端点地址/超时/重试；开关为即时保存不计入）
+    // 值改回与已保存快照一致时自动清除「有未保存更改」提醒
+    document.addEventListener('input', function (e) {
+        const el = e.target;
+        if (el && el.classList && (el.classList.contains('endpoint-url') || el.classList.contains('timeout-input') || el.classList.contains('retries-input'))) {
+            markDirty();
+            if (isAllClean()) clearDirty();
+        }
+    });
+    const aiSearchEl2 = document.getElementById('aiSearchEnabled');
+    if (aiSearchEl2) aiSearchEl2.addEventListener('change', function () {
+        markDirty();
+        if (isAllClean()) clearDirty();
+    });
+
+    // V10.11.26 页面加载：初始化各组状态徽标、停用行样式与批量按钮态
+    (function initGroupViews() {
+        Object.keys(GROUP_DEFAULTS).forEach(function (gname) { updateGroupBatchState(gname); });
+    })();
 </script>
 {% endblock %}
