@@ -2034,3 +2034,16 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   5. **登出/会话失效清理**（`templates/base.html`）：① document 级点击委托捕获 `/logout` 链接 → 清除当前用户 `gift_weather_<uid>_*` 与 `gift_weather_0_*` 键再跳转；② 登录页（`not current_user.is_authenticated`）加载时清除全部 `gift_weather_*` 键（覆盖会话失效自动退出、登出后落地、直接访问登录页三类场景）——多账号切换数据隔离与重置。
 - **验证**：py_compile 通过；Python 直连 15 组输入匹配（峨眉山风景区→峨眉山市 29.598/103.493、西双版纳→景洪市、乐山大佛→乐山市、凤凰古城→凤凰县、布达拉宫→拉萨市、恩阳景区→恩阳区、四川省巴中市恩阳区→恩阳区回归等）全部正确；浏览器逐项——缓存结构含 mode/label/coords/fetchedAt；TTL 内刷新零天气请求秒开；「刷新」按钮 1 次请求并更新时间（18:16→18:19）；伪造过期 31 分钟 → 自动静默拉取（18:22 已自动更新）；别名搜索页面显示正确（峨眉山市，四川省 / 景洪市，云南省）；退出登录后 11 个缓存键全清。
 - **连带影响**：`services/weather_service.py` + `templates/weather.html` + `templates/base.html` + `docs/CHANGELOG.md` + `README.md`（功能特性与版本导航同步）；`geocode_city` 别名命中路径零网络零缓存写入（磁盘 geocode 缓存无测试残留）；Docker 版/APK 版待同步。
+
+### 11.20 ADR-58：Linux 服务器 logs/ 运行目录缺失启动失败修复（V10.11.28 落地）
+- **背景与根因**（用户服务器实测反馈：`run.sh: 135: cannot create /opt/service/gift-bookkeeping-app/logs/app.log: Directory nonexistent`）：
+  1. **V10.11.21 结构重组的隐含依赖**：运行日志 `app.log`/`app.pid` 归入 `logs/` 目录，且 `.gitignore` 整体忽略 `logs/`（设计意图「仅本地留存，不入库不上传」）——副作用是 **git clone / git pull 后目录必然不存在**；
+  2. **shell 重定向不创建目录**：`bin/service.sh` start_service 的 `setsid bash -c "..." >> "$LOG_FILE" 2>&1 &` 与 `echo "$PID" > "$PID_FILE"`，sh/dash 下目标目录不存在时直接报错中止启动；
+  3. **就绪逻辑覆盖盲区**：`ssl/`（bin/ssl_certs.sh）、`.temp/`（db_select/db_setup）、`data/`（ensure_sqlite_runtime_db）均有 `mkdir -p` 就绪，**唯 `logs/` 无**——老服务器因历史目录存在而未暴露，全新部署/重新 clone 的服务器必现。
+- **决策方案**：
+  1. **修复位置选 `bin/config.sh`**（而非 service.sh start_service 内）：config.sh 是 run.sh 全部子命令（start/stop/status/restart/clean）的最先公共加载点，加载即就绪；任意调用路径（含 cron 定时 restart）都不会绕过；
+  2. **实现**：`LOG_FILE`/`PID_FILE` 定义后无条件 `mkdir -p "$APP_DIR/logs" 2>/dev/null || true`——POSIX 兼容（run.sh 为 #!/bin/sh）、幂等（目录已存在零副作用）、失败不阻断（只读挂载等极端场景交由后续写入方报出更具体错误）；
+  3. **双路径覆盖**：正式部署 `/opt/service/gift-bookkeeping-app` 与任意 clone 位置（config.sh 的 APP_DIR 探测回退 `$SCRIPT_DIR`）均生效。
+- **Python 层核查（结论：无需修复）**：全部 logs/ 写入点均已有 makedirs 兜底——`weather_service._save_json_disk_cache`（`os.makedirs(os.path.dirname(filepath), exist_ok=True)`）、`holiday_service`（`os.makedirs('logs', exist_ok=True)`）、`routes_ext` 两处数据库恢复备份（`os.makedirs(_bak_dir, exist_ok=True)`）；`_load_json_disk_cache` 对不存在文件安全返回空 dict——直跑 `python app.py`（桌面调试/容器）场景无缺口。
+- **验证**：① 12 个 `run.sh + bin/*.sh` 全部通过 POSIX `sh -n`（Git Bash 5.2.37）；② 沙盒三场景模拟——全新部署（无 logs/ + APP_DIR 回退）自动创建且重定向成功 / 重复加载幂等 / 伪造 `/opt/service/gift-bookkeeping-app` 正式路径 PASS（用户服务器同场景）；③ 本地服务重启 health 200。
+- **连带影响**：仅 `bin/config.sh`（+7 行）；Python/模板/前端零改动；APK 版不涉及（Android 数据目录由系统私有存储初始化 + Python 层 makedirs 兜底）；Docker 版同步评估见其 ADR-54（宿主侧无 LOG_FILE 引用不受影响，镜像侧预置空目录 + .dockerignore 补排除）。

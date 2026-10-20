@@ -9,6 +9,12 @@
 
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🐛 **V10.11.28 修复 Linux 服务器启动报错「run.sh: cannot create /opt/service/gift-bookkeeping-app/logs/app.log: Directory nonexistent」**（用户服务器实测反馈）：
+>   ① **根因**：V10.11.21 结构重组将运行日志/PID 归入 `logs/` 并由 `.gitignore` 整体忽略（仅本地留存，不入库不上传）——服务器 **git clone / git pull 后目录必然不存在**；而 `bin/service.sh` 启动时 `setsid bash -c "..." >> "$LOG_FILE" 2>&1 &` 的 **shell 重定向要求目录已存在**（sh/dash 下直接报 Directory nonexistent 中止启动，不会自动创建），且 `echo "$PID" > "$PID_FILE"` 同样失败；全链路（run.sh + bin/ 全部模块）无任何 `mkdir logs`（仅 `ssl/`、`.temp/`、`data/` 有就绪逻辑）——此前的老服务器因历史遗留 logs/ 已存在而未暴露，**全新部署/重新 clone 的服务器必现**；
+>   ② **修复**：`bin/config.sh`（run.sh 全部子命令 start/stop/status/restart/clean 的最先公共加载点）在 `LOG_FILE`/`PID_FILE` 定义后无条件 `mkdir -p "$APP_DIR/logs"`（POSIX 兼容幂等；`|| true` 失败不阻断——只读挂载等极端场景由后续写入方报错）——**正式路径 `/opt/service/gift-bookkeeping-app` 与任意 clone 位置（APP_DIR 回退 SCRIPT_DIR）均覆盖**；
+>   ③ **Python 层核查结论（无需修复）**：全部 logs/ 写入点均已有 makedirs 兜底——`weather_service._save_json_disk_cache`（`os.makedirs(os.path.dirname(filepath), exist_ok=True)`）、`holiday_service`（`os.makedirs('logs', exist_ok=True)`）、`routes_ext` 两处数据库恢复备份（`os.makedirs(_bak_dir, exist_ok=True)`）；`_load_json_disk_cache` 对不存在文件安全返回空 dict——直跑 `python app.py`（无 run.sh）场景无缺口；
+>   ④ **验证**：12 个 run.sh + bin/*.sh 全部通过 POSIX `sh -n` 语法检查；Git Bash 沙盒三场景模拟全部通过——全新部署（无 logs/ + APP_DIR 回退脚本目录）自动创建目录且 `>> logs/app.log` 重定向成功、重复加载幂等、**伪造 `/opt/service/gift-bookkeeping-app` 正式路径场景 PASS**（正是用户服务器的路径）；本地服务重启正常（health 200）。
+>   **服务器升级指引**：`git pull` 后直接 `./run.sh restart` 即可（config.sh 加载时自动建目录）；无需手工 mkdir。APK 版不涉及（Android 环境目录由系统私有 files/data 初始化，桌面调试场景 Python 层 makedirs 已兜底）。
 > - 🧭 **V10.11.27 自由搜索智能匹配双保险 + 天气数据持久化缓存与请求频次治理**：
 >   ① **后端智能拆词双保险（防错误降级至地级市）**：新增 `DISTRICT_ALIASES` 中文区县别名表（约 90 条，覆盖三类难命中场景——名胜古迹→所在区划（峨眉山→峨眉山市/布达拉宫→拉萨市/西湖→杭州西湖区）、自治州俗称→州府（西双版纳→景洪市/延边→延吉市/甘孜→康定市）、城市别称/历史旧称（羊城→广州市/长安→西安市/金陵→南京市））+ `SCENIC_STRIP_SUFFIXES` 景区通用后缀剥离（『峨眉山风景区』→『峨眉山』，仅当剥离后可命中才采用）；宽松匹配兜底全面重写——旧实现按 dict 遍历顺序返回第一个命中键（非常规输入可能误配上级/无关区划），新实现收集全部候选后按「层级（区县>市>省，依据索引条目 admin2 判定）优先、同层级命中键更长者优先」排序，取最具体候选；实测「峨眉山风景区→峨眉山市」「西双版纳→景洪市（云南省）」「乐山大佛→乐山市」「延边→延吉市」「西湖→西湖区（杭州）」「恩阳景区→恩阳区」全部精确命中，多级地名回归（四川省巴中市恩阳区→恩阳区）无损；
 >   ② **缓存结构升级**：`gift_weather_<uid>_data` 由 `{ts, data}` 升级为 `{mode, label, city, lat, lon, data, fetchedAt}`（读取兼容旧结构），查询地点元信息随数据一并持久化；

@@ -30,6 +30,13 @@ PID_FILE="$APP_DIR/logs/app.pid"
 # V10.11.21 结构重组：运行日志归入 logs/ 目录（不入库不上传）
 LOG_FILE="$APP_DIR/logs/app.log"
 
+# V10.11.28 修复：运行目录就绪。logs/ 被 .gitignore 整体忽略（仅本地留存，不入库不上传），
+# 服务器 git clone / 代码更新后该目录不存在，start_service 的 shell 重定向（>> "$LOG_FILE"）
+# 与 PID 文件写入会直接报错「cannot create .../logs/app.log: Directory nonexistent」中止启动。
+# config.sh 是 run.sh 全部子命令（start/stop/status/restart/clean）的最先公共加载点，
+# 此处无条件 mkdir -p 确保目录可用（POSIX 兼容幂等；失败不阻断——只读挂载等极端场景由后续写入方报错）
+mkdir -p "$APP_DIR/logs" 2>/dev/null || true
+
 # ===== SNI 多项目共用端口配置 =====
 PROJECT_NAME="${PROJECT_NAME:-gift_app}"
 SNI_DOMAIN="${SNI_DOMAIN:-localhost}"

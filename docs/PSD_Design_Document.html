@@ -115,7 +115,7 @@
   <h1>人情礼金记账系统 PSD 设计与重构决策文档</h1>
   <div class="meta">
     <span><strong>版本</strong>：V10.11.25</span>
-    <span><strong>生成日期</strong>：2026-10-19</span>
+    <span><strong>生成日期</strong>：2026-10-20</span>
     <span><strong>审计基线</strong>：main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</span>
     <br>
     <span class="badge">代码是实现真相</span>
@@ -1589,13 +1589,27 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 11 部分补充十：ADR-58 logs 运行目录缺失修复（V10.11.28） ==================== -->
+<div class="section">
+<h1>第 11 部分补充十：ADR-58 Linux 服务器 logs/ 运行目录缺失启动失败修复（V10.11.28 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与根因</td><td>用户服务器实测：<code>run.sh: 135: cannot create /opt/service/gift-bookkeeping-app/logs/app.log: Directory nonexistent</code>。三层根因：① V10.11.21 重组将 app.log/app.pid 归入 logs/ 且 .gitignore 整体忽略——<strong>git clone/pull 后目录必然不存在</strong>；② shell 重定向（&gt;&gt; "$LOG_FILE"、&gt; "$PID_FILE"）目标目录不存在时 sh/dash 直接报错中止启动（不自动创建）；③ 就绪逻辑盲区——ssl/、.temp/、data/ 均有 mkdir -p 唯 logs/ 无（老服务器因历史目录存在未暴露，全新部署必现）。</td></tr>
+<tr><td>决策方案</td><td>修复位置选 <code>bin/config.sh</code>（run.sh 全部子命令的最先公共加载点，加载即就绪，含 cron 定时调用不绕过）：<code>LOG_FILE/PID_FILE</code> 定义后无条件 <code>mkdir -p "$APP_DIR/logs" 2>/dev/null || true</code>——POSIX 兼容、幂等、失败不阻断；正式路径与 clone 任意位置（APP_DIR 回退 SCRIPT_DIR）双覆盖。</td></tr>
+<tr><td>Python 层核查</td><td>结论：无需修复。全部 logs/ 写入点均已有 makedirs 兜底——weather_service._save_json_disk_cache、holiday_service、routes_ext 两处数据库恢复备份；_load_json_disk_cache 对不存在文件安全返回空 dict；直跑 python app.py 场景无缺口。</td></tr>
+<tr><td>验证</td><td>① 12 个 run.sh + bin/*.sh 全部通过 POSIX sh -n（Git Bash 5.2.37）；② 沙盒三场景——全新部署自动创建且重定向成功 / 重复加载幂等 / 伪造 /opt/service/gift-bookkeeping-app 正式路径 PASS（用户服务器同场景）；③ 本地服务重启 health 200。</td></tr>
+<tr><td>服务器升级指引</td><td><code>git pull</code> 后直接 <code>./run.sh restart</code>（config.sh 加载时自动建目录），无需手工 mkdir。</td></tr>
+<tr><td>连带影响</td><td>仅 <code>bin/config.sh</code>（+7 行）；Python/模板/前端零改动；APK 版不涉及（Android 系统私有存储 + Python makedirs 兜底）；Docker 版同步评估见其 ADR-54（宿主侧无 LOG_FILE 引用不受影响；镜像侧预置空目录 + .dockerignore 补排除）。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.27</td></tr>
-<tr><td>生成日期</td><td>2026-10-19（V10.11.27 自由搜索智能匹配双保险 + 天气数据持久化缓存与请求频次治理；承接 V10.11.26 多级地名匹配修复与服务停用明确报错）</td></tr>
+<tr><td>文档版本</td><td>V10.11.28</td></tr>
+<tr><td>生成日期</td><td>2026-10-20（V10.11.28 Linux 服务器 logs 运行目录缺失修复；承接 V10.11.27 自由搜索别名双保险与缓存治理）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>

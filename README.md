@@ -10,7 +10,7 @@
 
 > **简洁、安全、全能的人情往来与礼金财务管理系统**。支持自然语言智能记账、专属宴席独立台账、人情往来精准对账、权威万年历与节假日调休感知、AI 记账助手、多渠道 Webhook 告警与 WebDAV 加密云备份。
 >
-> 📌 **当前版本**：`V10.11.27` | 📖 **[查看全量版本发布历史与更新日志 (docs/CHANGELOG.md)](docs/CHANGELOG.md)**
+> 📌 **当前版本**：`V10.11.28` | 📖 **[查看全量版本发布历史与更新日志 (docs/CHANGELOG.md)](docs/CHANGELOG.md)**
 
 <!-- 
   【AI 协作与维护规范 - 严禁违背】
@@ -123,7 +123,7 @@ gift_bookkeeping_app/
 │   ├── DEPLOYMENT.md          # 详细部署与 Nginx/SSL/Git 运维手册
 │   ├── PSD_Design_Document.md # 详细设计与重构决策文档 (Markdown 原生版)
 │   ├── PSD_Design_Document.html # 设计文档图表离线 HTML 交互版
-│   ├── CHANGELOG.md           # 全量版本演进与历史变更日志 (V2 ~ V10.11.27)
+│   ├── CHANGELOG.md           # 全量版本演进与历史变更日志 (V2 ~ V10.11.28)
 │   ├── SAMPLE_DATA.md         # 样例数据体系与 9 项推送前核查规范
 │   └── ANDROID_BUILD.md       # Android 原生 APK 打包指南
 │
@@ -149,7 +149,7 @@ gift_bookkeeping_app/
 
 - 🛠️ **[完整部署与运维手册 (docs/DEPLOYMENT.md)](docs/DEPLOYMENT.md)**：包含端口配置、多项目共用 443 SNI 分流、自签名 SSL 证书定制、Nginx 自动渲染以及 Linux 服务器代码免冲突更新方案；
 - 📐 **[PSD 架构设计与重构决策文档 (docs/PSD_Design_Document.md)](docs/PSD_Design_Document.md)**：包含系统全景技术栈审计、漂移矩阵分析、前后台完整设计规格及 ADR-01~57 全部架构决策记录（另备有包含完整图表的 [HTML 交互版](docs/PSD_Design_Document.html)）；
-- 📜 **[全量版本发布与变更日志 (docs/CHANGELOG.md)](docs/CHANGELOG.md)**：记录从 V2 至 V10.11.27 每一个版本的迭代日志与详细技术升级公告；
+- 📜 **[全量版本发布与变更日志 (docs/CHANGELOG.md)](docs/CHANGELOG.md)**：记录从 V2 至 V10.11.28 每一个版本的迭代日志与详细技术升级公告；
 - 📦 **[开箱即用样例数据体系规范 (docs/SAMPLE_DATA.md)](docs/SAMPLE_DATA.md)**：包含 151 条高仿真演示记录构成、多角色测试账号矩阵、敏感数据脱敏准则及推送前 9 项核查红线；
 - 📱 **[Android APK 打包指南 (docs/ANDROID_BUILD.md)](docs/ANDROID_BUILD.md)**：基于 GitHub Actions 与 Buildozer 的移动端离线安装包自动构建流程；
 - 🌐 **[多形态交付生态矩阵 (Ecosystem)](docs/DEPLOYMENT.md#八项目多形态交付矩阵-ecosystem)**：了解 Web 原生版、Docker Compose 版与 Android APK 版的源码仓库。
