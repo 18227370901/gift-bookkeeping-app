@@ -517,5 +517,12 @@ def _inspector_loop(app):
                 print('[Alert Inspector Error] {0}'.format(e))
             except Exception:
                 pass
+        finally:
+            # V10.11.29 资源治理：每轮巡检结束后显式清理 Session 与连接池，防对象泄露
+            try:
+                with app.app_context():
+                    db.session.remove()
+            except Exception:
+                pass
         count += 1
         time.sleep(INSPECT_INTERVAL_SECONDS)

@@ -180,6 +180,15 @@ FORECAST_CACHE_TTL = 1800  # 30 分钟缓存有效期
 _mem_forecast_cache = {}
 _mem_geocode_cache = {}
 _weather_cache_lock = threading.Lock()
+MAX_MEM_CACHE_ENTRIES = 500
+
+
+def _safe_put_mem_cache(cache_dict, key, value):
+    """V10.11.29 内存治理：带容量上限防护的内存缓存写入，防止全局字典无界膨胀"""
+    if len(cache_dict) >= MAX_MEM_CACHE_ENTRIES:
+        for k in list(cache_dict.keys())[:MAX_MEM_CACHE_ENTRIES // 5]:
+            cache_dict.pop(k, None)
+    cache_dict[key] = value
 
 # 内置主要城市地理坐标（覆盖直辖市、各省省会及重要城市，断网/网络隔离下免地理编码）
 BUILTIN_CITIES = {
@@ -504,9 +513,18 @@ def _find_cached_or_builtin_city(city_name, province=None, district_city=None):
             hit = (k == norm or norm in k or k in norm)
         if hit:
             loose.append((k, v))
+            # V10.11.29 CPU 防御：若已命中精准区县级（level 3）且名称重合度高，或候选达 50 条，提前截断
+            if len(loose) >= 50 or (_region_level(v) == 3 and (k == raw or (norm and k == norm))):
+                break
     if loose:
         loose.sort(key=lambda kv: (_region_level(kv[1]), -len(kv[0])))
-        return dict(loose[0][1])
+        best = dict(loose[0][1])
+        # V10.11.29 性能治理：写回内存缓存，避免下次请求重走万次循环与排序
+        with _weather_cache_lock:
+            _safe_put_mem_cache(_mem_geocode_cache, raw, best)
+            if norm:
+                _safe_put_mem_cache(_mem_geocode_cache, norm, best)
+        return best
 
     if district_city:
         d_norm = _norm_region(district_city)
@@ -813,10 +831,10 @@ def geocode_city(city_name, province=None, district_city=None):
     # 写入缓存
     try:
         with _weather_cache_lock:
-            _mem_geocode_cache[city_name] = city_info
+            _safe_put_mem_cache(_mem_geocode_cache, city_name, city_info)
             norm_name = _norm_region(city_name)
             if norm_name:
-                _mem_geocode_cache[norm_name] = city_info
+                _safe_put_mem_cache(_mem_geocode_cache, norm_name, city_info)
         disk_geo = _load_json_disk_cache(GEOCODE_CACHE_FILE)
         disk_geo[city_name] = city_info
         if norm_name:
@@ -888,7 +906,7 @@ def fetch_forecast(latitude, longitude, timezone='auto', days=DEFAULT_FORECAST_D
     if network_data:
         # 网络获取成功，刷新内存缓存与磁盘缓存
         with _weather_cache_lock:
-            _mem_forecast_cache[cache_key] = (now, network_data)
+            _safe_put_mem_cache(_mem_forecast_cache, cache_key, (now, network_data))
         try:
             d = _load_json_disk_cache(FORECAST_CACHE_FILE)
             d[cache_key] = {'ts': now, 'data': network_data}

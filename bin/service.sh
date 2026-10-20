@@ -132,13 +132,19 @@ start_service() {
     ensure_python_env || return 1
 
     # 使用进程组方式启动，便于后续统一管理
+    # V10.11.29: 生产级 WSGI 容器 Gunicorn 启动（多 Worker + 多线程解绑 GIL，--max-requests 回收内存，落实 PF-01/OP-01）
+    # 环境若无 gunicorn 则平滑回退 python3 app.py；exec 确保 PID 对应真实主服务进程
     setsid bash -c "
         export ADMIN_USER='$ADMIN_USER'
         export ADMIN_PASS='$ADMIN_PASS'
         export PORT='$PORT'
         export DATABASE_URL='$DATABASE_URL'
         . $VENV_DIR/bin/activate
-        python3 $APP_SCRIPT
+        if command -v gunicorn >/dev/null 2>&1; then
+            exec gunicorn -w 2 -k gthread --threads 4 --max-requests 2000 --max-requests-jitter 200 -b 127.0.0.1:$PORT app:app --timeout 60
+        else
+            exec python3 $APP_SCRIPT
+        fi
     " >> "$LOG_FILE" 2>&1 &
 
     # 保存 PID

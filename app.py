@@ -1186,7 +1186,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'app': 'gift_bookkeeping_app',
-        'version': 'V10.11.18'
+        'version': 'V10.11.30'
     }), 200
 
 @app.route('/')
@@ -1251,12 +1251,18 @@ def index():
     else:
         query = query.order_by(GiftRecord.created_at.desc())
 
-    # Get total statistics before pagination
-    all_filtered_records = query.all()
-    total_count = len(all_filtered_records)
-    total_amount = sum(r.amount for r in all_filtered_records) if all_filtered_records else 0.0
+    # V10.11.29 PF-03性能治理：数据库层一次性标量聚合统计，彻底废除 query.all() 全量 ORM 内存加载
+    # 规避成百上千个实体对象实例化与 Python 循环求和带来的 CPU 尖刺与内存暴涨
+    stats_row = query.with_entities(
+        db.func.count(GiftRecord.id),
+        db.func.coalesce(db.func.sum(GiftRecord.amount), 0.0),
+        db.func.coalesce(db.func.max(GiftRecord.amount), 0.0)
+    ).order_by(None).first()
+
+    total_count = int(stats_row[0] or 0) if stats_row else 0
+    total_amount = float(stats_row[1] or 0.0) if stats_row else 0.0
+    max_amount = float(stats_row[2] or 0.0) if stats_row else 0.0
     avg_amount = round(total_amount / total_count, 2) if total_count > 0 else 0.0
-    max_amount = max((r.amount for r in all_filtered_records), default=0.0)
 
     # Apply pagination
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)

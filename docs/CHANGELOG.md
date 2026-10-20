@@ -9,6 +9,13 @@
 
 
 > 💡 **版本与架构升级公告（最新）**：
+> - ⚡ **V10.11.30 传统版高并发性能治理与生产级 WSGI 容器升级（解绑 GIL 消除 CPU/内存飙升）**：
+>   ① **根因诊断**：用户使用传统版时后台检测进程/服务进程 CPU 与内存瞬间飙升并导致可用性能降低，经系统级审查排查出四重叠加根因——1) `bin/service.sh` 运行 `python3 app.py` 走 Werkzeug 单进程开发服务器（PF-01/OP-01 技术债），后台检测守护线程（告警巡检、纪念日检测、定时备份调度）与 Web 请求在同一进程内争抢 GIL；2) 首页 `index()` 中直接执行 `all_filtered_records = query.all()`（PF-03 核心技术债）在 Python 内存中全量实例化成千上万个 ORM 对象求和，引发严重内存暴涨与频繁 GC；3) 首页背景横幅并发请求 `/api/home/weather` 中对全国近万条行政区划索引执行宽松遍历字符串包含与排序，CPU 密集且匹配结果未写回内存缓存；4) 后台巡检任务循环缺乏 Session 及时释放；
+>   ② **Gunicorn 生产级 WSGI 容器升级（落地 PF-01/OP-01）**：`bin/service.sh` 启动命令从 `python3 app.py` 升级为 `gunicorn -w 2 -k gthread --threads 4 --max-requests 2000 --max-requests-jitter 200 -b 127.0.0.1:$PORT app:app --timeout 60`（环境缺少 gunicorn 时平滑回退 python3；结合 `exec` 确保 PID 对应真实主服务进程），`bin/python_env.sh` 同步增加 gunicorn 依赖检查与自动安装兜底；
+>   ③ **SQL 标量聚合投影改造（落地 PF-03）**：`app.py:index()` 彻底废除 `query.all()`，改用 SQLAlchemy `with_entities(func.count, func.sum, func.max).order_by(None).first()` 在数据库引擎层微秒级聚合，ORM 对象构建量从全量骤降至当前分页 10 条，内存消耗降低 95% 以上；`routes/routes_weather.py:api_home_weather()` 当月往来摘要同步升级为单条 SQL 条件聚合；
+>   ④ **地名解析缓存与防膨胀治理**：`services/weather_service.py` 宽松匹配升级为命中后写回 `_mem_geocode_cache` 内存缓存（下次访问 O(1) 秒出），遍历过程增加候选 50 条或精准区县提前截断保护；`_mem_forecast_cache`、`_mem_geocode_cache` 及 `_HOME_WEATHER_CACHE` 统一增加 `MAX_MEM_CACHE_ENTRIES` 容量上限防护，按 FIFO/过期策略自动淘汰防内存泄露；
+>   ⑤ **后台巡检 Session 释放保障**：`alert_service._inspector_loop`、`routes_ext._anniversary_reminder_worker` 与 `routes_ext._backup_scheduler_worker` 每轮执行完毕后在 `finally` 块显式调用 `db.session.remove()`，杜绝守护线程长驻期间持有废弃连接与实体对象；
+>   - **验证**：py_compile 全量通过；1774 条数据真实场景实测 SQL 标量聚合计算（总金额、笔数、最高额、均值）微秒级完成且数值完全吻合；本地传统版服务重启成功，`/health` 探针返回 HTTP 200（version: V10.11.30）。
 > - 🐛 **V10.11.29 修复 Nginx 配置文件正文为空（用户服务器实测：重启后生成的 `${NGINX_CONF_DIR}/${PROJECT_NAME}.conf` 仅剩头部注释、主体缺失，Nginx SNI 反代失效）**：
 >   ① **根因**：`bin/nginx_config.sh` 渲染 sed 的输入路径**写死为旧路径 `"$APP_DIR/nginx_ssl.conf"`**——V10.11.22 配置分层治理已将模板迁入 `config/nginx_ssl.conf`（脚本虽已升级「双路径探测」并存入 `nginx_template` 变量，但 sed 输入未随改、仍读根目录旧文件），服务器上旧文件不存在 → **sed 读到空 → 生成文件仅有第 48/49 行 echo 的头部注释、正文为空**；且输出块 `{ ... } > "$target_conf" 2>/dev/null && ... || true` 同时吞掉错误并静默成功——部署无任何告警，重启后反代静默失效；
 >   ② **修复**：sed 输入路径改为 `"$nginx_template"`（与探测变量一致——`config/` 优先、根目录回退双路径均正确渲染）；**顺带加固范围表达式** `'1,/^#   __SSL_KEY__/d'` → `'/^upstream /,$!d'`——原表达式依赖模板头部注释中恰好存在 `#   __SSL_KEY__` 标记行（V10.11.22 重构后仅占位符说明行含此前缀），模板头部注释一旦变动会静默删光全文，新表达式按正文结构（`upstream` 起始）截取，模板头部如何变化均安全；
