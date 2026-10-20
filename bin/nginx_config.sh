@@ -47,14 +47,18 @@ setup_nginx_config() {
             {
                 echo "# 本文件由 run.sh 依据 $(basename "$nginx_template") 模板自动生成，请勿手工修改（改模板请编辑源文件后重跑 start）"
                 echo "# 项目: $PROJECT_NAME | SNI域名: $SNI_DOMAIN | 监听端口: $NGINX_PORT | default_server: $default_flag | 生成时间: $(date '+%Y-%m-%d %H:%M:%S')"
-                sed -e '1,/^#   __SSL_KEY__/d' \
+                # V10.11.29 修复：模板统一从 $nginx_template 读取（此前写死旧路径 $APP_DIR/nginx_ssl.conf，
+                # 模板迁入 config/ 后该路径不存在，sed 读到空导致生成文件仅有头部注释、正文为空）
+                # 范围表达式由 '1,/^#   __SSL_KEY__/d' 改为 '/^upstream /,$!d'（按正文结构截取，
+                # 不再依赖模板头部注释标记，避免模板头部变动时静默删光正文）
+                sed -e '/^upstream /,$!d' \
                     -e "s|__UPSTREAM_NAME__|${PROJECT_NAME}_backend|g" \
                     -e "s|__BACKEND_PORT__|$PORT|g" \
                     -e "s|__NGINX_PORT__|$listen_value|g" \
                     -e "s|__SNI_DOMAIN__|$SNI_DOMAIN|g" \
                     -e "s|__SSL_CERT__|$SSL_CERT|g" \
                     -e "s|__SSL_KEY__|$SSL_KEY|g" \
-                    "$APP_DIR/nginx_ssl.conf"
+                    "$nginx_template"
             } > "$target_conf" 2>/dev/null && \
             echo_e "${GREEN}✅ 已动态更新并同步 Nginx 配置到 $target_conf (项目: $PROJECT_NAME, 后端端口: $PORT, Nginx监听端口: $NGINX_PORT, SNI域名: $SNI_DOMAIN, default_server: $default_flag)${NC}" || true
         fi

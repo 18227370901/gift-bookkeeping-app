@@ -2047,3 +2047,15 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
 - **Python 层核查（结论：无需修复）**：全部 logs/ 写入点均已有 makedirs 兜底——`weather_service._save_json_disk_cache`（`os.makedirs(os.path.dirname(filepath), exist_ok=True)`）、`holiday_service`（`os.makedirs('logs', exist_ok=True)`）、`routes_ext` 两处数据库恢复备份（`os.makedirs(_bak_dir, exist_ok=True)`）；`_load_json_disk_cache` 对不存在文件安全返回空 dict——直跑 `python app.py`（桌面调试/容器）场景无缺口。
 - **验证**：① 12 个 `run.sh + bin/*.sh` 全部通过 POSIX `sh -n`（Git Bash 5.2.37）；② 沙盒三场景模拟——全新部署（无 logs/ + APP_DIR 回退）自动创建且重定向成功 / 重复加载幂等 / 伪造 `/opt/service/gift-bookkeeping-app` 正式路径 PASS（用户服务器同场景）；③ 本地服务重启 health 200。
 - **连带影响**：仅 `bin/config.sh`（+7 行）；Python/模板/前端零改动；APK 版不涉及（Android 数据目录由系统私有存储初始化 + Python 层 makedirs 兜底）；Docker 版同步评估见其 ADR-54（宿主侧无 LOG_FILE 引用不受影响，镜像侧预置空目录 + .dockerignore 补排除）。
+
+### 11.21 ADR-59：Nginx 配置渲染正文为空修复（V10.11.29 落地）
+- **背景与根因**（用户服务器实测：Linux 上执行 `run.sh` 重启服务后，`$NGINX_CONF_DIR/gift_app.conf` 被重新生成但**仅剩 2 行头部注释、主体为空**——SNI 反代静默失效）：
+  1. **sed 输入路径写死旧路径**：`bin/nginx_config.sh` 第 57 行 sed 输入为 `"$APP_DIR/nginx_ssl.conf"`（根目录），而 V10.11.22 配置分层治理已将模板迁入 `config/nginx_ssl.conf`——脚本第 31-36 行的「双路径探测」只把结果存入 `nginx_template` 变量，**sed 输入未随改**；服务器根目录旧模板文件不存在 → sed 读到空 → 生成文件只有头部 echo 注释；
+  2. **错误被静默吞掉**：输出块 `{ ... } > "$target_conf" 2>/dev/null && echo_e "✅ 已动态更新…" || true`——`2>/dev/null` 丢弃 sed 错误、`|| true` 掩盖失败，部署日志仍显示「✅ 已动态更新并同步 Nginx 配置」，重启全程无告警；
+  3. **范围表达式脆弱**：`sed -e '1,/^#   __SSL_KEY__/d'` 依赖模板头部注释中存在 `#   __SSL_KEY__` 前缀行（V10.11.22 模板重构后仅为占位符说明行），模板头部注释一旦变动，sed 地址范围延伸至 EOF 将静默删光全部正文——属于同样的「静默失败」模式，本次一并加固。
+- **决策方案**：
+  1. **sed 输入路径对齐变量**：`"$APP_DIR/nginx_ssl.conf"` → `"$nginx_template"`（与探测一致：`config/` 优先、根目录回退，两路径均可正确渲染）；
+  2. **范围表达式按正文结构加固**：`'1,/^#   __SSL_KEY__/d'` → `'/^upstream /,$!d'`（删除 `upstream` 行之前的所有头部注释，正文完整保留）——不再依赖模板头部注释内容，模板头部如何调整均安全；
+  3. **Docker 版同步加固**：Docker 版 sed 输入本就使用 `$nginx_template`（无路径缺陷），但其范围表达式与旧版相同，同步替换为同一健壮形式，消除同类隐患（其模板同样无独立 `__SSL_KEY__` 标记行）。
+- **验证**：① 传统/Docker 两版 `bin/nginx_config.sh` 均通过 POSIX `sh -n`（Git Bash 5.2.37）；② Git Bash 沙盒按服务器场景渲染（config/ 模板存在、根目录旧模板缺失）——传统版与 Docker 版均生成 **57 行完整配置**，`upstream gift_app_backend {`、`server_name gift.example.com;`、`listen 443 default_server ssl;`、`proxy_pass http://gift_app_backend;` 等全部正确替换，`grep -E "__[A-Z_]+__"` 无残留占位符——与缺陷现象（仅头部注释）形成明确对照；③ 原缺陷根因复核：旧代码在沙盒中渲染即复现「仅头部注释」空文件（sed 读到不存在的旧路径）。
+- **连带影响**：仅 `bin/nginx_config.sh`（传统版 +1 行注释变更并替换两处表达式；Docker 版替换一处表达式）；Python/模板/前端/数据库零改动；APK 版不涉及（Android 场景无 Nginx 反代）。

@@ -9,6 +9,11 @@
 
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🐛 **V10.11.29 修复 Nginx 配置文件正文为空（用户服务器实测：重启后生成的 `${NGINX_CONF_DIR}/${PROJECT_NAME}.conf` 仅剩头部注释、主体缺失，Nginx SNI 反代失效）**：
+>   ① **根因**：`bin/nginx_config.sh` 渲染 sed 的输入路径**写死为旧路径 `"$APP_DIR/nginx_ssl.conf"`**——V10.11.22 配置分层治理已将模板迁入 `config/nginx_ssl.conf`（脚本虽已升级「双路径探测」并存入 `nginx_template` 变量，但 sed 输入未随改、仍读根目录旧文件），服务器上旧文件不存在 → **sed 读到空 → 生成文件仅有第 48/49 行 echo 的头部注释、正文为空**；且输出块 `{ ... } > "$target_conf" 2>/dev/null && ... || true` 同时吞掉错误并静默成功——部署无任何告警，重启后反代静默失效；
+>   ② **修复**：sed 输入路径改为 `"$nginx_template"`（与探测变量一致——`config/` 优先、根目录回退双路径均正确渲染）；**顺带加固范围表达式** `'1,/^#   __SSL_KEY__/d'` → `'/^upstream /,$!d'`——原表达式依赖模板头部注释中恰好存在 `#   __SSL_KEY__` 标记行（V10.11.22 重构后仅占位符说明行含此前缀），模板头部注释一旦变动会静默删光全文，新表达式按正文结构（`upstream` 起始）截取，模板头部如何变化均安全；
+   - **验证**：传统/Docker 两版 `bin/nginx_config.sh` POSIX `sh -n` 全过；Git Bash 沙盒按服务器真实场景渲染（`config/nginx_ssl.conf` 存在、根目录旧模板缺失）——两版均生成 **57 行完整配置**，`upstream/keepalive/server_name/listen/ssl_certificate/proxy_pass` 等全部正确替换、**无残留占位符**，与原缺陷（空正文）形成对照；Docker 版同步同一加固（其 sed 本已使用 `$nginx_template`，仅范围表达式同改）。
+   > **服务器升级指引**：`git pull` 后执行 `NGINX_CONF_FORCE_UPDATE=1 ./run.sh restart`（或删除旧的空配置文件后 restart）即可重新生成完整 Nginx 配置并热重载；Docker 部署同理由宿主侧脚本重跑生效。
 > - 🐛 **V10.11.28 修复 Linux 服务器启动报错「run.sh: cannot create /opt/service/gift-bookkeeping-app/logs/app.log: Directory nonexistent」**（用户服务器实测反馈）：
 >   ① **根因**：V10.11.21 结构重组将运行日志/PID 归入 `logs/` 并由 `.gitignore` 整体忽略（仅本地留存，不入库不上传）——服务器 **git clone / git pull 后目录必然不存在**；而 `bin/service.sh` 启动时 `setsid bash -c "..." >> "$LOG_FILE" 2>&1 &` 的 **shell 重定向要求目录已存在**（sh/dash 下直接报 Directory nonexistent 中止启动，不会自动创建），且 `echo "$PID" > "$PID_FILE"` 同样失败；全链路（run.sh + bin/ 全部模块）无任何 `mkdir logs`（仅 `ssl/`、`.temp/`、`data/` 有就绪逻辑）——此前的老服务器因历史遗留 logs/ 已存在而未暴露，**全新部署/重新 clone 的服务器必现**；
 >   ② **修复**：`bin/config.sh`（run.sh 全部子命令 start/stop/status/restart/clean 的最先公共加载点）在 `LOG_FILE`/`PID_FILE` 定义后无条件 `mkdir -p "$APP_DIR/logs"`（POSIX 兼容幂等；`|| true` 失败不阻断——只读挂载等极端场景由后续写入方报错）——**正式路径 `/opt/service/gift-bookkeeping-app` 与任意 clone 位置（APP_DIR 回退 SCRIPT_DIR）均覆盖**；

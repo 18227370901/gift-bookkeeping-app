@@ -1603,13 +1603,26 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 11 部分补充十一：ADR-59 Nginx 配置渲染正文为空修复（V10.11.29） ==================== -->
+<div class="section">
+<h1>第 11 部分补充十一：ADR-59 Nginx 配置渲染正文为空修复（V10.11.29 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与根因</td><td>用户服务器实测：Linux 执行 run.sh 重启后，<code>$NGINX_CONF_DIR/gift_app.conf</code> 被重新生成但仅剩 2 行头部注释、主体为空——SNI 反代静默失效。三层根因：① <strong>sed 输入路径写死旧路径</strong>——第 57 行 sed 输入为 <code>"$APP_DIR/nginx_ssl.conf"</code>（根目录），而 V10.11.22 分层治理已将模板迁入 config/（双路径探测结果仅存入 nginx_template 变量，sed 未随改），服务器旧文件不存在 → sed 读到空；② <strong>错误被静默吞掉</strong>——<code>{ ... } &gt; "$target_conf" 2>/dev/null &amp;&amp; echo_e "✅ 已动态更新…" || true</code>，部署日志仍显示成功、全程无告警；③ <strong>范围表达式脆弱</strong>——<code>'1,/^#   __SSL_KEY__/d'</code> 依赖模板头部注释恰好含此前缀，模板头部变动将静默删光全文。</td></tr>
+<tr><td>决策方案</td><td>① sed 输入路径对齐变量：<code>"$APP_DIR/nginx_ssl.conf"</code> → <code>"$nginx_template"</code>（config/ 优先、根目录回退双路径均正确渲染）；② 范围表达式按正文结构加固：<code>'1,/^#   __SSL_KEY__/d'</code> → <code>'/^upstream /,$!d'</code>（删除 upstream 行前全部头部注释，正文完整保留，模板头部如何调整均安全）；③ Docker 版同步替换同一范围表达式（其 sed 本已使用 $nginx_template，无路径缺陷，消除同类隐患）。</td></tr>
+<tr><td>验证</td><td>① 传统/Docker 两版 bin/nginx_config.sh 均通过 POSIX sh -n（Git Bash 5.2.37）；② Git Bash 沙盒按服务器场景渲染（config/ 模板存在、根目录旧模板缺失）——两版均生成 57 行完整配置，upstream/server_name/listen/proxy_pass 等全部正确替换、无残留占位符，与原缺陷（仅头部注释）明确对照；③ 旧代码在沙盒中渲染即复现空正文缺陷（sed 读到不存在的旧路径）。</td></tr>
+<tr><td>服务器升级指引</td><td><code>git pull</code> 后执行 <code>NGINX_CONF_FORCE_UPDATE=1 ./run.sh restart</code>（或先删除旧空配置文件再 restart）即可重新生成完整 Nginx 配置并热重载；Docker 部署同理由宿主侧脚本重跑生效。</td></tr>
+<tr><td>连带影响</td><td>仅 <code>bin/nginx_config.sh</code>（传统版替换 sed 输入路径 + 两处表达式；Docker 版替换一处表达式）；Python/模板/前端/数据库零改动；APK 版不涉及（无 Nginx 反代）。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.28</td></tr>
-<tr><td>生成日期</td><td>2026-10-20（V10.11.28 Linux 服务器 logs 运行目录缺失修复；承接 V10.11.27 自由搜索别名双保险与缓存治理）</td></tr>
+<tr><td>文档版本</td><td>V10.11.29</td></tr>
+<tr><td>生成日期</td><td>2026-10-20（V10.11.29 Nginx 配置渲染正文为空修复；承接 V10.11.28 Linux 服务器 logs 运行目录缺失修复）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
