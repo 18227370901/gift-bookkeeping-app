@@ -1643,13 +1643,26 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 11 部分补充十四：ADR-62 依赖检查升级 requirements 全量校验（V10.11.32） ==================== -->
+<div class="section">
+<h1>第 11 部分补充十四：ADR-62 依赖检查升级为 requirements.txt 全量校验（V10.11.32 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与根因</td><td>用户正式环境实测：按 V10.11.31 指引 <code>git pull</code> 后直接 <code>./run.sh restart</code>，AI 测试按钮仍报 httpx 缺失。根因：<code>bin/python_env.sh</code> 的 <code>ensure_python_env()</code> 依赖检查长期使用<strong>手工 6 包白名单</strong>（flask/flask_sqlalchemy/flask_wtf/flask_login/pyzipper/gunicorn）——requirements.txt 新增包（如 httpx）白名单未同步 → 6 包探测全过 → 误判「依赖齐全」跳过安装 → 「requirements 有、清单不全、venv 缺」死循环，缺陷不暴露。</td></tr>
+<tr><td>决策方案</td><td>① <code>_req_module()</code> 包名→模块名映射：去版本约束与 <code>[extras]</code>、连字符/点转下划线、统一小写（Flask-Login→flask_login、psycopg[binary]→psycopg）；特例——<code>wecom-aibot-python-sdk</code> 走仓库内 aibot/ 副本跳过探测、<code>psycopg2-binary</code> 映射 <code>psycopg2</code>；② <code>_check_req_missing()</code> 逐行解析 requirements（跳过注释/空行）逐模块 import 探测；③ <code>ensure_python_env()</code> 以全量校验取代白名单：任一缺失自动 <code>pip_install_fb</code>（三镜像源兜底）全量安装，安装失败保持「阻止启动 + 可读错误」并提示逃生阀；新增 <code>SKIP_REQ_CHECK=1</code> 跳过检查（无外网/只读场景）；无 requirements 时退回历史 6 包探测。</td></tr>
+<tr><td>验证</td><td>① <code>sh -n</code> 通过；② 沙盒三分支——真实 requirements 探测仅识别实际缺失的 <code>psycopg[binary]</code>（本地未装，httpx 等 19 包均识别已装）；缺失自动安装闭环（真实从清华源下载 psycopg 3.3.6 安装成功，二次校验「✅ 依赖检查通过」）；<code>SKIP_REQ_CHECK=1</code> 逃生提示；③ 包名→模块名映射抽查 19 项全对（含易错点）；伪造缺失包正确识别。</td></tr>
+<tr><td>服务器升级指引</td><td><code>git pull &amp;&amp; ./run.sh restart</code>——首次重启自动检测 httpx 缺失并安装；此后任何依赖缺口都会在启停时自动补齐，无需手工 pip。无外网环境可用 <code>SKIP_REQ_CHECK=1 ./run.sh restart</code> 跳过并手工装包。</td></tr>
+<tr><td>连带影响</td><td>仅 <code>bin/python_env.sh</code>（+45 行）；Python/模板/前端零改动；Docker 版无此脚本不涉及（镜像构建期 pip install -r requirements 保证依赖）；APK 版不涉及。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.31</td></tr>
-<tr><td>生成日期</td><td>2026-10-20（V10.11.31 AI 助手依赖缺失修复与错误指引治理；承接 V10.11.30 高并发性能治理与 WSGI 容器升级）</td></tr>
+<tr><td>文档版本</td><td>V10.11.32</td></tr>
+<tr><td>生成日期</td><td>2026-10-21（V10.11.32 依赖检查升级为 requirements 全量校验与自动补装；承接 V10.11.31 AI 助手依赖缺失修复）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>

@@ -61,6 +61,41 @@ pip_install_fb() {
     return 1
 }
 
+# V10.11.32: requirements.txt 包名 → import 模块名映射（供依赖全量校验）
+# 规则：去版本约束（== >= <= != ~= ===）与 [extras] 后缀，连字符/点转下划线，统一小写
+# （Flask-Login → flask_login、Flask-SQLAlchemy → flask_sqlalchemy、psycopg[binary] → psycopg）
+# 特例：wecom-aibot-python-sdk 运行期走仓库内 aibot/ 副本（webhook_utils._import_aibot），
+#       不依赖 site-packages 安装，跳过探测避免误报缺失
+# 特例：psycopg2-binary 是编译轮发行包，import 模块名仍为 psycopg2（非下划线形式）
+_req_module() {
+    case "$1" in
+        wecom-aibot-python-sdk) return 2 ;;   # 特例：跳过
+        psycopg2-binary) printf '%s' "psycopg2"; return 0 ;;
+    esac
+    printf '%s' "$1" | sed -e 's/\[.*//' -e 's/[-.]/_/g' | tr '[:upper:]' '[:lower:]'
+    return 0
+}
+
+# V10.11.32: 按 requirements.txt 全量校验依赖，返回缺失包列表（含前导空格；空=无缺失）
+# 依赖：$APP_DIR/requirements.txt 存在；$VENV_DIR/bin/python3 可用
+_check_req_missing() {
+    local _line _pkg _mod _miss=""
+    while IFS= read -r _line; do
+        # 去行尾注释（# 前需空白）后去除首尾空白；空行/纯注释跳过
+        _line=$(printf '%s' "$_line" | sed -e 's/[[:space:]]*#.*$//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        [ -n "$_line" ] || continue
+        # 取包名：剥除版本约束与 [extras]
+        _pkg=$(printf '%s' "$_line" | sed -E 's/(==|>=|<=|!=|>|<|~=|===).*$//')
+        [ -n "$_pkg" ] || continue
+        _mod=$(_req_module "$_pkg") || continue   # 特例返回 2 时跳过
+        if ! "$VENV_DIR/bin/python3" -c "import ${_mod}" >/dev/null 2>&1; then
+            _miss="${_miss} ${_pkg}"
+        fi
+    done < "$APP_DIR/requirements.txt"
+    printf '%s' "$_miss"
+    return 0
+}
+
 # V10.10.21: venv 就绪 + 依赖检查/安装（自 start_service 抽取，幂等，可独立维护）
 ensure_python_env() {
     # 自动创建虚拟环境及安装依赖库
@@ -72,24 +107,45 @@ ensure_python_env() {
         }
     fi
 
-    # 检查核心依赖库是否存在，若缺失则强制安装（V10.10.18：镜像源自动兜底 清华源→阿里云→官方源）
-    # V10.10.22: 增加 pyzipper 检查
-    # V10.11.29: 增加 gunicorn 生产级 WSGI 容器依赖检查（老部署自动补全，落实 PF-01/OP-01）
-    if ! "$VENV_DIR/bin/python3" -c "import flask, flask_sqlalchemy, flask_wtf, flask_login, pyzipper, gunicorn" >/dev/null 2>&1; then
-        echo_e "${GREEN}正在检查/补全项目依赖库...${NC}"
-        pip_install_fb "install --upgrade pip" || true
-        if [ -f "$APP_DIR/requirements.txt" ]; then
-            pip_install_fb "install" "$APP_DIR/requirements.txt" || {
-                echo_e "${RED}错误: 依赖库安装失败（已依次尝试清华源/阿里源/官方源），请检查网络或 requirements.txt${NC}"
-                return 1
-            }
-        else
-            pip_install_fb "install flask flask-sqlalchemy flask-wtf flask-login" || {
-                echo_e "${RED}错误: 依赖库安装失败（已依次尝试清华源/阿里云/官方源）${NC}"
-                return 1
-            }
-        fi
-        echo_e "${GREEN}✅ 依赖库检查/安装完成!${NC}"
+    # V10.11.32: 逃生阀——无外网/只读环境跳过依赖检查直接启动（请确保依赖已手工安装）
+    if [ "${SKIP_REQ_CHECK:-0}" = "1" ]; then
+        echo_e "${YELLOW}⚠️ 已设置 SKIP_REQ_CHECK=1，跳过依赖检查（请确保 requirements.txt 依赖已手工安装）${NC}"
+        return 0
     fi
+
+    # V10.11.32: 依赖检查由「历史 6 包手工清单」升级为「按 requirements.txt 全量解析校验」——
+    # 手工清单与 requirements 存在漂移（V10.11.31 httpx 缺依赖即因清单未含 httpx 漏检），
+    # 全量校验后 requirements 新增任何包都会在重启时自动发现并补装
+    local _miss=""
+    if [ -f "$APP_DIR/requirements.txt" ]; then
+        _miss=$(_check_req_missing)
+    else
+        # 无 requirements.txt 时退回基础包探测（历史行为）
+        if ! "$VENV_DIR/bin/python3" -c "import flask, flask_sqlalchemy, flask_wtf, flask_login, pyzipper, gunicorn" >/dev/null 2>&1; then
+            _miss=" flask"
+        fi
+    fi
+
+    if [ -z "$_miss" ]; then
+        echo_e "${GREEN}✅ 依赖检查通过（按 requirements.txt 全量校验）${NC}"
+        return 0
+    fi
+
+    # 存在缺失 → 自动安装（V10.10.18：镜像源自动兜底 清华源→阿里云→官方源）
+    echo_e "${YELLOW}检测到 ${_miss} 依赖缺失，正在自动安装...${NC}"
+    pip_install_fb "install --upgrade pip" || true
+    if [ -f "$APP_DIR/requirements.txt" ]; then
+        pip_install_fb "install" "$APP_DIR/requirements.txt" || {
+            echo_e "${RED}错误: 依赖库安装失败（已依次尝试清华源/阿里源/官方源），请检查网络或 requirements.txt${NC}"
+            echo_e "${YELLOW}提示: 无外网环境可设置 SKIP_REQ_CHECK=1 跳过检查后手工安装依赖${NC}"
+            return 1
+        }
+    else
+        pip_install_fb "install flask flask-sqlalchemy flask-wtf flask-login" || {
+            echo_e "${RED}错误: 依赖库安装失败（已依次尝试清华源/阿里云/官方源）${NC}"
+            return 1
+        }
+    fi
+    echo_e "${GREEN}✅ 依赖库安装完成!${NC}"
     return 0
 }

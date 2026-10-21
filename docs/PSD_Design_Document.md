@@ -2105,3 +2105,15 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
 - **验证**：传统/Docker 两版 `py_compile` 通过；两版 `ai_service.py`/`requirements.txt` 仓库态哈希一致；Git Bash/PowerShell 沙盒模拟缺 httpx 双场景——场景1（openai 可导入、运行期 import httpx 失败，用户实测现象）：`test_ai_config` 返回 message「服务器 Python 环境缺少 AI 运行依赖（如 httpx），请执行 pip install -r requirements.txt 安装后重试」+ detail 含 httpx 安装命令（对照修复前「未知错误」）；场景2（httpx 缺失连锁 openai 导入失败）：返回「OpenAI SDK 未安装或依赖缺失，无法测试」+ detail 含具体导入错误。本地服务重启回归通过。
 - **连带影响**：`requirements.txt`（+2 行）、`services/ai_service.py`（约 30 行注释与分支加固）、`app.py`（health 版本号）；Docker 版同步（ADR 见其 PSD）；APK 版不涉及（AI 助手为 Web 端功能）。
 - **服务器升级指引**：`git pull && pip install -r requirements.txt && ./run.sh restart`（httpx 即随装）；若直连不可达网关，测试按钮会回落系统代理，成功但较慢属预期。
+
+### 11.24 ADR-62：依赖检查升级为 requirements 全量校验 + 缺失自动补装（V10.11.32 落地）
+- **背景与根因**（用户正式环境实测：按 V10.11.31 指引 `git pull` 后直接 `./run.sh restart`，AI 测试按钮仍报 httpx 缺失）：
+  1. **手工白名单与 requirements 漂移**：`bin/python_env.sh` 的 `ensure_python_env()` 依赖检查长期使用**手工 6 包清单**（`import flask, flask_sqlalchemy, flask_wtf, flask_login, pyzipper, gunicorn`）——requirements.txt 新增任何包（如 V10.11.31 的 httpx）若不手动同步清单，探测永不触发，**「requirements 有、清单没、venv 缺」的死循环**：安装不执行、缺陷不暴露；
+  2. **失败静默**：依赖检查通过即跳过安装，无任何日志提示「已跳过 N 包未校验」，运维无法感知清单漂移。
+- **决策方案**（仅传统版 `bin/python_env.sh`；Docker 版无此脚本，依赖由镜像构建保证）：
+  1. **`_req_module()` 包名→模块名映射**：去版本约束（`==/>=/<=/!=/</>/~=/===`）与 `[extras]` 后缀 → 连字符/点转下划线 → 统一小写（`Flask-Login→flask_login`、`psycopg[binary]→psycopg`）；两个特例——`wecom-aibot-python-sdk` 走仓库内 `aibot/` 副本（webhook_utils._import_aibot 已确认）跳过探测防误报；`psycopg2-binary` 映射 `psycopg2`（二进制轮发行，模块名非下划线形式）；
+  2. **`_check_req_missing()`**：逐行解析 requirements.txt（跳过空行/`#` 注释/行内注释），对每个模块用 `$VENV_DIR/bin/python3 -c "import <mod>"` 探测，聚合返回缺失包列表；
+  3. **`ensure_python_env()` 改造**：requirements 存在时以 `_check_req_missing` 取代 6 包白名单；缺失任一包即打印「检测到 X 依赖缺失，正在自动安装...」→ `pip_install_fb`（清华→阿里→官方三源兜底）`-r requirements.txt` 全量安装；安装失败保持「阻止启动 + 可读错误」语义并提示逃生阀；新增 `SKIP_REQ_CHECK=1` 逃生（无外网/只读环境跳过检查）；requirements 缺失时退回历史 6 包探测。
+- **验证**：① `sh -n` 通过；② 沙盒三分支——真实 requirements 全量探测仅识别出实际缺失的 `psycopg[binary]`（本地 SQLite 模式未装，httpx 等 19 包全部识别已装）→ 缺失自动安装闭环（真实从清华源下载 psycopg 3.3.6 + psycopg-binary 安装，二次校验「✅ 依赖检查通过（按 requirements.txt 全量校验）」）；`SKIP_REQ_CHECK=1` 逃生提示；③ 包名→模块名映射抽查 19 项全对（含 Flask-Login/Flask-SQLAlchemy/psycopg2-binary/psycopg[binary] 等易错项）；伪造缺失包（definitely-not-exist-pkg-xyz）正确识别。
+- **连带影响**：仅 `bin/python_env.sh`（+45 行）；Python/模板/前端零改动；Docker 版无 `python_env.sh` 不涉及（镜像构建期 pip 全量安装）；APK 版不涉及。
+- **服务器升级指引**：`git pull && ./run.sh restart`——首次重启自动检测 httpx 缺失并安装；此后任何依赖缺口都会在启停时自动补齐，无需手工 pip。

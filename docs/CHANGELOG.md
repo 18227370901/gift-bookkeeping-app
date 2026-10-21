@@ -9,6 +9,11 @@
 
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🔧 **V10.11.32 依赖检查升级：run.sh 重启自动按 requirements.txt 全量校验并补装缺失包（根治「手工清单漏检」）**：
+>   ① **根因**：`bin/python_env.sh` 的 `ensure_python_env()` 依赖检查长期使用**手工 6 包白名单**（flask/flask_sqlalchemy/flask_wtf/flask_login/pyzipper/gunicorn）——V10.11.31 在 `requirements.txt` 新增 `httpx` 后白名单未同步，服务器 `./run.sh restart` 时 6 包探测全过 → **误判「依赖齐全」跳过安装** → httpx 持续缺失，AI 助手测试按钮仍报依赖缺失错误（用户正式环境实测）；
+>   ② **修复**：依赖检查升级为**按 requirements.txt 全量解析校验**——新增 `_req_module()`（包名→import 模块名映射：去版本约束/`[extras]`、连字符与点转下划线、统一小写，特例 `wecom-aibot-python-sdk` 走仓库内 `aibot/` 副本跳过探测、`psycopg2-binary` 映射 `psycopg2`）与 `_check_req_missing()`（逐行解析跳过注释/空行，对每个模块 import 探测聚合缺失列表）；`ensure_python_env()` 缺失任一包即自动走 `pip_install_fb`（清华→阿里→官方三镜像兜底）全量安装，安装失败按原语义阻止启动并提示；新增逃生阀 `SKIP_REQ_CHECK=1` 跳过检查（无外网/只读环境）；
+>   ③ **验证**：`sh -n` 通过；沙盒三分支全过——真实 requirements 全量探测仅正确报出实际缺失的 `psycopg[binary]`（httpx 等 20 包全部识别已装）／缺失自动安装闭环（实际从清华源下载 psycopg 3.3.6 安装成功后二次校验「✅ 依赖检查通过」）／`SKIP_REQ_CHECK=1` 逃生提示；包名→模块名映射抽查 19 项全对（Flask-Login→flask_login、psycopg[binary]→psycopg、psycopg2-binary→psycopg2 等）；伪造缺失包正确识别；
+>   ④ **服务器升级**：`git pull && ./run.sh restart`——首次重启将自动检测到 httpx 缺失并从镜像源安装，**此后任何依赖缺口都会在每次启动时自动发现并补齐**。
 > - 🐛 **V10.11.31 修复 AI 助手正式环境依赖缺失（测试按钮报「配置不可用 未知错误  No module named 'httpx'」，获模型列表却正常）**：
 >   ① **根因**：同一页面两条网络通道依赖不一——「获取模型列表」走 `requests`（显式依赖，必有）正常；「测试按钮」走 OpenAI SDK（`_chat_with_fallback` 内 `import httpx`），正式环境 venv **装了 openai 但缺传递依赖 httpx**（requirements 未显式声明，装包不全时即缺）→ ImportError 直冒；且 `test_ai_config` 异常归类无依赖缺失分支，落入兜底显示「未知错误」无指引。**影响面含 AI 对话与图片 OCR（同函数 3 处调用）**——正式环境 AI 整链路实际不可用；
 >   ② **A1 治本**：`requirements.txt` 显式声明 `httpx>=0.27.0`（openai SDK 传递依赖，对话/测试/OCR 必需），部署不再依赖传递解析；
