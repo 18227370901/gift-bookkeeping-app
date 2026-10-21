@@ -1186,7 +1186,7 @@ def health_check():
     return jsonify({
         'status': 'ok',
         'app': 'gift_bookkeeping_app',
-        'version': 'V10.11.30'
+        'version': 'V10.11.31'
     }), 200
 
 @app.route('/')

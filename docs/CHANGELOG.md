@@ -9,6 +9,13 @@
 
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🐛 **V10.11.31 修复 AI 助手正式环境依赖缺失（测试按钮报「配置不可用 未知错误  No module named 'httpx'」，获模型列表却正常）**：
+>   ① **根因**：同一页面两条网络通道依赖不一——「获取模型列表」走 `requests`（显式依赖，必有）正常；「测试按钮」走 OpenAI SDK（`_chat_with_fallback` 内 `import httpx`），正式环境 venv **装了 openai 但缺传递依赖 httpx**（requirements 未显式声明，装包不全时即缺）→ ImportError 直冒；且 `test_ai_config` 异常归类无依赖缺失分支，落入兜底显示「未知错误」无指引。**影响面含 AI 对话与图片 OCR（同函数 3 处调用）**——正式环境 AI 整链路实际不可用；
+>   ② **A1 治本**：`requirements.txt` 显式声明 `httpx>=0.27.0`（openai SDK 传递依赖，对话/测试/OCR 必需），部署不再依赖传递解析；
+>   ③ **A2 错误指引治理**（`ai_service.py`）：`_ensure_openai` 记录 `_OPENAI_IMPORT_ERROR` 具体缺失模块名（不再误导「pip install openai」方向）；「SDK 未安装」分支文案升级并附安装指引；`_chat_with_fallback` 前置检测 httpx 缺失抛中文 `RuntimeError`；异常归类置顶新增依赖缺失分支——前端显示「服务器 Python 环境缺少 AI 运行依赖（如 httpx），请执行 pip install -r requirements.txt 安装后重试」；
+>   ④ **A3 测试超时优化**：测试请求 15s→10s（双路径最坏约 30s→20s；对话 30s/OCR 120s 不变）——测试环境「响应较长」为双路径设计代价（直连不通回落代理），属正常现象；
+>   ⑤ **验证**：两版 py_compile 通过、共享文件哈希一致；沙盒模拟缺 httpx 双场景均返回可操作指引（对照修复前「未知错误」）；本地服务重启回归通过。
+>   **服务器升级指引**：`git pull && pip install -r requirements.txt && ./run.sh restart`；测试按钮若直连不可达会回落代理（成功但较慢属预期）。
 > - ⚡ **V10.11.30 传统版高并发性能治理与生产级 WSGI 容器升级（解绑 GIL 消除 CPU/内存飙升）**：
 >   ① **根因诊断**：用户使用传统版时后台检测进程/服务进程 CPU 与内存瞬间飙升并导致可用性能降低，经系统级审查排查出四重叠加根因——1) `bin/service.sh` 运行 `python3 app.py` 走 Werkzeug 单进程开发服务器（PF-01/OP-01 技术债），后台检测守护线程（告警巡检、纪念日检测、定时备份调度）与 Web 请求在同一进程内争抢 GIL；2) 首页 `index()` 中直接执行 `all_filtered_records = query.all()`（PF-03 核心技术债）在 Python 内存中全量实例化成千上万个 ORM 对象求和，引发严重内存暴涨与频繁 GC；3) 首页背景横幅并发请求 `/api/home/weather` 中对全国近万条行政区划索引执行宽松遍历字符串包含与排序，CPU 密集且匹配结果未写回内存缓存；4) 后台巡检任务循环缺乏 Session 及时释放；
 >   ② **Gunicorn 生产级 WSGI 容器升级（落地 PF-01/OP-01）**：`bin/service.sh` 启动命令从 `python3 app.py` 升级为 `gunicorn -w 2 -k gthread --threads 4 --max-requests 2000 --max-requests-jitter 200 -b 127.0.0.1:$PORT app:app --timeout 60`（环境缺少 gunicorn 时平滑回退 python3；结合 `exec` 确保 PID 对应真实主服务进程），`bin/python_env.sh` 同步增加 gunicorn 依赖检查与自动安装兜底；

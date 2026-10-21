@@ -14,18 +14,22 @@ from datetime import datetime
 # 移至首次实际调用时才加载，进程启动不再预载
 OpenAI = None
 _HAS_OPENAI = None  # None=未检测, True/False=已检测
+_OPENAI_IMPORT_ERROR = None  # V10.11.30：导入失败的具体原因（如 No module named 'httpx'）
 
 def _ensure_openai():
     """首次调用时延迟导入 OpenAI SDK，后续从 sys.modules 缓存获取"""
-    global OpenAI, _HAS_OPENAI
+    global OpenAI, _HAS_OPENAI, _OPENAI_IMPORT_ERROR
     if _HAS_OPENAI is not None:
         return OpenAI
     try:
         from openai import OpenAI as _OpenAI
         OpenAI = _OpenAI
         _HAS_OPENAI = True
-    except ImportError:
+    except ImportError as e:
+        # V10.11.30：记录具体缺失的模块名（常见：openai 已装但传递依赖 httpx 缺失——
+        # 正式环境实测报「No module named 'httpx'」，旧提示「pip install openai」误导安装方向）
         _HAS_OPENAI = False
+        _OPENAI_IMPORT_ERROR = str(e)
     return OpenAI
 
 from services.models import db, User, ChatSession, ChatMessage, AIQueryLog
@@ -64,7 +68,15 @@ def _chat_with_fallback(client_kwargs, create_kwargs):
     鉴权/限流/模型不存在等业务错误不重试（避免无意义双倍消耗额度）。
     client_kwargs: {'api_key':..., 'base_url':...}；create_kwargs: model/messages/max_tokens/timeout 等
     """
-    import httpx
+    # V10.11.30：前置显式检测 httpx 可用性——正式环境曾出现 openai 可导入但传递依赖
+    # httpx 缺失（ImportError 直冒被上层归为「未知错误」无指引），改为抛出可操作的中文提示
+    try:
+        import httpx
+    except ImportError:
+        raise RuntimeError(
+            '服务器缺少 httpx 依赖（OpenAI SDK 运行必需），请执行: '
+            'pip install -r requirements.txt（或 pip install httpx）安装后重试'
+        )
     import openai as _openai_mod
     # 路径①：禁代理直连
     client = OpenAI(http_client=httpx.Client(trust_env=False), **client_kwargs)
@@ -226,6 +238,9 @@ def _call_openai(prompt, api_key, base_url, model):
     """
     _ensure_openai()
     if not _HAS_OPENAI:
+        # V10.11.30：附具体导入失败原因（如 httpx 缺失），便于日志定位
+        if _OPENAI_IMPORT_ERROR:
+            return False, '', 'OpenAI SDK 未安装或依赖缺失: {0}'.format(_OPENAI_IMPORT_ERROR)
         return False, '', 'OpenAI SDK 未安装'
 
     try:
@@ -268,8 +283,12 @@ def test_ai_config(api_key, base_url, model):
 
     _ensure_openai()
     if not _HAS_OPENAI:
-        return {'success': False, 'message': 'OpenAI SDK 未安装，无法测试', 'latency_ms': 0,
-                'detail': '请在服务器上执行 pip install openai 安装 SDK'}
+        # V10.11.30：附具体导入失败原因（如 httpx 缺失），安装指引改为完整 requirements
+        detail = '请在服务器上执行 pip install -r requirements.txt 安装完整依赖'
+        if _OPENAI_IMPORT_ERROR:
+            detail += '（导入失败: {0}）'.format(_OPENAI_IMPORT_ERROR)
+        return {'success': False, 'message': 'OpenAI SDK 未安装或依赖缺失，无法测试', 'latency_ms': 0,
+                'detail': detail}
 
     start_time = time.time()
     try:
@@ -288,7 +307,7 @@ def test_ai_config(api_key, base_url, model):
             ],
             'max_tokens': 20,
             'temperature': 0,
-            'timeout': 15  # 测试用较短超时，快速反馈
+            'timeout': 10  # V10.11.30：测试超时 15→10s（双路径最坏等待约 30s→20s，加速反馈；对话/OCR 超时不变）
         })
         content = resp.choices[0].message.content.strip()
         latency_ms = int((time.time() - start_time) * 1000)
@@ -313,7 +332,11 @@ def test_ai_config(api_key, base_url, model):
 
         # 常见错误自动归类提示
         err_lower = err_str.lower()
-        if 'invalid url' in err_lower or ('invalid_request_error' in err_lower and '404' in err_lower):
+        # V10.11.30：环境依赖缺失明确指引（httpx 等 OpenAI SDK 传递依赖未装的部署环境中，
+        # 原先 ImportError 直冒落入下方兜底显示「未知错误」，无指引性）
+        if 'no module named' in err_lower or '缺少 httpx 依赖' in err_str:
+            reason = '服务器 Python 环境缺少 AI 运行依赖（如 httpx），请执行 pip install -r requirements.txt 安装后重试'
+        elif 'invalid url' in err_lower or ('invalid_request_error' in err_lower and '404' in err_lower):
             # V10.11.3：404 + Invalid URL 是端点路径拼接错误（Base URL 误填完整端点），
             # 而非模型名错误——SDK 自动追加 /chat/completions 拼出不存在的路径
             reason = 'Base URL 疑似误填了完整接口地址（SDK 会自动追加 /chat/completions），请改填根地址（如 https://apihub.agnes-ai.com/v1）'

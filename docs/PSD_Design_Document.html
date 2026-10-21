@@ -1629,13 +1629,27 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 11 部分补充十三：ADR-61 AI 助手依赖缺失修复（V10.11.31） ==================== -->
+<div class="section">
+<h1>第 11 部分补充十三：ADR-61 AI 助手依赖缺失（No module named 'httpx'）修复与错误指引治理（V10.11.31 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与根因</td><td>正式环境实测：AI 配置页「获取模型列表」正常，点击「测试」报「配置不可用 未知错误  No module named 'httpx'」；测试环境一切正常仅响应较长。三层根因：① <strong>同一页面两条网络通道依赖不一</strong>——模型列表走 <code>requests</code>（显式依赖必有）正常；测试按钮走 OpenAI SDK（<code>_chat_with_fallback</code> 内 <code>import httpx</code>），正式环境 venv 装了 openai 但缺传递依赖 httpx（requirements 未显式声明）→ ImportError 直冒；② <strong>异常归类盲区</strong>——<code>test_ai_config</code> 无依赖缺失分支，落入兜底「未知错误」无指引；③ <strong>影响面不止测试按钮</strong>——<code>_chat_with_fallback</code> 共 3 处调用（AI 对话/测试/图片 OCR），正式环境 AI 整链路实际不可用；SDK 检测失败场景下旧文案「pip install openai」误导排查方向。</td></tr>
+<tr><td>决策方案</td><td>① <strong>A1 治本</strong>：<code>requirements.txt</code> 显式声明 <code>httpx>=0.27.0</code>（openai SDK 传递依赖，对话/测试/OCR 必需）；② <strong>A2 错误指引治理</strong>（<code>ai_service.py</code>）——<code>_ensure_openai</code> 新增 <code>_OPENAI_IMPORT_ERROR</code> 记录具体缺失模块名，「SDK 未安装」分支文案升级并附 <code>pip install -r requirements.txt</code> 指引；<code>_chat_with_fallback</code> 前置检测 httpx 缺失抛中文 RuntimeError；<code>test_ai_config</code> 异常归类置顶新增依赖缺失分支（命中 <code>no module named</code>/<code>缺少 httpx 依赖</code>）；③ <strong>A3 测试超时优化</strong>——测试请求 15s→10s（双路径最坏约 30s→20s；对话 30s/OCR 120s 不变）。</td></tr>
+<tr><td>测试环境响应长说明</td><td>非缺陷：V10.11.8 双路径网络策略（禁代理直连 15s 超时优先 → 失败回落系统代理再试）在直连不可达的网关上最坏累计约 30s，属设计代价；A3 后测试按钮最坏约 20s。</td></tr>
+<tr><td>验证</td><td>两版 py_compile 通过、<code>ai_service.py</code>/<code>requirements.txt</code> 仓库态哈希一致；沙盒模拟缺 httpx 双场景——场景1（openai 可导入、运行期 import httpx 失败，即用户实测现象）返回 message「服务器 Python 环境缺少 AI 运行依赖（如 httpx），请执行 pip install -r requirements.txt 安装后重试」+ detail 含安装命令（对照修复前「未知错误」）；场景2（httpx 连锁 openai 导入失败）返回「OpenAI SDK 未安装或依赖缺失，无法测试」+ detail 含具体导入错误；本地服务重启回归通过。</td></tr>
+<tr><td>服务器升级指引</td><td><code>git pull && pip install -r requirements.txt && ./run.sh restart</code>（httpx 随装）；测试按钮若直连不可达将回落系统代理，成功但较慢属预期。</td></tr>
+<tr><td>连带影响</td><td><code>requirements.txt</code>（+2 行）、<code>services/ai_service.py</code>（约 30 行注释与分支加固，零业务逻辑变化）、<code>app.py</code>（health 版本号）；Docker 版同步（其 PSD 对应 ADR）；APK 版不涉及（AI 助手为 Web 端功能）。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.30</td></tr>
-<tr><td>生成日期</td><td>2026-10-20（V10.11.30 传统版高并发性能治理与生产级 WSGI 容器升级；承接 V10.11.29 Nginx 配置修复）</td></tr>
+<tr><td>文档版本</td><td>V10.11.31</td></tr>
+<tr><td>生成日期</td><td>2026-10-20（V10.11.31 AI 助手依赖缺失修复与错误指引治理；承接 V10.11.30 高并发性能治理与 WSGI 容器升级）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>

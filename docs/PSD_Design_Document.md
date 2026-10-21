@@ -2086,4 +2086,22 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   2. 本地真实数据库（包含 1774 条数据场景）标量聚合计算（总笔数、总额、最高额、均值）实测微秒级响应，数据统计结果与原 Python 全量循环完全一致；
   3. 传统版后台重启成功，`/health` 端点返回 HTTP 200，确认版本号升级至 `V10.11.30`。
 - **连带影响**：
-  涉及 `app.py`、`bin/service.sh`、`bin/python_env.sh`、`routes/routes_weather.py`、`services/weather_service.py`、`services/alert_service.py`、`routes/routes_ext.py`，保持 100% 向后兼容与平滑降级能力，无数据表变更与客户端破坏。
+   涉及 `app.py`、`bin/service.sh`、`bin/python_env.sh`、`routes/routes_weather.py`、`services/weather_service.py`、`services/alert_service.py`、`routes/routes_ext.py`，保持 100% 向后兼容与平滑降级能力，无数据表变更与客户端破坏。
+
+### 11.23 ADR-61：AI 助手依赖缺失（No module named 'httpx'）修复与错误指引治理（V10.11.31 落地）
+- **背景与根因**（正式环境实测：AI 助手配置页「获取模型列表」正常，但点击「测试」按钮报「配置不可用 未知错误  No module named 'httpx'」；测试环境则一切正常仅响应较长）：
+  1. **同一功能两条网络通道，依赖要求不一**：`fetch_model_list`（获取模型列表）走 `requests`（`_ai_http_get`，requirements 显式依赖，任何环境必有）→ 正常；`test_ai_config`（测试按钮）走 OpenAI SDK（`_chat_with_fallback` 内 `import httpx`）→ 正式环境 venv **装了 openai 但缺传递依赖 httpx**（requirements 未显式声明，部署装包不全时即缺），`import httpx` 抛 `ModuleNotFoundError`；
+  2. **错误归类盲区**：`test_ai_config` 异常归类无依赖缺失分支，`No module named 'httpx'` 落入兜底 `reason='未知错误'`，前端仅显示「配置不可用 未知错误」+ detail 原文，无任何安装指引；
+  3. **影响面不止测试按钮**：`_chat_with_fallback` 共 3 处调用（AI 对话 `ai_chat` / 配置测试 / 图片 OCR），正式环境 AI 对话与 OCR 同样报该错——AI 助手整链路在该环境不可用；
+  4. **SDK 检测误导**：openai 导入失败场景下（httpx 缺失连锁导致），`_ensure_openai` 旧文案「pip install openai 安装 SDK」误导排查方向（openai 已装，缺的是 httpx）；
+  5. **测试环境响应长（非缺陷）**：V10.11.8 双路径网络策略（禁代理直连 15s 超时 → 失败回落系统代理再试）在直连不可达的网关上最坏累计约 30s，属设计代价。
+- **决策方案**：
+  1. **A1 治本——依赖显式声明**：`requirements.txt` 在 `openai>=1.0.0` 旁新增 `httpx>=0.27.0` 并注释说明（openai SDK 传递依赖、AI 对话/测试/OCR 必需），部署环境装包不再依赖传递依赖解析；
+  2. **A2 治标——错误指引治理**（`services/ai_service.py`）：
+     - `_ensure_openai` 新增 `_OPENAI_IMPORT_ERROR` 全局记录导入失败的具体模块名，`test_ai_config`/`_call_openai` 的「SDK 未安装」分支文案升级为「未安装或依赖缺失」并附具体导入错误与 `pip install -r requirements.txt` 指引；
+     - `_chat_with_fallback` 前置显式检测 `import httpx`，缺失时抛中文 `RuntimeError`（含安装命令），不再裸抛 `ImportError`；
+     - `test_ai_config` 异常归类置顶新增依赖缺失分支（`'no module named'` / `'缺少 httpx 依赖'` 命中），返回「服务器 Python 环境缺少 AI 运行依赖（如 httpx），请执行 pip install -r requirements.txt 安装后重试」；
+  3. **A3 测试超时优化**：测试请求超时 15s→10s（双路径最坏约 30s→20s，加速反馈；对话 30s/OCR 120s 超时不变）。
+- **验证**：传统/Docker 两版 `py_compile` 通过；两版 `ai_service.py`/`requirements.txt` 仓库态哈希一致；Git Bash/PowerShell 沙盒模拟缺 httpx 双场景——场景1（openai 可导入、运行期 import httpx 失败，用户实测现象）：`test_ai_config` 返回 message「服务器 Python 环境缺少 AI 运行依赖（如 httpx），请执行 pip install -r requirements.txt 安装后重试」+ detail 含 httpx 安装命令（对照修复前「未知错误」）；场景2（httpx 缺失连锁 openai 导入失败）：返回「OpenAI SDK 未安装或依赖缺失，无法测试」+ detail 含具体导入错误。本地服务重启回归通过。
+- **连带影响**：`requirements.txt`（+2 行）、`services/ai_service.py`（约 30 行注释与分支加固）、`app.py`（health 版本号）；Docker 版同步（ADR 见其 PSD）；APK 版不涉及（AI 助手为 Web 端功能）。
+- **服务器升级指引**：`git pull && pip install -r requirements.txt && ./run.sh restart`（httpx 即随装）；若直连不可达网关，测试按钮会回落系统代理，成功但较慢属预期。
