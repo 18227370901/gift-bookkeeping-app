@@ -13,8 +13,14 @@ echo_e() {
     printf '%b\n' "$*"
 }
 
-# ===== 判断是否覆盖已存在文件：交互环境弹 y/n 询问；非交互环境（cron/CI）不能卡死在 read，默认保留旧文件 =====
-# 入参 $1: 已存在文件路径（提示语用）；$2: 对应策略环境变量当前值（1=强制覆盖 0=强制保留 空=询问）；$3: 策略变量名（非交互提示文案用）
+# V10.11.33: 无人值守判定统一入口——显式声明 UNATTENDED=1（命令行 --unattended 或环境变量）或 stdin 非 TTY（cron/CI）均视为无人值守
+# 无人值守语义：所有业务交互（证书/Nginx 覆盖询问、数据库菜单、端口冲突处理）一律使用默认参数，不阻塞等待输入
+is_unattended() {
+    [ "${UNATTENDED:-}" = "1" ] || [ ! -t 0 ]
+}
+
+# ===== 判断是否覆盖已存在文件：交互环境弹 y/n 询问；无人值守/非交互环境（cron/CI/定时任务）不能卡死在 read，默认保留旧文件 =====
+# 入参 $1: 已存在文件路径（提示语用）；$2: 对应策略环境变量当前值（1=强制覆盖 0=强制保留 空=询问）；$3: 策略变量名（无人值守提示文案用）
 # 返回值: 0=允许覆盖更新 1=保留旧文件不覆盖
 should_overwrite() {
     local target_file="$1"
@@ -26,8 +32,8 @@ should_overwrite() {
     if [ "$force_value" = "0" ]; then
         return 1
     fi
-    if [ ! -t 0 ]; then
-        echo_e "${YELLOW}检测到已存在 $target_file，非交互环境自动保留旧文件（如需强制更新请设置 $hint_var=1）${NC}"
+    if is_unattended; then
+        echo_e "${YELLOW}检测到已存在 $target_file，无人值守/非交互环境自动保留旧文件（如需强制更新请设置 $hint_var=1）${NC}"
         return 1
     fi
     printf '检测到已存在 %s，是否覆盖更新? (y/n) [默认 n]: ' "$target_file" >&2

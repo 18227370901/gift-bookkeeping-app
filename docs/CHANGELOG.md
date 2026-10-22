@@ -1,6 +1,6 @@
 # 人情礼金记账系统 版本发布与全量变更日志 (Changelog)
 
-> 本文档收录了系统自诞生起从 V2 直至最新 V10.11.25 的全量版本演进、技术重构与历史缺陷修复档案。  
+> 本文档收录了系统自诞生起从 V2 直至最新 V10.11.33 的全量版本演进、技术重构与历史缺陷修复档案。    
 > 快速上手与使用指引请参见项目主页 [README.md](../README.md)。
 
 ---
@@ -9,6 +9,13 @@
 
 
 > 💡 **版本与架构升级公告（最新）**：
+> - 🔧 **V10.11.33 run.sh 双场景兼容：手动交互保留 + 定时任务无人值守（UNATTENDED=1 / --unattended）**：
+>   ① **需求**：run.sh 需兼容两种场景——手动执行时保留原有交互（证书是否替换、Nginx 配置是否替换的 y/n 询问、数据库三选一菜单）；定时任务（crontab）执行时直接使用默认参数免人工介入，且**数据库沿用用户此前手动选择并持久化的模式**（.temp/.db.env），不引入新的默认覆盖逻辑；
+>   ② **方案**：`bin/common.sh` 新增 `is_unattended()` 统一判定——**显式声明 `UNATTENDED=1`（环境变量或命令行 `--unattended`）或 stdin 非 TTY（cron/CI）即视为无人值守**（判定升级：不再单纯依赖 `[ -t 0 ]`，定时任务行为不依赖调度器是否分配 TTY）；`run.sh` 参数解析由仅 `$2` 扩展为 `$2/$3` 循环，`--unattended` 可与 `--reconfig/--reconfig-db` 任意顺序组合；
+>   ③ **无人值守默认参数表**：证书与 Nginx 配置已存在 → 自动保留不询问（`SSL_FORCE_UPDATE=1` / `NGINX_CONF_FORCE_UPDATE=1` 显式策略仍优先）；数据库 → `DB_MODE` 环境变量 > `.temp/.db.env` 已持久化配置 > 默认 SQLite；端口冲突 → 中止启动（绝不自动 kill 进程或停用他人 Nginx 配置，安全语义）；
+>   ④ **涉及**：`run.sh`（参数解析 +7 行）、`bin/common.sh`（+`is_unattended`、`should_overwrite` 判定升级）、`bin/config.sh`（`UNATTENDED` 定义）、`bin/db_select.sh`（菜单条件升级，④ 分支文案）、`bin/port_conflict.sh`（中止分支判定升级）、`bin/help.sh`（用法文档化）、`app.py`（版本号）；Docker 版同步（common.sh 两版一致 MD5 校验通过，其余模块同构变更）；
+>   ⑤ **验证**：两版 23 个 Shell 文件 `sh -n` 全过；Git Bash 沙盒 38 项断言全过——is_unattended 三态判定、should_overwrite 保留/强制覆盖优先级、`--unattended`/`--reconfig --unattended`/`--unattended --reconfig-db`/未知参数、数据库三分支（默认 SQLite / 沿用 .db.env / DB_MODE 直通）；
+>   ⑥ **服务器升级指引**：`git pull && ./run.sh restart`（手动交互不变）；定时任务示例——`30 3 * * * UNATTENDED=1 /opt/service/gift-bookkeeping-app/run.sh restart >> /var/log/gift_app_cron.log 2>&1`。
 > - 🔧 **V10.11.32 依赖检查升级：run.sh 重启自动按 requirements.txt 全量校验并补装缺失包（根治「手工清单漏检」）**：
 >   ① **根因**：`bin/python_env.sh` 的 `ensure_python_env()` 依赖检查长期使用**手工 6 包白名单**（flask/flask_sqlalchemy/flask_wtf/flask_login/pyzipper/gunicorn）——V10.11.31 在 `requirements.txt` 新增 `httpx` 后白名单未同步，服务器 `./run.sh restart` 时 6 包探测全过 → **误判「依赖齐全」跳过安装** → httpx 持续缺失，AI 助手测试按钮仍报依赖缺失错误（用户正式环境实测）；
 >   ② **修复**：依赖检查升级为**按 requirements.txt 全量解析校验**——新增 `_req_module()`（包名→import 模块名映射：去版本约束/`[extras]`、连字符与点转下划线、统一小写，特例 `wecom-aibot-python-sdk` 走仓库内 `aibot/` 副本跳过探测、`psycopg2-binary` 映射 `psycopg2`）与 `_check_req_missing()`（逐行解析跳过注释/空行，对每个模块 import 探测聚合缺失列表）；`ensure_python_env()` 缺失任一包即自动走 `pip_install_fb`（清华→阿里→官方三镜像兜底）全量安装，安装失败按原语义阻止启动并提示；新增逃生阀 `SKIP_REQ_CHECK=1` 跳过检查（无外网/只读环境）；

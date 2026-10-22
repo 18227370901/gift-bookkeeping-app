@@ -49,6 +49,14 @@ NGINX_CONF_DIR="${NGINX_CONF_DIR:-/opt/service/nginx/conf.d}"
 SSL_FORCE_UPDATE="${SSL_FORCE_UPDATE:-}"
 NGINX_CONF_FORCE_UPDATE="${NGINX_CONF_FORCE_UPDATE:-}"
 
+# ===== 无人值守模式（V10.11.33） =====
+# 1=无人值守：证书/Nginx 覆盖询问、数据库交互菜单、端口冲突处理一律使用默认参数（不阻塞等待输入）
+# 手动执行: ./run.sh restart            （TTY 下保留原有交互询问：证书是否替换/Nginx 配置是否替换/数据库三选一）
+# 定时任务: UNATTENDED=1 ./run.sh restart   或  ./run.sh restart --unattended  （直接使用默认参数）
+# 数据库默认参数: DB_MODE 环境变量 > .temp/.db.env 已持久化配置 > 默认 SQLite（沿用用户此前手动选择）
+# 显式策略环境变量（SSL_FORCE_UPDATE / NGINX_CONF_FORCE_UPDATE / DB_MODE 等）优先级始终高于无人值守默认值
+UNATTENDED="${UNATTENDED:-}"
+
 # ===== 环境变量定义（全局有效） =====
 export PORT="${PORT:-11443}"
 export NGINX_PORT="${NGINX_PORT:-443}"

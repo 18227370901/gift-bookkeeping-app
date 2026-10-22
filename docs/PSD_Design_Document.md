@@ -2117,3 +2117,17 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
 - **验证**：① `sh -n` 通过；② 沙盒三分支——真实 requirements 全量探测仅识别出实际缺失的 `psycopg[binary]`（本地 SQLite 模式未装，httpx 等 19 包全部识别已装）→ 缺失自动安装闭环（真实从清华源下载 psycopg 3.3.6 + psycopg-binary 安装，二次校验「✅ 依赖检查通过（按 requirements.txt 全量校验）」）；`SKIP_REQ_CHECK=1` 逃生提示；③ 包名→模块名映射抽查 19 项全对（含 Flask-Login/Flask-SQLAlchemy/psycopg2-binary/psycopg[binary] 等易错项）；伪造缺失包（definitely-not-exist-pkg-xyz）正确识别。
 - **连带影响**：仅 `bin/python_env.sh`（+45 行）；Python/模板/前端零改动；Docker 版无 `python_env.sh` 不涉及（镜像构建期 pip 全量安装）；APK 版不涉及。
 - **服务器升级指引**：`git pull && ./run.sh restart`——首次重启自动检测 httpx 缺失并安装；此后任何依赖缺口都会在启停时自动补齐，无需手工 pip。
+
+### 11.25 ADR-63：run.sh 双场景兼容——手动交互保留 + 定时任务无人值守（V10.11.33 落地）
+- **背景与需求**（用户明确提出）：`run.sh` 需兼容两种执行场景——① **手动执行**：保留现有正常交互（SSL 证书是否替换、Nginx 配置文件是否替换的 y/n 询问、数据库模式三选一菜单）；② **定时任务执行**（crontab）：直接使用默认参数免人工介入，且**数据库沿用用户此前手动选择并持久化的模式**（`.temp/.db.env`），不引入额外的默认覆盖逻辑。
+  1. **判定依赖隐式 TTY 状态**：原有全部交互点仅靠 `[ -t 0 ]`（stdin 是否为终端）区分交互/非交互——cron 默认非 TTY 所以"碰巧可用"，但行为不可预期（部分调度器/Jenkins/容器环境 stdin 状态不一），且无法在 TTY 终端内显式声明"本次按无人值守执行"；
+  2. **无文档化的定时任务标准写法**：`SSL_FORCE_UPDATE=1`/`NGINX_CONF_FORCE_UPDATE=1` 等虽有 cron 兼容注释，但缺少统一开关与使用说明。
+- **决策方案**：
+  1. **统一无人值守判定入口**（`bin/common.sh` 新增 `is_unattended()`）：`[ "${UNATTENDED:-}" = "1" ] || [ ! -t 0 ]`——**显式声明 `UNATTENDED=1`（命令行 `--unattended` 或环境变量）或 stdin 非 TTY（cron/CI）即视为无人值守**；行为不依赖调度器是否分配 TTY，且 TTY 下也可显式声明无人值守；
+  2. **run.sh 参数解析扩展**：`$2` 单一参数升级为 `$2/$3` 循环，新增 `--unattended`（等价 `UNATTENDED=1`），可与 `--reconfig`/`--reconfig-db` **任意顺序组合**（如 `./run.sh restart --reconfig --unattended`）；`DB_RESET=1`/`UNATTENDED=1` 环境变量形式仍兼容（cron/CI）；
+  3. **各交互点升级**：`should_overwrite`（证书/Nginx 覆盖询问）`[ ! -t 0 ]` → `is_unattended`；`select_db_mode` ③ 交互菜单条件 `[ -t 0 ]` → `! is_unattended`（④ 默认分支语义不变：`.db.env` 存在时 ② 分支已优先读取用户持久化选择，无配置才默认 SQLite）；`check_port_conflict` 中止分支判定升级（无人值守时端口冲突中止启动，**绝不自动 kill 进程或停用他人 Nginx 配置**——安全语义）；
+  4. **优先级设计**：显式策略环境变量（`SSL_FORCE_UPDATE=1/0`、`NGINX_CONF_FORCE_UPDATE=1/0`、`DB_MODE=sqlite/shared/independent`、`PORT` 等）**始终高于**无人值守默认值 → 定时任务需要强制更新证书/配置时仍可显式指定；
+  5. **文档化**：`bin/help.sh` 增加 `--unattended`/`UNATTENDED=1` 用法与 crontab 示例；`bin/config.sh` 定义 `UNATTENDED` 默认值并注释说明。
+- **验证**：① 传统/Docker 两版 23 个 Shell 文件（run.sh + bin/*.sh）`sh -n` 语法全过；② Git Bash 沙盒 38 项断言全过——is_unattended 三态判定（非 TTY/UNATTENDED=1/TTY 显式声明）；should_overwrite 保留旧文件与 `force=1` 强制覆盖优先级（UNATTENDED=1 下仍覆盖）；参数解析（`--unattended` 单独、`--reconfig --unattended`、`--unattended --reconfig-db` 任意顺序、未知参数报错、`--unattended` 不误触发 DB_RESET）；数据库三分支（无配置默认 SQLite 含无人值守提示 / 已有 .db.env 沿用用户此前选择 / DB_MODE 环境变量直通）；③ 两版 `bin/common.sh` 仓库态 MD5 一致（两版公共函数对齐原则）。
+- **连带影响**：传统版 7 文件（run.sh +7 行、common.sh +8 行、config.sh +7 行、db_select.sh 条件与文案、port_conflict.sh 判定与文案、help.sh +13 行、app.py 版本号）；Docker 版同构同步（其 run.sh 多 2 行差异源自 check_docker）；Python/模板/前端/数据库零改动；APK 版不涉及。
+- **服务器升级指引**：`git pull && ./run.sh restart`（手动交互行为不变）；定时任务示例——`30 3 * * * UNATTENDED=1 /opt/service/gift-bookkeeping-app/run.sh restart >> /var/log/gift_app_cron.log 2>&1`；需强制更新证书时：`UNATTENDED=1 SSL_FORCE_UPDATE=1 ./run.sh restart`。

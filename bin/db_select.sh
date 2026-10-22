@@ -110,8 +110,10 @@ select_db_mode() {
         return
     fi
 
-    # ③ 交互式终端：显示三选一菜单
-    if [ -t 0 ]; then
+    # ③ 交互式终端（且未声明无人值守）：显示三选一菜单
+    # V10.11.33: 判定由 [ -t 0 ] 升级为 ! is_unattended——定时任务显式声明 UNATTENDED=1 / --unattended
+    # 时即使 stdin 为终端也不弹菜单，直接走 ④ 默认参数分支，行为不依赖调度器是否分配 TTY
+    if ! is_unattended; then
         detect_pg_environment
         echo_e ""
         echo_e "${GREEN}🔍 检测服务器环境...${NC}"
@@ -176,8 +178,8 @@ select_db_mode() {
         esac
         save_db_env
     else
-        # ④ 非交互环境：默认 SQLite（cron/管道安全降级）
-        echo_e "${YELLOW}非交互环境，默认使用 SQLite。如需配置 PostgreSQL，请设置 DB_MODE 环境变量或交互式运行 ./run.sh start${NC}"
+        # ④ 无人值守/非交互环境：默认 SQLite（cron/管道安全降级；.db.env 已持久化的配置在 ② 分支已优先读取）
+        echo_e "${YELLOW}无人值守/非交互环境，默认使用 SQLite。如需配置 PostgreSQL，请设置 DB_MODE 环境变量或交互式运行 ./run.sh start${NC}"
         DB_MODE=sqlite
         DATABASE_URL=""
         export DATABASE_URL

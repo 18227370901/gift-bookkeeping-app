@@ -38,8 +38,10 @@ check_port_conflict() {
     echo_e "   占用进程 PID: $port_pid"
     echo_e "   进程信息: $proc_info"
 
-    if [ ! -t 0 ]; then
-        echo_e "${RED}非交互环境无法选择，服务启动中止。请更换端口后重试。${NC}"
+    # V10.11.33: 判定升级为 is_unattended——无人值守模式（UNATTENDED=1 / --unattended）下同样中止，
+    # 绝不自动 kill 占用进程或停用他人 Nginx 配置（安全语义：无人值守时端口冲突属必须人工介入的场景）
+    if is_unattended; then
+        echo_e "${RED}无人值守/非交互环境无法选择处理方式，服务启动中止。请更换端口后重试。${NC}"
         echo_e "   传统版: PORT=新端口 ./$0 start"
         echo_e "   Docker版: HOST_PORT=新端口 ./$0 start"
         return 1

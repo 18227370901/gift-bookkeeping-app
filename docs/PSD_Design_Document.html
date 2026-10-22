@@ -1656,13 +1656,26 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 11 部分补充十五：ADR-63 run.sh 双场景兼容（V10.11.33） ==================== -->
+<div class="section">
+<h1>第 11 部分补充十五：ADR-63 run.sh 双场景兼容——手动交互保留 + 定时任务无人值守（V10.11.33 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与需求</td><td>run.sh 需兼容两种场景——<strong>手动执行</strong>：保留现有正常交互（SSL 证书/Nginx 配置是否替换的 y/N 询问、数据库三选一菜单）；<strong>定时任务</strong>（crontab）：直接使用默认参数免人工介入，且<strong>直接沿用用户此前手动选择并持久化的数据库模式</strong>（.temp/.db.env）。缺陷：① 全部交互仅靠 <code>[ -t 0 ]</code> 隐式判定，cron 默认非 TTY 才"碰巧可用"，行为不可预期且无法在 TTY 内显式声明；② 无统一开关与定时任务标准写法文档。</td></tr>
+<tr><td>决策方案</td><td>① <code>bin/common.sh</code> 新增 <code>is_unattended()</code>：<code>[ "${UNATTENDED:-}" = "1" ] || [ ! -t 0 ]</code>——显式 <code>UNATTENDED=1</code>（命令行 <code>--unattended</code> 或环境变量）或 stdin 非 TTY 即无人值守；② <code>run.sh</code> 参数解析由 <code>$2</code> 升级为 <code>$2/$3</code> 循环，新增 <code>--unattended</code>，可与 <code>--reconfig</code>/<code>--reconfig-db</code> 任意顺序组合；③ 三个交互点判定统一升级：<code>should_overwrite</code>（证书/Nginx）、<code>select_db_mode</code> ③ 菜单条件 <code>! is_unattended</code>（② 分支已优先读取 .db.env 用户持久化选择）、<code>check_port_conflict</code> 无人值守中止（绝不自动 kill 进程/关闭他人配置，安全语义）；④ 优先级：显式策略环境变量（SSL_FORCE_UPDATE/NGINX_CONF_FORCE_UPDATE/DB_MODE/PORT）始终高于无人值守默认值。</td></tr>
+<tr><td>验证</td><td>① 两版 23 个 Shell 文件 <code>sh -n</code> 全过；② Git Bash 沙盒 38 项断言全过——is_unattended 三态判定、should_overwrite 保留/强制覆盖优先级、参数解析（<code>--unattended</code>/组合/未知参数报错）、select_db_mode 三分支（默认 SQLite/沿用 .db.env/DB_MODE 直通）；③ 两版 common.sh 仓库态 MD5 一致。</td></tr>
+<tr><td>连带影响</td><td>传统版 7 文件（run.sh/common.sh/config.sh/db_select.sh/port_conflict.sh/help.sh/app.py 版本号）；Docker 版同构同步；Python/模板/前端/数据库零改动；APK 版不涉及。</td></tr>
+<tr><td>定时任务用法</td><td><code>30 3 * * * UNATTENDED=1 /opt/service/gift-bookkeeping-app/run.sh restart &gt;&gt; /var/log/gift_app_cron.log 2&gt;&amp;1</code>；或 <code>./run.sh restart --unattended</code>；需强制更新证书时 <code>UNATTENDED=1 SSL_FORCE_UPDATE=1 ./run.sh restart</code>。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.32</td></tr>
-<tr><td>生成日期</td><td>2026-10-21（V10.11.32 依赖检查升级为 requirements 全量校验与自动补装；承接 V10.11.31 AI 助手依赖缺失修复）</td></tr>
+<tr><td>文档版本</td><td>V10.11.33</td></tr>
+<tr><td>生成日期</td><td>2026-10-22（V10.11.33 run.sh 双场景兼容：手动交互保留 + 定时任务无人值守；承接 V10.11.32 依赖检查升级为 requirements 全量校验与自动补装）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>
