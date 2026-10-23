@@ -72,3 +72,11 @@ setup_nginx_config() {
         fi
     fi
 }
+
+# V10.11.34: 独立配置/更新 Nginx 反向代理与 SSL 证书（免重启后端 Python 服务）
+add_nginx_service() {
+    echo_e "${GREEN}正在配置/更新 SSL 证书与 Nginx 反向代理 ($PROJECT_NAME)...${NC}"
+    ensure_ssl_certs || return 1
+    setup_nginx_config || return 1
+    echo_e "${GREEN}✅ Nginx 反向代理与 SSL 证书已处理完毕${NC}"
+}

@@ -13,10 +13,10 @@ echo_e() {
     printf '%b\n' "$*"
 }
 
-# V10.11.33: 无人值守判定统一入口——显式声明 UNATTENDED=1（命令行 --unattended 或环境变量）或 stdin 非 TTY（cron/CI）均视为无人值守
+# V10.11.34: 无人值守与定时任务判定统一入口——显式声明 CRON=1 / UNATTENDED=1（命令行 --cron / --unattended 或环境变量）或 stdin 非 TTY（crontab/CI）均视为无人值守
 # 无人值守语义：所有业务交互（证书/Nginx 覆盖询问、数据库菜单、端口冲突处理）一律使用默认参数，不阻塞等待输入
 is_unattended() {
-    [ "${UNATTENDED:-}" = "1" ] || [ ! -t 0 ]
+    [ "${CRON:-}" = "1" ] || [ "${UNATTENDED:-}" = "1" ] || [ ! -t 0 ]
 }
 
 # ===== 判断是否覆盖已存在文件：交互环境弹 y/n 询问；无人值守/非交互环境（cron/CI/定时任务）不能卡死在 read，默认保留旧文件 =====

@@ -2131,3 +2131,14 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
 - **验证**：① 传统/Docker 两版 23 个 Shell 文件（run.sh + bin/*.sh）`sh -n` 语法全过；② Git Bash 沙盒 38 项断言全过——is_unattended 三态判定（非 TTY/UNATTENDED=1/TTY 显式声明）；should_overwrite 保留旧文件与 `force=1` 强制覆盖优先级（UNATTENDED=1 下仍覆盖）；参数解析（`--unattended` 单独、`--reconfig --unattended`、`--unattended --reconfig-db` 任意顺序、未知参数报错、`--unattended` 不误触发 DB_RESET）；数据库三分支（无配置默认 SQLite 含无人值守提示 / 已有 .db.env 沿用用户此前选择 / DB_MODE 环境变量直通）；③ 两版 `bin/common.sh` 仓库态 MD5 一致（两版公共函数对齐原则）。
 - **连带影响**：传统版 7 文件（run.sh +7 行、common.sh +8 行、config.sh +7 行、db_select.sh 条件与文案、port_conflict.sh 判定与文案、help.sh +13 行、app.py 版本号）；Docker 版同构同步（其 run.sh 多 2 行差异源自 check_docker）；Python/模板/前端/数据库零改动；APK 版不涉及。
 - **服务器升级指引**：`git pull && ./run.sh restart`（手动交互行为不变）；定时任务示例——`30 3 * * * UNATTENDED=1 /opt/service/gift-bookkeeping-app/run.sh restart >> /var/log/gift_app_cron.log 2>&1`；需强制更新证书时：`UNATTENDED=1 SSL_FORCE_UPDATE=1 ./run.sh restart`。
+
+### 11.26 ADR-64：run.sh 定时任务 3 大场景优化（自适应检测 + --cron 显式语义 + add_nginx 与 --renew-ssl 证书轮换闭环）（V10.11.34 落地）
+- **背景与需求**：在 V10.11.33 无人值守能力基础上，根据生产实际定时任务使用场景深度优化：① 完全自适应模式（crontab 自身无 TTY，直接写 `./run.sh restart` 自动使用默认参数，零额外参数）；② 显式语义化模式（推荐，显式传 `--cron`，意图最明确且防伪终端干扰）；③ 按需强制更新模式（如每月定时轮换证书：`./run.sh add_nginx --cron --renew-ssl`，独立热重载 Nginx 反代，免重启后端服务）。
+- **决策方案**：
+  1. **多参数通用解析循环**：升级 `run.sh` 解析架构为 `while [ $# -gt 0 ]` 循环消费，支持 `--cron`、`--unattended`、`--renew-ssl`、`--renew-nginx`、`--reconfig` 任意数量与顺序组合；
+  2. **新增 `add_nginx` 运维子命令**：独立执行 `ensure_ssl_certs` 与 `setup_nginx_config`，支持证书自动签发/轮换及 Nginx 反代配置热重载（`nginx -s reload` / `systemctl reload nginx`），零后端 Gunicorn 进程中断；
+  3. **`is_unattended` 判定扩展**：`bin/common.sh` 支持 `CRON=1` 与 `--cron` 标志联动，与 `UNATTENDED=1`、`[ ! -t 0 ]` 形成三元保底；
+  4. **参数映射规范**：`--renew-ssl` 自动映射 `SSL_FORCE_UPDATE=1`；`--renew-nginx` 自动映射 `NGINX_CONF_FORCE_UPDATE=1`；
+  5. **帮助文档完善**：`bin/help.sh` 全面收录 3 大场景 crontab 示例与参数规范。
+- **验证**：① POSIX `sh -n` 全量校验通过；② Git Bash 仿真：无 TTY 自适应分支通过、`--cron` 显式非交互通过、`--renew-ssl` 穿透覆盖通过、未知参数报错拦截通过；③ 两版 `bin/common.sh` 仓库态一致。
+- **连带影响**：传统版 `run.sh`、`bin/common.sh`、`bin/config.sh`、`bin/nginx_config.sh`、`bin/help.sh`、`app.py`、`README.md`；Docker 版同构同步。

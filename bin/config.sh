@@ -49,12 +49,14 @@ NGINX_CONF_DIR="${NGINX_CONF_DIR:-/opt/service/nginx/conf.d}"
 SSL_FORCE_UPDATE="${SSL_FORCE_UPDATE:-}"
 NGINX_CONF_FORCE_UPDATE="${NGINX_CONF_FORCE_UPDATE:-}"
 
-# ===== 无人值守模式（V10.11.33） =====
-# 1=无人值守：证书/Nginx 覆盖询问、数据库交互菜单、端口冲突处理一律使用默认参数（不阻塞等待输入）
-# 手动执行: ./run.sh restart            （TTY 下保留原有交互询问：证书是否替换/Nginx 配置是否替换/数据库三选一）
-# 定时任务: UNATTENDED=1 ./run.sh restart   或  ./run.sh restart --unattended  （直接使用默认参数）
+# ===== 无人值守与定时任务模式（V10.11.34 升级） =====
+# 1=无人值守/定时任务：证书/Nginx 覆盖询问、数据库交互菜单、端口冲突处理一律使用默认参数（不阻塞等待输入）
+# 模式 ① 完全自适应：crontab 自身无 TTY，执行 ./run.sh restart 自动识别为定时任务并使用默认参数
+# 模式 ② 显式语义化：./run.sh restart --cron 或 CRON=1 ./run.sh restart（--unattended 兼容别名）
+# 模式 ③ 按需强制更新：./run.sh add_nginx --cron --renew-ssl（强制更新证书并热重载 Nginx，免重启后端）
 # 数据库默认参数: DB_MODE 环境变量 > .temp/.db.env 已持久化配置 > 默认 SQLite（沿用用户此前手动选择）
 # 显式策略环境变量（SSL_FORCE_UPDATE / NGINX_CONF_FORCE_UPDATE / DB_MODE 等）优先级始终高于无人值守默认值
+CRON="${CRON:-}"
 UNATTENDED="${UNATTENDED:-}"
 
 # ===== 环境变量定义（全局有效） =====
