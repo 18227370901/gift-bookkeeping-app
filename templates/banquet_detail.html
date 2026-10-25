@@ -52,7 +52,7 @@
                 <div class="row g-3 text-center mb-4">
                     <div class="col-md-3">
                         <div class="p-3 bg-light rounded-3 border">
-                            <span class="text-muted d-block small mb-1">收礼总收入 ({{ records|length }}笔)</span>
+                            <span class="text-muted d-block small mb-1">收礼总收入 ({{ total_count }}笔)</span>
                             <span class="fs-4 fw-bold text-success privacy-blur">¥{{ "%.2f"|format(total_income) }}</span>
                         </div>
                     </div>
@@ -111,51 +111,57 @@
                 {% endif %}
 
                 <!-- 明细查询、筛选与分页条数工具栏 -->
-                <div class="bg-light p-3 rounded-3 mb-3 border">
+                <form id="banquetFilterForm" method="GET" action="{{ url_for('banquet_detail_view', banquet_id=banquet.id) }}" class="bg-light p-3 rounded-3 mb-3 border">
                     <div class="row g-2 align-items-center">
                         <div class="col-md-3 col-sm-12">
                             <div class="input-group input-group-sm">
                                 <span class="input-group-text bg-white"><i class="fa-solid fa-magnifying-glass text-muted"></i></span>
-                                <input type="text" id="recordSearchInput" class="form-control" placeholder="搜索客人姓名、电话、备注...">
+                                <input type="text" id="recordSearchInput" name="q" value="{{ q or '' }}" class="form-control" placeholder="搜索客人姓名、电话、备注...">
+                                {% if q %}
+                                <a href="{{ url_for('banquet_detail_view', banquet_id=banquet.id, amount_range=amount_filter, sort=sort_by, per_page=per_page) }}" class="btn btn-outline-secondary" type="button" title="清除关键字"><i class="fa-solid fa-xmark"></i></a>
+                                {% endif %}
                             </div>
                         </div>
                         <div class="col-md-2 col-sm-6">
-                            <select id="recordAmountFilter" class="form-select form-select-sm">
-                                <option value="">全部金额范围</option>
-                                <option value="0-200">200 元及以下</option>
-                                <option value="200-500">200 - 500 元</option>
-                                <option value="500-1000">500 - 1000 元</option>
-                                <option value="1000-2000">1000 - 2000 元</option>
-                                <option value="2000+">2000 元以上</option>
+                            <select id="recordAmountFilter" name="amount_range" class="form-select form-select-sm" onchange="document.getElementById('banquetFilterForm').submit()">
+                                <option value="" {% if not amount_filter %}selected{% endif %}>全部金额范围</option>
+                                <option value="0-200" {% if amount_filter == '0-200' %}selected{% endif %}>200 元及以下</option>
+                                <option value="200-500" {% if amount_filter == '200-500' %}selected{% endif %}>200 - 500 元</option>
+                                <option value="500-1000" {% if amount_filter == '500-1000' %}selected{% endif %}>500 - 1000 元</option>
+                                <option value="1000-2000" {% if amount_filter == '1000-2000' %}selected{% endif %}>1000 - 2000 元</option>
+                                <option value="2000+" {% if amount_filter == '2000+' %}selected{% endif %}>2000 元以上</option>
                             </select>
                         </div>
                         <div class="col-md-2 col-sm-6">
-                            <select id="recordSortSelect" class="form-select form-select-sm">
-                                <option value="time_desc">登记时间倒序 (最新)</option>
-                                <option value="time_asc">登记时间正序</option>
-                                <option value="amount_desc">礼金金额从高到低</option>
-                                <option value="amount_asc">礼金金额从低到高</option>
-                                <option value="name_asc">客人姓名 A-Z</option>
+                            <select id="recordSortSelect" name="sort" class="form-select form-select-sm" onchange="document.getElementById('banquetFilterForm').submit()">
+                                <option value="time_desc" {% if sort_by == 'time_desc' %}selected{% endif %}>登记时间倒序 (最新)</option>
+                                <option value="time_asc" {% if sort_by == 'time_asc' %}selected{% endif %}>登记时间正序</option>
+                                <option value="amount_desc" {% if sort_by == 'amount_desc' %}selected{% endif %}>礼金金额从高到低</option>
+                                <option value="amount_asc" {% if sort_by == 'amount_asc' %}selected{% endif %}>礼金金额从低到高</option>
+                                <option value="name_asc" {% if sort_by == 'name_asc' %}selected{% endif %}>客人姓名 A-Z</option>
                             </select>
                         </div>
                         <div class="col-md-2 col-sm-6">
                             <div class="input-group input-group-sm">
                                 <span class="input-group-text bg-white text-muted">每页</span>
-                                <select id="recordPageSizeSelect" class="form-select form-select-sm">
-                                    <option value="10" selected>10 条</option>
-                                    <option value="20">20 条</option>
-                                    <option value="50">50 条</option>
-                                    <option value="all">全部显示</option>
+                                <select id="recordPageSizeSelect" name="per_page" class="form-select form-select-sm" onchange="document.getElementById('banquetFilterForm').submit()">
+                                    <option value="10" {% if per_page == 10 %}selected{% endif %}>10 条</option>
+                                    <option value="20" {% if per_page == 20 %}selected{% endif %}>20 条</option>
+                                    <option value="50" {% if per_page == 50 %}selected{% endif %}>50 条</option>
+                                    <option value="100" {% if per_page == 100 %}selected{% endif %}>100 条</option>
                                 </select>
                             </div>
                         </div>
-                        <div class="col-md-3 col-sm-6 text-md-end">
-                            <button type="button" id="btnResetRecordFilters" class="btn btn-sm btn-outline-secondary w-100">
-                                <i class="fa-solid fa-rotate-left me-1"></i>重置筛选条件
+                        <div class="col-md-3 col-sm-6 d-flex gap-2 text-md-end">
+                            <button type="submit" class="btn btn-sm btn-primary flex-fill">
+                                <i class="fa-solid fa-magnifying-glass me-1"></i>查询
                             </button>
+                            <a href="{{ url_for('banquet_detail_view', banquet_id=banquet.id) }}" class="btn btn-sm btn-outline-secondary flex-fill">
+                                <i class="fa-solid fa-rotate-left me-1"></i>重置
+                            </a>
                         </div>
                     </div>
-                </div>
+                </form>
 
                 <!-- 批量操作工具条 -->
                 <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 px-2 py-2 bg-white border rounded-3 shadow-sm">
@@ -176,7 +182,7 @@
                     </div>
                     <div>
                         <span class="small text-muted" id="recordStatsSpan">
-                            当前筛选到 <strong id="matchedRecordsCount">{{ records|length }}</strong> / 共 {{ records|length }} 笔明细
+                            当前筛选到 <strong id="matchedRecordsCount">{{ matched_count }}</strong> / 共 {{ total_count }} 笔明细
                         </span>
                     </div>
                 </div>
@@ -213,7 +219,7 @@
                                     <td class="text-center">
                                         <input type="checkbox" class="form-check-input record-checkbox" value="{{ r.id }}" data-name="{{ r.name }}">
                                     </td>
-                                    <td class="text-muted row-index">{{ loop.index }}</td>
+                                    <td class="text-muted row-index">{{ (pagination.page - 1) * per_page + loop.index }}</td>
                                     <td class="fw-bold">{{ r.name }}</td>
                                     <td class="text-success fw-bold privacy-blur">¥{{ "%.2f"|format(r.amount) }}</td>
                                     <td>{{ r.phone or '-' }}</td>
@@ -250,17 +256,39 @@
                     </table>
                 </div>
 
-                <!-- 分页控制栏 -->
+                <!-- 分页控制栏 (服务端物理分页) -->
+                {% if pagination and pagination.pages > 1 %}
                 <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 pt-2 border-top" id="paginationWrapper">
                     <div class="small text-muted" id="recordPaginationInfo">
-                        显示第 1 - 10 条
+                        显示第 {{ (pagination.page - 1) * per_page + 1 if matched_count > 0 else 0 }} 到 {{ [pagination.page * per_page, matched_count]|min }} 条，共 {{ matched_count }} 笔明细
                     </div>
                     <nav aria-label="明细分页">
                         <ul class="pagination pagination-sm mb-0" id="recordPaginationUl">
-                            <!-- 动态生成分页按钮 -->
+                            <li class="page-item {% if not pagination.has_prev %}disabled{% endif %}">
+                                <a class="page-link" href="{{ url_for('banquet_detail_view', banquet_id=banquet.id, page=pagination.prev_num, per_page=per_page, q=q, amount_range=amount_filter, sort=sort_by) if pagination.has_prev else '#' }}">上一页</a>
+                            </li>
+                            {% for p in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                                {% if p %}
+                                    {% if p == pagination.page %}
+                                        <li class="page-item active"><span class="page-link">{{ p }}</span></li>
+                                    {% else %}
+                                        <li class="page-item"><a class="page-link" href="{{ url_for('banquet_detail_view', banquet_id=banquet.id, page=p, per_page=per_page, q=q, amount_range=amount_filter, sort=sort_by) }}">{{ p }}</a></li>
+                                    {% endif %}
+                                {% else %}
+                                    <li class="page-item disabled"><span class="page-link">…</span></li>
+                                {% endif %}
+                            {% endfor %}
+                            <li class="page-item {% if not pagination.has_next %}disabled{% endif %}">
+                                <a class="page-link" href="{{ url_for('banquet_detail_view', banquet_id=banquet.id, page=pagination.next_num, per_page=per_page, q=q, amount_range=amount_filter, sort=sort_by) if pagination.has_next else '#' }}">下一页</a>
+                            </li>
                         </ul>
                     </nav>
                 </div>
+                {% elif matched_count > 0 %}
+                <div class="d-flex justify-content-between align-items-center mt-3 pt-2 border-top small text-muted" id="paginationWrapper">
+                    <span>共 {{ matched_count }} 笔明细（第 1/1 页）</span>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -331,69 +359,114 @@
 
 <!-- 从账本引入收礼明细模态框 -->
 <div class="modal fade" id="importRecordsModal" tabindex="-1">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
         <div class="modal-content border-0 shadow rounded-4">
-            <div class="modal-header bg-light">
-                <h5 class="modal-title fw-bold"><i class="fa-solid fa-file-import text-primary me-2"></i>从礼金账本引入收礼明细</h5>
+            <div class="modal-header bg-light py-3">
+                <div class="d-flex align-items-center">
+                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle p-2 rounded-3 me-2">
+                        <i class="fa-solid fa-file-import fa-lg"></i>
+                    </span>
+                    <div>
+                        <h5 class="modal-title fw-bold mb-0">从主礼金账本引入收礼明细</h5>
+                        <div class="text-muted small">归集已有的独立收礼记录至当前专属宴席</div>
+                    </div>
+                </div>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form action="{{ url_for('banquet_import_records', banquet_id=banquet.id) }}" method="POST">
+            <form id="importRecordsForm" action="{{ url_for('banquet_import_records', banquet_id=banquet.id) }}" method="POST">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <div class="modal-body">
-                    <p class="small text-muted mb-3">
-                        选择主礼金账本中现有的收礼记录，直接归集关联到本专属宴席（根据业务规则，仅收礼记录支持关联专属宴席）。
-                    </p>
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <div class="input-group input-group-sm" style="max-width: 320px;">
-                            <span class="input-group-text"><i class="fa-solid fa-search"></i></span>
-                            <input type="text" class="form-control" id="importSearchInput" placeholder="输入姓名/事由/备注快速搜索..." oninput="filterImportRows()">
-                        </div>
-                        <div class="small text-muted">
-                            候选收礼记录：<span class="fw-bold text-primary">{{ available_records|length if available_records else 0 }}</span> 笔
+                <div id="importHiddenInputsContainer"></div>
+                <div class="modal-body p-4">
+                    <!-- 业务逻辑说明提示条 -->
+                    <div class="alert alert-info border-0 bg-info-subtle text-info-emphasis rounded-3 p-3 mb-3 small d-flex align-items-start">
+                        <i class="fa-solid fa-circle-info fa-lg me-2 mt-1 text-info flex-shrink-0"></i>
+                        <div>
+                            <div class="fw-bold mb-1">引入明细与回收站逻辑说明：</div>
+                            <ul class="mb-0 ps-3">
+                                <li><strong>仅收礼记录支持归集：</strong>根据宴席账本核算逻辑，此处仅列出类型为【收礼】且当前未归属于本宴席的记录。</li>
+                                <li><strong>移入回收站 vs 移出宴席：</strong>若在专属宴席中点击【移出此宴席】，记录保留在主账本中，可在此再次引入；若点击【移入回收站】，记录已进入系统回收站；当回收站被清空后，数据已被永久删除，因此不会再出现在候选列表中。</li>
+                            </ul>
                         </div>
                     </div>
-                    <div class="table-responsive border rounded-3" style="max-height: 380px; overflow-y: auto;">
-                        <!-- V10.11.7 列宽拖拽 -->
-                        <table class="table table-sm table-hover align-middle mb-0" id="importRecordsTable" data-resizable="banquet_detail_import">
+
+                    <!-- 工具栏：搜索、每页条数、全选/反选快捷按钮与选中计数 -->
+                    <div class="row g-2 align-items-center mb-3">
+                        <div class="col-md-4 col-12">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-light border-end-0"><i class="fa-solid fa-search text-muted"></i></span>
+                                <input type="text" class="form-control border-start-0 ps-1" id="importSearchInput" placeholder="按姓名、事由、备注实时筛选...">
+                            </div>
+                        </div>
+                        <div class="col-md-3 col-6">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-light">每页</span>
+                                <select class="form-select" id="importPageSizeSelect">
+                                    <option value="10" selected>10 条/页</option>
+                                    <option value="20">20 条/页</option>
+                                    <option value="50">50 条/页</option>
+                                    <option value="all">显示全部</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="col-md-5 col-6 text-end">
+                            <button type="button" class="btn btn-outline-secondary btn-sm me-1" id="btnImportSelectCurrentPage">
+                                <i class="fa-regular fa-square-check me-1"></i>选本页
+                            </button>
+                            <button type="button" class="btn btn-outline-primary btn-sm me-1" id="btnImportSelectAllFiltered">
+                                <i class="fa-solid fa-check-double me-1"></i>全选所有
+                            </button>
+                            <button type="button" class="btn btn-outline-danger btn-sm" id="btnImportClearSelection">
+                                <i class="fa-solid fa-rotate-left me-1"></i>清空勾选
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 状态栏 -->
+                    <div class="d-flex justify-content-between align-items-center mb-2 px-1">
+                        <div class="small text-muted">
+                            候选总数：<span class="fw-bold text-dark" id="importTotalCount">{{ available_count or 0 }}</span> 笔
+                            <span id="importFilterNotice" class="ms-2 text-primary" style="display: none;">（筛选匹配 <span class="fw-bold" id="importFilteredCount">0</span> 笔）</span>
+                        </div>
+                        <div class="small">
+                            已勾选：<span class="badge bg-primary fs-6 px-2 py-1" id="importSelectedCountBadge">0</span> 笔
+                        </div>
+                    </div>
+
+                    <!-- 表格展示区 -->
+                    <div class="table-responsive border rounded-3" style="min-height: 260px; max-height: 380px; overflow-y: auto;">
+                        <table class="table table-sm table-hover align-middle mb-0" id="importRecordsTable">
                             <thead class="table-light sticky-top">
                                 <tr>
-                                    <th class="text-center" data-col="checkbox" data-col-min="36" data-col-max="60">
-                                        <input class="form-check-input" type="checkbox" id="importSelectAll" onclick="toggleImportSelectAll(this)">
+                                    <th class="text-center" style="width: 48px;">
+                                        <input class="form-check-input" type="checkbox" id="importSelectAllHeader" title="切换当前页全选">
                                     </th>
-                                    <th data-col="name">客人姓名</th>
-                                    <th data-col="amount">礼金金额</th>
-                                    <th data-col="reason">办席事由</th>
-                                    <th data-col="note">备注说明</th>
-                                    <th data-col="created_at">登记时间</th>
+                                    <th style="width: 120px;">客人姓名</th>
+                                    <th style="width: 110px;">礼金金额</th>
+                                    <th style="width: 130px;">办席事由</th>
+                                    <th>备注说明</th>
+                                    <th style="width: 110px;">登记时间</th>
                                 </tr>
                             </thead>
-                            <tbody>
-                                {% if available_records %}
-                                    {% for ar in available_records %}
-                                    <tr class="import-record-row">
-                                        <td class="text-center">
-                                            <input class="form-check-input import-checkbox" type="checkbox" name="record_ids" value="{{ ar.id }}">
-                                        </td>
-                                        <td class="fw-bold col-name">{{ ar.name }}</td>
-                                        <td class="text-success fw-bold">¥{{ "%.2f"|format(ar.amount) }}</td>
-                                        <td><span class="badge bg-light text-dark border col-reason">{{ ar.event_reason }}</span></td>
-                                        <td class="small text-muted text-truncate col-notes" style="max-width: 150px;" title="{{ ar.notes }}">{{ ar.notes or '-' }}</td>
-                                        <td class="small text-muted">{{ ar.created_at.strftime('%Y-%m-%d') if ar.created_at else '-' }}</td>
-                                    </tr>
-                                    {% endfor %}
-                                {% else %}
-                                    <tr>
-                                        <td colspan="6" class="text-center py-4 text-muted">暂无未归属本宴席的候选收礼记录</td>
-                                    </tr>
-                                {% endif %}
+                            <tbody id="importTableBody">
+                                <!-- 由前端 JS 分页与筛选渲染 -->
                             </tbody>
                         </table>
                     </div>
+
+                    <!-- 分页控件栏 -->
+                    <div class="d-flex flex-wrap justify-content-between align-items-center mt-3 pt-2 border-top" id="importPaginationWrapper">
+                        <div class="small text-muted mb-2 mb-md-0" id="importPaginationInfo">
+                            正在准备候选数据...
+                        </div>
+                        <ul class="pagination pagination-sm mb-0" id="importPaginationUl">
+                            <!-- 分页按钮 -->
+                        </ul>
+                    </div>
                 </div>
-                <div class="modal-footer">
+                <div class="modal-footer bg-light py-2">
                     <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
-                    <button type="submit" class="btn btn-primary btn-sm fw-bold">
-                        <i class="fa-solid fa-check me-1"></i>确认引入选中记录到本宴席
+                    <button type="submit" class="btn btn-primary btn-sm fw-bold px-3" id="btnSubmitImportRecords" disabled>
+                        <i class="fa-solid fa-check me-1"></i>确认引入选中的 <span id="btnSubmitImportCount">0</span> 笔记录
                     </button>
                 </div>
             </form>
@@ -527,32 +600,423 @@ async function deleteShareLink() {
     }
 }
 
-function toggleImportSelectAll(source) {
-    document.querySelectorAll('#importRecordsTable .import-checkbox').forEach(cb => {
-        const tr = cb.closest('tr');
-        if (tr && tr.style.display !== 'none') {
-            cb.checked = source.checked;
-        }
-    });
-}
+// V10.11.36: 从账本引入收礼明细 异步按需拉取、高性能分页、多选与全选控制器
+const ImportModalManager = {
+    allData: null,
+    filteredData: [],
+    selectedIds: new Set(),
+    currentPage: 1,
+    pageSize: 10,
+    isLoading: false,
 
-function filterImportRows() {
-    const input = document.getElementById('importSearchInput');
-    const q = input ? input.value.trim().toLowerCase() : '';
-    document.querySelectorAll('#importRecordsTable .import-record-row').forEach(row => {
-        const name = row.querySelector('.col-name') ? row.querySelector('.col-name').textContent.toLowerCase() : '';
-        const reason = row.querySelector('.col-reason') ? row.querySelector('.col-reason').textContent.toLowerCase() : '';
-        const notes = row.querySelector('.col-notes') ? row.querySelector('.col-notes').textContent.toLowerCase() : '';
-        if (!q || name.includes(q) || reason.includes(q) || notes.includes(q)) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
+    init() {
+        this.bindEvents();
+    },
+
+    bindEvents() {
+        const modalEl = document.getElementById('importRecordsModal');
+        if (modalEl) {
+            modalEl.addEventListener('show.bs.modal', () => {
+                if (this.allData === null && !this.isLoading) {
+                    this.fetchCandidates();
+                } else if (this.allData !== null) {
+                    this.render();
+                }
+            });
         }
-    });
+
+        const searchInput = document.getElementById('importSearchInput');
+        if (searchInput) {
+            let debounceTimer = null;
+            searchInput.addEventListener('input', () => {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => {
+                    this.handleSearch(searchInput.value.trim().toLowerCase());
+                }, 150);
+            });
+        }
+
+        const pageSizeSelect = document.getElementById('importPageSizeSelect');
+        if (pageSizeSelect) {
+            pageSizeSelect.addEventListener('change', () => {
+                const val = pageSizeSelect.value;
+                this.pageSize = (val === 'all') ? 999999 : parseInt(val, 10);
+                this.currentPage = 1;
+                this.render();
+            });
+        }
+
+        const headerCb = document.getElementById('importSelectAllHeader');
+        if (headerCb) {
+            headerCb.addEventListener('change', () => {
+                const curPageItems = this.getCurrentPageItems();
+                if (headerCb.checked) {
+                    curPageItems.forEach(item => this.selectedIds.add(String(item.id)));
+                } else {
+                    curPageItems.forEach(item => this.selectedIds.delete(String(item.id)));
+                }
+                this.renderTableBody();
+                this.updateSelectionUI();
+            });
+        }
+
+        const btnSelectCurPage = document.getElementById('btnImportSelectCurrentPage');
+        if (btnSelectCurPage) {
+            btnSelectCurPage.addEventListener('click', () => {
+                this.getCurrentPageItems().forEach(item => this.selectedIds.add(String(item.id)));
+                this.renderTableBody();
+                this.updateSelectionUI();
+            });
+        }
+
+        const btnSelectAllFiltered = document.getElementById('btnImportSelectAllFiltered');
+        if (btnSelectAllFiltered) {
+            btnSelectAllFiltered.addEventListener('click', () => {
+                this.filteredData.forEach(item => this.selectedIds.add(String(item.id)));
+                this.renderTableBody();
+                this.updateSelectionUI();
+            });
+        }
+
+        const btnClear = document.getElementById('btnImportClearSelection');
+        if (btnClear) {
+            btnClear.addEventListener('click', () => {
+                this.selectedIds.clear();
+                this.renderTableBody();
+                this.updateSelectionUI();
+            });
+        }
+
+        const form = document.getElementById('importRecordsForm');
+        if (form) {
+            form.addEventListener('submit', (e) => {
+                if (this.selectedIds.size === 0) {
+                    e.preventDefault();
+                    showToast('请至少勾选一条收礼明细记录后再引入！', 'warning');
+                    return;
+                }
+                const container = document.getElementById('importHiddenInputsContainer');
+                if (container) {
+                    container.innerHTML = '';
+                    this.selectedIds.forEach(id => {
+                        const hiddenInput = document.createElement('input');
+                        hiddenInput.type = 'hidden';
+                        hiddenInput.name = 'record_ids';
+                        hiddenInput.value = id;
+                        container.appendChild(hiddenInput);
+                    });
+                }
+            });
+        }
+    },
+
+    fetchCandidates() {
+        this.isLoading = true;
+        this.renderLoading();
+        fetch("{{ url_for('banquet_available_records', banquet_id=banquet.id) }}", {
+            headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(r => r.json())
+        .then(res => {
+            this.isLoading = false;
+            if (res.code === 200) {
+                this.allData = res.records || [];
+                this.filteredData = [...this.allData];
+                const searchInput = document.getElementById('importSearchInput');
+                if (searchInput && searchInput.value.trim()) {
+                    this.handleSearch(searchInput.value.trim().toLowerCase());
+                } else {
+                    this.render();
+                }
+            } else {
+                this.renderError(res.message || '加载候选记录失败');
+            }
+        })
+        .catch(err => {
+            this.isLoading = false;
+            this.renderError('网络请求异常，请重试');
+        });
+    },
+
+    renderLoading() {
+        const tbody = document.getElementById('importTableBody');
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-5 text-muted">
+                        <div class="spinner-border text-primary spinner-border-sm me-2" role="status"></div>
+                        <span>正在快速加载未归集收礼明细...</span>
+                    </td>
+                </tr>
+            `;
+        }
+    },
+
+    renderError(msg) {
+        const tbody = document.getElementById('importTableBody');
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-5 text-danger">
+                        <i class="fa-solid fa-triangle-exclamation fa-lg me-1"></i>
+                        <span>${this.escapeHtml(msg)}</span>
+                        <div class="mt-3">
+                            <button type="button" class="btn btn-outline-primary btn-sm" onclick="ImportModalManager.fetchCandidates()">
+                                <i class="fa-solid fa-rotate-right me-1"></i>点击重试
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+            `;
+        }
+    },
+
+    handleSearch(query) {
+        if (!this.allData) return;
+        if (!query) {
+            this.filteredData = [...this.allData];
+        } else {
+            this.filteredData = this.allData.filter(item => {
+                const name = (item.name || '').toLowerCase();
+                const reason = (item.event_reason || '').toLowerCase();
+                const notes = (item.notes || '').toLowerCase();
+                return name.includes(query) || reason.includes(query) || notes.includes(query);
+            });
+        }
+        this.currentPage = 1;
+        this.render();
+    },
+
+    getCurrentPageItems() {
+        if (!this.filteredData) return [];
+        const start = (this.currentPage - 1) * this.pageSize;
+        return this.filteredData.slice(start, start + this.pageSize);
+    },
+
+    render() {
+        this.renderStats();
+        this.renderTableBody();
+        this.renderPagination();
+        this.updateSelectionUI();
+    },
+
+    renderStats() {
+        const total = this.allData ? this.allData.length : 0;
+        const totalSpan = document.getElementById('importTotalCount');
+        if (totalSpan) totalSpan.textContent = total;
+
+        const noticeEl = document.getElementById('importFilterNotice');
+        const filterSpan = document.getElementById('importFilteredCount');
+        if (this.allData && this.filteredData.length !== this.allData.length) {
+            if (noticeEl) noticeEl.style.display = 'inline';
+            if (filterSpan) filterSpan.textContent = this.filteredData.length;
+        } else {
+            if (noticeEl) noticeEl.style.display = 'none';
+        }
+    },
+
+    renderTableBody() {
+        const tbody = document.getElementById('importTableBody');
+        if (!tbody) return;
+
+        if (!this.allData) {
+            this.renderLoading();
+            return;
+        }
+
+        if (this.filteredData.length === 0) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="text-center py-5 text-muted">
+                        <i class="fa-regular fa-folder-open fa-2x mb-2 d-block text-secondary opacity-50"></i>
+                        <span>${this.allData.length === 0 ? '暂无可引入的独立收礼记录' : '没有匹配到符合筛选条件的收礼记录'}</span>
+                    </td>
+                </tr>
+            `;
+            return;
+        }
+
+        const items = this.getCurrentPageItems();
+        let htmlRows = '';
+        items.forEach(item => {
+            const isChecked = this.selectedIds.has(String(item.id)) ? 'checked' : '';
+            const amountNum = parseFloat(item.amount) || 0;
+            const amountFormatted = amountNum.toFixed(2);
+            htmlRows += `
+                <tr class="import-record-row">
+                    <td class="text-center">
+                        <input class="form-check-input import-item-checkbox" type="checkbox" data-id="${item.id}" ${isChecked}>
+                    </td>
+                    <td class="fw-bold text-dark">${this.escapeHtml(item.name)}</td>
+                    <td class="text-success fw-bold">¥${amountFormatted}</td>
+                    <td><span class="badge bg-light text-dark border">${this.escapeHtml(item.event_reason || '-')}</span></td>
+                    <td class="small text-muted text-truncate" style="max-width: 220px;" title="${this.escapeHtml(item.notes || '')}">${this.escapeHtml(item.notes || '-')}</td>
+                    <td class="small text-muted">${this.escapeHtml(item.created_at_str || '-')}</td>
+                </tr>
+            `;
+        });
+        tbody.innerHTML = htmlRows;
+
+        tbody.querySelectorAll('.import-item-checkbox').forEach(cb => {
+            cb.addEventListener('change', (e) => {
+                const id = e.target.dataset.id;
+                if (e.target.checked) {
+                    this.selectedIds.add(id);
+                } else {
+                    this.selectedIds.delete(id);
+                }
+                this.updateSelectionUI();
+            });
+        });
+    },
+
+    renderPagination() {
+        const totalItems = this.filteredData ? this.filteredData.length : 0;
+        const totalPages = Math.ceil(totalItems / this.pageSize) || 1;
+        if (this.currentPage > totalPages) this.currentPage = totalPages;
+
+        const info = document.getElementById('importPaginationInfo');
+        if (info) {
+            if (totalItems === 0) {
+                info.textContent = '共 0 条数据';
+            } else {
+                const start = (this.currentPage - 1) * this.pageSize + 1;
+                const end = Math.min(this.currentPage * this.pageSize, totalItems);
+                info.innerHTML = `显示第 <span class="fw-bold text-dark">${start}</span> 至 <span class="fw-bold text-dark">${end}</span> 条，共 <span class="fw-bold text-primary">${totalItems}</span> 条记录`;
+            }
+        }
+
+        const ul = document.getElementById('importPaginationUl');
+        if (!ul) return;
+        if (totalPages <= 1) {
+            ul.innerHTML = '';
+            return;
+        }
+
+        let pagesHtml = '';
+        pagesHtml += `
+            <li class="page-item ${this.currentPage === 1 ? 'disabled' : ''}">
+                <a class="page-link" href="javascript:void(0)" data-page="${this.currentPage - 1}">&laquo;</a>
+            </li>
+        `;
+
+        const maxButtons = 5;
+        let startPage = Math.max(1, this.currentPage - 2);
+        let endPage = Math.min(totalPages, startPage + maxButtons - 1);
+        if (endPage - startPage < maxButtons - 1) {
+            startPage = Math.max(1, endPage - maxButtons + 1);
+        }
+
+        if (startPage > 1) {
+            pagesHtml += `<li class="page-item"><a class="page-link" href="javascript:void(0)" data-page="1">1</a></li>`;
+            if (startPage > 2) pagesHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+        }
+
+        for (let p = startPage; p <= endPage; p++) {
+            pagesHtml += `
+                <li class="page-item ${p === this.currentPage ? 'active' : ''}">
+                    <a class="page-link" href="javascript:void(0)" data-page="${p}">${p}</a>
+                </li>
+            `;
+        }
+
+        if (endPage < totalPages) {
+            if (endPage < totalPages - 1) pagesHtml += `<li class="page-item disabled"><span class="page-link">...</span></li>`;
+            pagesHtml += `<li class="page-item"><a class="page-link" href="javascript:void(0)" data-page="${totalPages}">${totalPages}</a></li>`;
+        }
+
+        pagesHtml += `
+            <li class="page-item ${this.currentPage === totalPages ? 'disabled' : ''}">
+                <a class="page-link" href="javascript:void(0)" data-page="${this.currentPage + 1}">&raquo;</a>
+            </li>
+        `;
+        ul.innerHTML = pagesHtml;
+
+        ul.querySelectorAll('a.page-link').forEach(link => {
+            link.addEventListener('click', (e) => {
+                const targetPage = parseInt(link.dataset.page, 10);
+                if (targetPage >= 1 && targetPage <= totalPages && targetPage !== this.currentPage) {
+                    this.currentPage = targetPage;
+                    this.renderTableBody();
+                    this.renderPagination();
+                    this.updateSelectionUI();
+                }
+            });
+        });
+    },
+
+    updateSelectionUI() {
+        const count = this.selectedIds.size;
+        const countBadge = document.getElementById('importSelectedCountBadge');
+        if (countBadge) countBadge.textContent = count;
+
+        const submitBtn = document.getElementById('btnSubmitImportRecords');
+        const submitCount = document.getElementById('btnSubmitImportCount');
+        if (submitBtn) {
+            submitBtn.disabled = (count === 0);
+        }
+        if (submitCount) {
+            submitCount.textContent = count;
+        }
+
+        const headerCb = document.getElementById('importSelectAllHeader');
+        if (headerCb) {
+            const curItems = this.getCurrentPageItems();
+            if (curItems.length === 0) {
+                headerCb.checked = false;
+                headerCb.indeterminate = false;
+            } else {
+                const curSelectedCount = curItems.filter(item => this.selectedIds.has(String(item.id))).length;
+                if (curSelectedCount === 0) {
+                    headerCb.checked = false;
+                    headerCb.indeterminate = false;
+                } else if (curSelectedCount === curItems.length) {
+                    headerCb.checked = true;
+                    headerCb.indeterminate = false;
+                } else {
+                    headerCb.checked = false;
+                    headerCb.indeterminate = true;
+                }
+            }
+        }
+    },
+
+    escapeHtml(str) {
+        if (!str) return '';
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+};
+
+// 页面全局无阻塞提示条
+function showToast(msg, type = 'success') {
+    let container = document.getElementById('banquetToastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'banquetToastContainer';
+        container.style.cssText = 'position:fixed;top:24px;right:24px;z-index:99999;max-width:360px;';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type} shadow border-0 rounded-3 py-2 px-3 mb-2 d-flex align-items-center`;
+    toast.innerHTML = `<i class="fa-solid ${type === 'success' ? 'fa-circle-check text-success' : 'fa-circle-exclamation text-danger'} me-2"></i><span class="small fw-bold">${msg}</span>`;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.transition = 'opacity 0.35s ease, transform 0.35s ease';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-8px)';
+        setTimeout(() => toast.remove(), 350);
+    }, 2200);
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    // 1. 分享表单 AJAX 提交（停留在当前小窗口，不强行刷新页面）
+    ImportModalManager.init();
+
+// 1. 分享表单 AJAX 提交（停留在当前小窗口，不强行刷新页面）
     const shareForm = document.getElementById('banquetShareForm');
     if (shareForm) {
         shareForm.addEventListener('submit', async function(e) {
@@ -607,26 +1071,13 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // 2. 礼金明细表格：筛选、查询、排序、分页与批量操作
-    const searchInput = document.getElementById('recordSearchInput');
-    const amountFilter = document.getElementById('recordAmountFilter');
-    const sortSelect = document.getElementById('recordSortSelect');
-    const pageSizeSelect = document.getElementById('recordPageSizeSelect');
-    const resetBtn = document.getElementById('btnResetRecordFilters');
-
+    // 2. 礼金明细表格：复选框管理、单笔操作与批量操作（极速轻量物理分页）
     const selectAllCheckbox = document.getElementById('selectAllRecords');
     const selectedBadge = document.getElementById('selectedRecordsBadge');
     const selectedCountSpan = document.getElementById('selectedRecordsCount');
     const batchUnlinkBtn = document.getElementById('btnBatchUnlinkRecords');
     const batchDeleteBtn = document.getElementById('btnBatchDeleteRecords');
-    const matchedCountSpan = document.getElementById('matchedRecordsCount');
-
     const tbody = document.getElementById('recordsTbody');
-    const paginationInfo = document.getElementById('recordPaginationInfo');
-    const paginationUl = document.getElementById('recordPaginationUl');
-    const paginationWrapper = document.getElementById('paginationWrapper');
-
-    let currentPage = 1;
 
     function getAllRows() {
         return Array.from(document.querySelectorAll('.banquet-record-row'));
@@ -634,12 +1085,11 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function updateSelectionState() {
         const rows = getAllRows();
-        const visibleChecked = rows
-            .filter(r => r.style.display !== 'none')
+        const checkedCbs = rows
             .map(r => r.querySelector('.record-checkbox'))
             .filter(cb => cb && cb.checked);
 
-        const count = visibleChecked.length;
+        const count = checkedCbs.length;
         if (selectedCountSpan) selectedCountSpan.textContent = count;
         if (batchUnlinkBtn) {
             batchUnlinkBtn.disabled = (count === 0);
@@ -650,19 +1100,18 @@ document.addEventListener('DOMContentLoaded', function() {
             batchDeleteBtn.innerHTML = '<i class="fa-solid fa-trash-can me-1"></i>批量移入回收站 (' + count + ')';
         }
 
-        const visibleCbs = rows
-            .filter(r => r.style.display !== 'none')
+        const allCbs = rows
             .map(r => r.querySelector('.record-checkbox'))
             .filter(Boolean);
 
         if (selectAllCheckbox) {
-            if (visibleCbs.length === 0) {
+            if (allCbs.length === 0) {
                 selectAllCheckbox.checked = false;
                 selectAllCheckbox.indeterminate = false;
-            } else if (visibleChecked.length === visibleCbs.length) {
+            } else if (checkedCbs.length === allCbs.length) {
                 selectAllCheckbox.checked = true;
                 selectAllCheckbox.indeterminate = false;
-            } else if (visibleChecked.length > 0) {
+            } else if (checkedCbs.length > 0) {
                 selectAllCheckbox.checked = false;
                 selectAllCheckbox.indeterminate = true;
             } else {
@@ -672,189 +1121,33 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function applyFilterAndPagination() {
-        const q = searchInput ? searchInput.value.trim().toLowerCase() : '';
-        const amtMode = amountFilter ? amountFilter.value : '';
-        const sortMode = sortSelect ? sortSelect.value : 'time_desc';
-        const pageSizeVal = pageSizeSelect ? pageSizeSelect.value : '10';
-
-        let rows = getAllRows();
-        if (rows.length === 0) return;
-
-        // 1. 过滤匹配
-        let matchedRows = rows.filter(row => {
-            const name = row.dataset.name || '';
-            const phone = row.dataset.phone || '';
-            const notes = row.dataset.notes || '';
-            const amt = parseFloat(row.dataset.amount || '0');
-
-            if (q) {
-                if (!name.includes(q) && !phone.includes(q) && !notes.includes(q)) {
-                    return false;
-                }
-            }
-
-            if (amtMode) {
-                if (amtMode === '0-200' && amt > 200) return false;
-                if (amtMode === '200-500' && (amt < 200 || amt > 500)) return false;
-                if (amtMode === '500-1000' && (amt < 500 || amt > 1000)) return false;
-                if (amtMode === '1000-2000' && (amt < 1000 || amt > 2000)) return false;
-                if (amtMode === '2000+' && amt <= 2000) return false;
-            }
-
-            return true;
-        });
-
-        // 2. 排序
-        matchedRows.sort((a, b) => {
-            if (sortMode === 'time_desc') {
-                return parseFloat(b.dataset.time || '0') - parseFloat(a.dataset.time || '0');
-            } else if (sortMode === 'time_asc') {
-                return parseFloat(a.dataset.time || '0') - parseFloat(b.dataset.time || '0');
-            } else if (sortMode === 'amount_desc') {
-                return parseFloat(b.dataset.amount || '0') - parseFloat(a.dataset.amount || '0');
-            } else if (sortMode === 'amount_asc') {
-                return parseFloat(a.dataset.amount || '0') - parseFloat(b.dataset.amount || '0');
-            } else if (sortMode === 'name_asc') {
-                return (a.dataset.name || '').localeCompare(b.dataset.name || '');
-            }
-            return 0;
-        });
-
-        // 3. 分页计算
-        const totalMatched = matchedRows.length;
-        if (matchedCountSpan) matchedCountSpan.textContent = totalMatched;
-
-        let pageSize = (pageSizeVal === 'all') ? (totalMatched || 1) : parseInt(pageSizeVal, 10);
-        let totalPages = Math.ceil(totalMatched / pageSize) || 1;
-        if (currentPage > totalPages) currentPage = totalPages;
-        if (currentPage < 1) currentPage = 1;
-
-        let startIndex = (currentPage - 1) * pageSize;
-        let endIndex = startIndex + pageSize;
-
-        // 隐藏所有行，并仅展示当前页的匹配行
-        rows.forEach(r => {
-            r.style.display = 'none';
-        });
-
-        matchedRows.forEach((r, idx) => {
-            if (idx >= startIndex && idx < endIndex) {
-                r.style.display = '';
-                const idxCell = r.querySelector('.row-index');
-                if (idxCell) idxCell.textContent = idx + 1;
-                tbody.appendChild(r);
-            }
-        });
-
-        // 4. 更新分页 UI
-        if (paginationInfo) {
-            if (totalMatched === 0) {
-                paginationInfo.textContent = '暂无符合筛选条件的明细';
-            } else {
-                let showEnd = Math.min(endIndex, totalMatched);
-                paginationInfo.textContent = '显示第 ' + (startIndex + 1) + ' - ' + showEnd + ' 条，共 ' + totalMatched + ' 条';
-            }
-        }
-
-        renderPaginationButtons(totalPages);
-        updateSelectionState();
-    }
-
-    function renderPaginationButtons(totalPages) {
-        if (!paginationUl) return;
-        paginationUl.innerHTML = '';
-        if (totalPages <= 1) {
-            paginationWrapper.style.display = (pageSizeSelect.value === 'all') ? 'flex' : 'none';
-            return;
-        }
-        paginationWrapper.style.display = 'flex';
-
-        // 上一页
-        const prevLi = document.createElement('li');
-        prevLi.className = 'page-item ' + (currentPage === 1 ? 'disabled' : '');
-        prevLi.innerHTML = '<a class="page-link" href="javascript:void(0);">上一页</a>';
-        prevLi.addEventListener('click', () => {
-            if (currentPage > 1) {
-                currentPage--;
-                applyFilterAndPagination();
-            }
-        });
-        paginationUl.appendChild(prevLi);
-
-        // 页码
-        let startP = Math.max(1, currentPage - 2);
-        let endP = Math.min(totalPages, currentPage + 2);
-
-        for (let p = startP; p <= endP; p++) {
-            const li = document.createElement('li');
-            li.className = 'page-item ' + (p === currentPage ? 'active' : '');
-            li.innerHTML = '<a class="page-link" href="javascript:void(0);">' + p + '</a>';
-            li.addEventListener('click', () => {
-                currentPage = p;
-                applyFilterAndPagination();
-            });
-            paginationUl.appendChild(li);
-        }
-
-        // 下一页
-        const nextLi = document.createElement('li');
-        nextLi.className = 'page-item ' + (currentPage === totalPages ? 'disabled' : '');
-        nextLi.innerHTML = '<a class="page-link" href="javascript:void(0);">下一页</a>';
-        nextLi.addEventListener('click', () => {
-            if (currentPage < totalPages) {
-                currentPage++;
-                applyFilterAndPagination();
-            }
-        });
-        paginationUl.appendChild(nextLi);
-    }
-
-    if (searchInput) searchInput.addEventListener('input', () => { currentPage = 1; applyFilterAndPagination(); });
-    if (amountFilter) amountFilter.addEventListener('change', () => { currentPage = 1; applyFilterAndPagination(); });
-    if (sortSelect) sortSelect.addEventListener('change', () => { applyFilterAndPagination(); });
-    if (pageSizeSelect) pageSizeSelect.addEventListener('change', () => { currentPage = 1; applyFilterAndPagination(); });
-
-    if (resetBtn) {
-        resetBtn.addEventListener('click', () => {
-            if (searchInput) searchInput.value = '';
-            if (amountFilter) amountFilter.value = '';
-            if (sortSelect) sortSelect.value = 'time_desc';
-            if (pageSizeSelect) pageSizeSelect.value = '10';
-            currentPage = 1;
-            applyFilterAndPagination();
-        });
-    }
-
-    // 全选/取消全选当前可见明细
     if (selectAllCheckbox) {
         selectAllCheckbox.addEventListener('change', function() {
             const isChecked = this.checked;
             getAllRows().forEach(r => {
-                if (r.style.display !== 'none') {
-                    const cb = r.querySelector('.record-checkbox');
-                    if (cb) cb.checked = isChecked;
-                }
+                const cb = r.querySelector('.record-checkbox');
+                if (cb) cb.checked = isChecked;
             });
             updateSelectionState();
         });
     }
 
-    // 行复选框切换
-    tbody.addEventListener('change', function(e) {
-        if (e.target.classList.contains('record-checkbox')) {
-            updateSelectionState();
-        }
-    });
+    if (tbody) {
+        tbody.addEventListener('change', function(e) {
+            if (e.target && e.target.classList.contains('record-checkbox')) {
+                updateSelectionState();
+            }
+        });
+    }
 
-    // 单笔明细删除 (AJAX 移入回收站，不离开本宴席页面)
-    tbody.addEventListener('click', async function(e) {
+    // 单笔记录删除 (移入回收站)
+    document.addEventListener('click', async function(e) {
         const btn = e.target.closest('.btn-delete-single-record');
         if (!btn) return;
 
         const recordId = btn.dataset.id;
-        const recordName = btn.dataset.name || '此客人';
-        if (!confirm('确定要删除客人 [' + recordName + '] 的这笔记录吗？（将移入回收站）')) {
+        const recordName = btn.dataset.name || '客人';
+        if (!confirm('确定要将客人 [' + recordName + '] 的记录移入回收站吗？')) {
             return;
         }
 
@@ -875,14 +1168,10 @@ document.addEventListener('DOMContentLoaded', function() {
             });
             const data = await resp.json();
             if (resp.ok && (data.code === 200 || data.success)) {
-                alert(data.message || '客人记录已成功移入回收站！');
-                const row = btn.closest('.banquet-record-row');
-                if (row) row.remove();
-                applyFilterAndPagination();
-                // 刷新页面以更新统计指标
-                window.location.reload();
+                showToast(data.message || '客人记录已成功移入回收站！');
+                setTimeout(() => window.location.reload(), 200);
             } else {
-                alert(data.message || '删除失败，请稍后重试');
+                showToast(data.message || '删除失败，请稍后重试', 'danger');
                 btn.disabled = false;
                 btn.innerHTML = origHtml;
             }
@@ -898,7 +1187,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (batchUnlinkBtn) {
         batchUnlinkBtn.addEventListener('click', async function() {
             const checkedBoxes = getAllRows()
-                .filter(r => r.style.display !== 'none')
                 .map(r => r.querySelector('.record-checkbox'))
                 .filter(cb => cb && cb.checked);
 
@@ -929,10 +1217,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 const data = await resp.json();
                 if (resp.ok && (data.code === 200 || data.success)) {
-                    alert(data.message || '选中的记录已成功移出此宴席！');
-                    window.location.reload();
+                    showToast(data.message || '选中的记录已成功移出此宴席！');
+                    setTimeout(() => window.location.reload(), 300);
                 } else {
-                    alert(data.message || '批量移出失败，请重试');
+                    showToast(data.message || '批量移出失败，请重试', 'danger');
                     batchUnlinkBtn.disabled = false;
                     batchUnlinkBtn.innerHTML = origHtml;
                 }
@@ -949,7 +1237,6 @@ document.addEventListener('DOMContentLoaded', function() {
     if (batchDeleteBtn) {
         batchDeleteBtn.addEventListener('click', async function() {
             const checkedBoxes = getAllRows()
-                .filter(r => r.style.display !== 'none')
                 .map(r => r.querySelector('.record-checkbox'))
                 .filter(cb => cb && cb.checked);
 
@@ -980,10 +1267,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
                 const data = await resp.json();
                 if (resp.ok && (data.code === 200 || data.success)) {
-                    alert(data.message || '选中的明细已成功移入回收站！');
-                    window.location.reload();
+                    showToast(data.message || '选中的明细已成功移入回收站！');
+                    setTimeout(() => window.location.reload(), 300);
                 } else {
-                    alert(data.message || '批量删除失败，请重试');
+                    showToast(data.message || '批量删除失败，请重试', 'danger');
                     batchDeleteBtn.disabled = false;
                     batchDeleteBtn.innerHTML = origHtml;
                 }
@@ -997,7 +1284,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // 初始化运行一次筛选与分页
-    applyFilterAndPagination();
+    updateSelectionState();
 });
 </script>
 {% endblock %}

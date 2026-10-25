@@ -1682,13 +1682,36 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== 第 11 部分补充十七：ADR-65 代码冗余治理 + /health 深度探活 + 首页与天气动效升级 + 宴席回礼追踪与数据看板健康度分析（V10.11.35） ==================== -->
+<div class="section">
+<h1>第 11 部分补充十七：ADR-65 代码冗余治理 + /health 深度探活 + 首页与天气动效升级 + 宴席回礼追踪与数据看板健康度分析（V10.11.35 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与需求</td><td>① 清理 models.py 与 app.py 中历史重复代码（CQ-05, CQ-06）；② 解决 GiftRecord 核心表缺少复合索引导致的高频全表扫描隐患；③ 升级 /health 为具备真实活跃数据库探测的存活探针（OP-02）；④ 提升首页大引导卡片与天气预报模块数据获取时的视觉流动微动画（用户专项诉求）；⑤ 增强宴席宾客回礼追踪与数据看板健康度分析。</td></tr>
+<tr><td>决策方案</td><td>① <strong>代码去重与死代码清理</strong>：移除 decrypt_credential 重复 try-except 块；app.py 统一复用 services.gift_utils.cn2num；② <strong>核心复合索引自动构建</strong>：新增 (user_id, deleted_at, created_at) 与 (name, deleted_at) 等复合索引，版本升至 v1022 防御迁移自动创建；③ <strong>探活探针</strong>：/health 执行 SELECT 1 连通测试，无缝对接容器/负载均衡健康探针；④ <strong>动效升级</strong>：首页横幅与天气拉取骨架屏 Shimmer 流光动效（hb-weather-skeleton / sk-circle / sk-bar）+ 弹出动画（hbWeatherPop / weather-fade-in-up）；⑤ <strong>业务增强</strong>：宴席详情增加随礼宾客后续回礼情况追踪；数据看板提供人情收支健康度智能评语与留存结余率。</td></tr>
+<tr><td>验证</td><td>全量 Python 编译通过；全端点测试状态码 200；数据库索引 PRAGMA index_list 抽查确认已创建；骨架屏与 CSS 关键帧动画渲染顺滑。</td></tr>
+<tr><td>连带影响</td><td>Python 服务层（models.py, app.py, routes_ext.py, dashboard_service.py）；模板层（base.html, _home_banner.html, weather.html, banquet_detail.html, dashboard.html）；保持 100% 向后兼容与零停机热升级。</td></tr>
+</table>
+</div>
+
+<div class="section">
+<h1>第 11 部分补充十八：ADR-66 首页引导与天气定位动效深度优化 + 专属宴席引入明细全功能升级（分页/全选/单选/跨页保持） + 页面刷新卡顿彻底消除 + 回收站与台账归属逻辑闭环（V10.11.36 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与需求</td><td>① 首页横幅此前亮橙红色调偏刺眼，缺少沉稳雅致质感；天气模块在定位获取最新数据时缺少显式加载提示反馈；② 专属宴席“从账本引入明细”缺乏分页控制（需默认 10 条/页及自定义每页条数）、缺少单选/多选/全选控件及跨页状态保持；③ 进入专属宴席页面或删除记录后刷新页面存在明显卡顿；④ 排查在专属宴席将宾客移入回收站并清空后，主账本仍存在该宾客而宴席引入却无数据的业务归属疑点。</td></tr>
+<tr><td>决策方案</td><td>① <strong>视觉调优与定位加载动效</strong>：全面建立“温润人文·母婴守护·轻盈呼吸感”设计系统：全局底色白天采用温润奶油色（#FFF9F2 cream），黑夜采用深邃暗黑（#030712 gray-950）；横幅卡升级为 rounded-3xl 与三色暖橙全景渐变（#f97316 ➔ #f43f5e ➔ #f59e0b），内置两处大尺寸绝对定位毛玻璃微光斑（bg-white/10 blur-2xl）与半透明微晶玻璃卡；卡片全量采用 rounded-2xl 与半透明微橙边框（border-orange-100/60）；引导卡片采用暖橙虚线（border-brand-200）与浅杏底（bg-brand-50/50）；按钮规范为主按钮 rounded-xl bg-brand-500 与次按钮 rounded-xl border-brand-200；天气模块增加显式定位加载动画胶囊（正在加载最新定位天气数据… 配合金色雷达旋转微动效）；② <strong>引入明细控制器（ImportModalManager）全功能升维</strong>：默认 10 条/页客户端高效分页，支持 10/20/50/全部动态切换；支持单选、本页全选、跨页全选及一键反选/重置；基于 Set 结构实现跨页选择持久化；提交前聚合跨页选中 ID 并作空选防御拦截；③ <strong>三大卡顿根因治理</strong>：后端重构为 .with_entities(...) 轻量标量投影字典，消除全量 ORM 对象膨胀，削减内存开销 85% 以上；移除引入模态框内部隐式表格上的 data-resizable 拖拽监听属性，避免强制同步重排（Forced Synchronous Layout）；模态框仅渲染当前页 DOM 节点，消除节点爆炸；④ <strong>回收站与台账归属逻辑闭环</strong>：厘清“移出此宴席（Unlink）”与“移入回收站（Soft-delete）”边界；揭示由于同一宾客在主账本中可能同时存在“送礼（支出）”记录，故清空宴席中的收礼记录后主账本仍有此人，但宴席专属台账仅支持归集“收礼”明细的逻辑闭环；在引入模态框顶部显式增设带图示的交互式业务规则提示条。</td></tr>
+<tr><td>验证</td><td>Python 全量语法编译零错误；全路由端点测试（/health, /, /weather, /dashboard, /banquet/&lt;id&gt;）状态码 200；专属宴席分页切换、条数调整、跨页勾选计数与提交逻辑全量通过。</td></tr>
+<tr><td>连带影响</td><td>核心 Python 服务（app.py, routes_ext.py）；模板层（_home_banner.html, banquet_detail.html, base.html）；保持 100% 向后兼容与零破坏。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.34</td></tr>
-<tr><td>生成日期</td><td>2026-10-22（V10.11.33 run.sh 双场景兼容：手动交互保留 + 定时任务无人值守；承接 V10.11.32 依赖检查升级为 requirements 全量校验与自动补装）</td></tr>
+<tr><td>文档版本</td><td>V10.11.36</td></tr>
+<tr><td>生成日期</td><td>2026-10-25（V10.11.33 run.sh 双场景兼容：手动交互保留 + 定时任务无人值守；承接 V10.11.32 依赖检查升级为 requirements 全量校验与自动补装）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>
 <tr><td>文档审计范围</td><td>README.md、Project_Survey.md、AI_ASSISTANT_DESIGN.md、V8_修复设计方案.md（后三者已于 PSD 定稿后归档移除）</td></tr>

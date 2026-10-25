@@ -24,6 +24,7 @@ from services.models import (
     ScheduledBackupTask, BackupAttachment, PermissionTicket,
     FamilyGroup, FamilyMember
 )
+from services.gift_utils import cn2num
 from services.webhook_utils import trigger_webhook_event
 from services.webdav_utils import (
     test_connection as test_webdav_connection,
@@ -439,44 +440,7 @@ def load_user(user_id):
             session['session_token'] = user.session_token
     return user
 
-def cn2num(s):
-    if not s:
-        return 0.0
-    s = str(s).strip()
-    s = s.replace('元', '').replace('圆', '').replace('正', '').replace('整', '').strip()
-    try:
-        return float(s)
-    except ValueError:
-        pass
-    
-    num_map = {'零':0, '壹':1, '贰':2, '叁':3, '肆':4, '伍':5, '陆':6, '柒':7, '捌':8, '玖':9,
-               '一':1, '二':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9, '两':2}
-    unit_map = {'拾':10, '十':10, '佰':100, '百':100, '仟':1000, '千':1000, '万':10000, '亿':100000000}
-    
-    total = 0
-    section = 0
-    number = 0
-    has_digit = False
-    
-    for char in s:
-        if char in num_map:
-            number = num_map[char]
-            has_digit = True
-        elif char in unit_map:
-            unit = unit_map[char]
-            has_digit = True
-            if unit == 10000 or unit == 100000000:
-                section = (section + (number if number != 0 or not section else 0)) * unit
-                total += section
-                section = 0
-                number = 0
-            else:
-                if number == 0:
-                    number = 1
-                section += number * unit
-                number = 0
-    total += section + number
-    return float(total) if has_digit else 0.0
+# CQ-05 统一治理：cn2num 已抽离至 services.gift_utils 统一复用维护
 
 
 def get_accessible_records_query(user, menu_key='ledger'):
@@ -672,7 +636,8 @@ def num2cn_filter(num):
 # V10.11.8: 新增 alert_push_configs / alert_push_grants 两张告警推送表
 # V10.11.18: 新增 users.webhook_authorized 字段与相关索引
 # V10.11.23: 新增 alert_push_configs.channels 告警推送渠道选择字段
-_SCHEMA_VERSION = 1021
+# V10.11.35: 礼金核心表高频索引自动构建
+_SCHEMA_VERSION = 1022
 
 def _is_db_schema_current():
     """检查数据库结构版本是否已标记为当前版本（SQLite 用 PRAGMA user_version，PG 用 schema_version 表）"""
@@ -1096,6 +1061,14 @@ def init_database():
             "ALTER TABLE alert_push_configs ADD COLUMN channels TEXT DEFAULT ''",
         ])
 
+        # --- V10.11.35 新增：GiftRecord 核心表性能索引构建 ---
+        migration_sqls.extend([
+            "CREATE INDEX IF NOT EXISTS idx_gift_user_del_created ON gift_records (user_id, deleted_at, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_gift_name_del ON gift_records (name, deleted_at)",
+            "CREATE INDEX IF NOT EXISTS idx_gift_banquet ON gift_records (banquet_id)",
+            "CREATE INDEX IF NOT EXISTS idx_gift_reason ON gift_records (event_reason)",
+        ])
+
         # V10.9: 数据迁移 — 将现有 Webhook 的空监控范围预填为全选
         # 逻辑变更：空列表从"不限制=全部放行"改为"不推送"，需保证现有通道不受影响
         try:
@@ -1182,12 +1155,25 @@ except Exception as _e:
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """轻量健康检查端点（供容器探针/负载均衡器/监控服务调用）"""
+    """生产级健康检查探针：包含服务状态与数据库活跃连通性探测（供 Docker/K8s/负载均衡探针使用）"""
+    db_ok = True
+    db_msg = 'healthy'
+    try:
+        db.session.execute(db.text("SELECT 1"))
+    except Exception as e:
+        db_ok = False
+        db_msg = str(e)
+
+    status_code = 200 if db_ok else 503
     return jsonify({
-        'status': 'ok',
+        'status': 'ok' if db_ok else 'unhealthy',
         'app': 'gift_bookkeeping_app',
-        'version': 'V10.11.34'
-    }), 200
+        'version': 'V10.11.37',
+        'database': {
+            'status': 'connected' if db_ok else 'disconnected',
+            'detail': db_msg
+        }
+    }), status_code
 
 @app.route('/')
 @login_required

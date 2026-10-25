@@ -55,7 +55,7 @@ def encrypt_credential(plain_text, secret_key=None):
         return None
 
 def decrypt_credential(cipher_text, secret_key=None, fallback_plain=False):
-    """使用 AES-256-GCM 对称算法对凭证进行解密，支持旧明文平滑回退"""
+    """使用 AES-256-GCM 对称算法对凭证进行解密，支持旧明文平滑回退（已清理 CQ-06 冗余死代码）"""
     if not cipher_text:
         return None
     try:
@@ -71,19 +71,6 @@ def decrypt_credential(cipher_text, secret_key=None, fallback_plain=False):
         return decrypted_bytes.decode('utf-8')
     except Exception:
         return cipher_text if fallback_plain else None
-    try:
-        AESGCM = _get_aesgcm()
-        key = get_aes_key(secret_key)
-        aesgcm = AESGCM(key)
-        encrypted_raw = base64.b64decode(cipher_text.encode('utf-8'))
-        if len(encrypted_raw) < 13:
-            return None
-        nonce = encrypted_raw[:12]
-        cipher_bytes = encrypted_raw[12:]
-        decrypted_bytes = aesgcm.decrypt(nonce, cipher_bytes, None)
-    except Exception as e:
-        print(f"[AES Decrypt Error] {e}")
-        return None
 
 db = SQLAlchemy()
 
@@ -507,21 +494,25 @@ class Banquet(db.Model):
 
 class GiftRecord(db.Model):
     __tablename__ = 'gift_records'
+    __table_args__ = (
+        db.Index('idx_gift_user_del_created', 'user_id', 'deleted_at', 'created_at'),
+        db.Index('idx_gift_name_del', 'name', 'deleted_at'),
+    )
     
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(64), nullable=False)           # 姓名 - 必填
-    record_type = db.Column(db.String(20), default='receive') # 记录类型：'receive' (收礼) | 'send' (随礼/送礼)
+    name = db.Column(db.String(64), nullable=False, index=True)           # 姓名 - 必填
+    record_type = db.Column(db.String(20), default='receive', index=True) # 记录类型：'receive' (收礼) | 'send' (随礼/送礼)
     age = db.Column(db.Integer, nullable=True)                 # 年龄 - 可选
     address = db.Column(db.String(256), nullable=True)         # 地址 - 可选
     phone = db.Column(db.String(30), nullable=True)            # 联系电话 - 可选
     amount = db.Column(db.Float, nullable=False)               # 礼金数额 - 必填
-    event_reason = db.Column(db.String(128), nullable=False)   # 办席事由/送礼原因 - 必填
+    event_reason = db.Column(db.String(128), nullable=False, index=True)   # 办席事由/送礼原因 - 必填
     notes = db.Column(db.Text, nullable=True)                  # 备注 - 可选
-    created_at = db.Column(db.DateTime, default=datetime.now)
-    deleted_at = db.Column(db.DateTime, nullable=True)         # 软删除标记（回收站）
+    created_at = db.Column(db.DateTime, default=datetime.now, index=True)
+    deleted_at = db.Column(db.DateTime, nullable=True, index=True)         # 软删除标记（回收站）
     
-    banquet_id = db.Column(db.Integer, db.ForeignKey('banquets.id', ondelete='SET NULL'), nullable=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    banquet_id = db.Column(db.Integer, db.ForeignKey('banquets.id', ondelete='SET NULL'), nullable=True, index=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
 
     @property
     def person_name(self):

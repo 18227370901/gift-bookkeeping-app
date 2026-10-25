@@ -107,11 +107,23 @@ def calculate_dashboard_stats(user, start_month=None, end_month=None, start_year
         v['total'] = v['received'] + v['sent']
     top10_contacts = sorted(contact_map.values(), key=lambda x: x['total'], reverse=True)[:10]
 
+    net_rate = round((net_amount / total_received * 100), 1) if total_received > 0 else 0.0
+    if total_count == 0:
+        health_comment = "当前筛选周期内暂无记账数据，快去记录第一笔人情礼金吧！"
+    elif net_amount > 0:
+        health_comment = f"人情往来资金流良好，收礼大于随礼支出，实现人情顺差结余 ¥{net_amount:,.2f}（留存结余率 {net_rate}%）。"
+    elif net_amount == 0:
+        health_comment = "人情往来收支完全相抵平衡，礼尚往来，恰到好处。"
+    else:
+        health_comment = f"近期随礼支出相对集中，人情结余为逆差 ¥{abs(net_amount):,.2f}，属于正常的人情走动周期，建议关注短期资金流。"
+
     return {
         'summary': {
             'total_received': round(total_received, 2),
             'total_sent': round(total_sent, 2),
             'net_amount': round(net_amount, 2),
+            'net_rate': net_rate,
+            'health_comment': health_comment,
             'total_count': total_count
         },
         'monthly_trend': monthly_trend,

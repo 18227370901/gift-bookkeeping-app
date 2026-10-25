@@ -2020,10 +2020,53 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash(f'同步专属大账本失败：{str(e)}', 'danger')
         return redirect(url_for('banquets_view'))
 
+    @app.route('/banquet/<int:banquet_id>/available_records', methods=['GET'])
+    @login_required
+    def banquet_available_records(banquet_id):
+        """异步按需拉取可引入到专属宴席的候选收礼记录（仅在打开引入模态框时调用，彻底解除页面刷新阻塞）"""
+        b = db.session.get(Banquet, banquet_id)
+        if not b or b.deleted_at:
+            return jsonify({'code': 404, 'message': '宴席账本不存在或已被删除', 'records': []}), 404
+        if can_user_view_entity and not can_user_view_entity(current_user, b, 'banquets'):
+            return jsonify({'code': 403, 'message': '您没有权限查看该专属宴席', 'records': []}), 403
+
+        if get_accessible_records_query:
+            cand_query = get_accessible_records_query(current_user)
+        else:
+            cand_query = GiftRecord.query.filter(GiftRecord.deleted_at.is_(None))
+            if not (current_user.is_admin or getattr(current_user, 'can_view_others', False)):
+                cand_query = cand_query.filter_by(user_id=current_user.id)
+
+        avail_rows = cand_query.filter(
+            GiftRecord.record_type == 'receive',
+            GiftRecord.deleted_at.is_(None),
+            db.or_(GiftRecord.banquet_id.is_(None), GiftRecord.banquet_id != b.id)
+        ).with_entities(
+            GiftRecord.id,
+            GiftRecord.name,
+            GiftRecord.amount,
+            GiftRecord.event_reason,
+            GiftRecord.notes,
+            GiftRecord.created_at
+        ).order_by(GiftRecord.created_at.desc()).all()
+
+        records_data = [
+            {
+                'id': row.id,
+                'name': row.name,
+                'amount': row.amount,
+                'event_reason': row.event_reason or '',
+                'notes': row.notes or '',
+                'created_at_str': row.created_at.strftime('%Y-%m-%d') if row.created_at else '-'
+            }
+            for row in avail_rows
+        ]
+        return jsonify({'code': 200, 'records': records_data, 'total': len(records_data)})
+
     @app.route('/banquet/<int:banquet_id>')
     @login_required
     def banquet_detail_view(banquet_id):
-        """专属宴席大账本详情、现场快速录入台账与盈亏分析"""
+        """专属宴席大账本详情、现场快速录入台账与盈亏分析（服务端高性能物理分页）"""
         b = db.session.get(Banquet, banquet_id)
         if not b or b.deleted_at:
             flash('该宴席账本不存在或已被删除！', 'warning')
@@ -2033,16 +2076,79 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('您没有权限查看该专属宴席！', 'danger')
             return redirect(url_for('banquets_view'))
 
+        # 1. 基础明细查询构建
         if get_accessible_records_query:
-            records = get_accessible_records_query(current_user).filter(GiftRecord.banquet_id == b.id, GiftRecord.deleted_at.is_(None)).order_by(GiftRecord.created_at.desc()).all()
+            base_q = get_accessible_records_query(current_user).filter(
+                GiftRecord.banquet_id == b.id,
+                GiftRecord.deleted_at.is_(None)
+            )
         else:
-            records = GiftRecord.query.filter_by(banquet_id=b.id).filter(GiftRecord.deleted_at.is_(None)).order_by(GiftRecord.created_at.desc()).all()
-        total_income = sum(r.amount for r in records if getattr(r, 'record_type', 'receive') != 'send')
-        cost = b.banquet_cost or 0.0
-        net_profit = total_income - cost
-        recovery_rate = (total_income / cost * 100) if cost > 0 else 0
+            base_q = GiftRecord.query.filter_by(
+                banquet_id=b.id
+            ).filter(GiftRecord.deleted_at.is_(None))
 
-        # 候选收礼记录（仅未删除、收礼类型、当前未归属于本宴席的记录供引入）
+        # 2. 数据库级极速聚合统计（避免将全量 ORM 实体加载入内存）
+        total_income_val = base_q.filter(
+            GiftRecord.record_type != 'send'
+        ).with_entities(db.func.coalesce(db.func.sum(GiftRecord.amount), 0.0)).scalar()
+        total_income = float(total_income_val or 0.0)
+        total_count = base_q.count()
+
+        cost = float(b.banquet_cost or 0.0)
+        net_profit = total_income - cost
+        recovery_rate = (total_income / cost * 100) if cost > 0 else 0.0
+
+        # 3. 解析搜索、金额筛选、排序与分页参数
+        q = (request.args.get('q', '') or request.args.get('search', '')).strip()
+        amount_filter = request.args.get('amount_range', '').strip()
+        sort_by = request.args.get('sort', 'time_desc').strip()
+        page = request.args.get('page', 1, type=int)
+        per_page = request.args.get('per_page', 10, type=int)
+        if per_page not in [5, 10, 20, 50, 100]:
+            per_page = 10
+        if page < 1:
+            page = 1
+
+        filter_q = base_q
+        if q:
+            search_pattern = f"%{q}%"
+            filter_q = filter_q.filter(
+                db.or_(
+                    GiftRecord.name.ilike(search_pattern),
+                    GiftRecord.phone.ilike(search_pattern),
+                    GiftRecord.notes.ilike(search_pattern),
+                    db.cast(GiftRecord.amount, db.String).ilike(search_pattern)
+                )
+            )
+
+        if amount_filter == '0-200':
+            filter_q = filter_q.filter(GiftRecord.amount <= 200)
+        elif amount_filter == '200-500':
+            filter_q = filter_q.filter(GiftRecord.amount >= 200, GiftRecord.amount <= 500)
+        elif amount_filter == '500-1000':
+            filter_q = filter_q.filter(GiftRecord.amount >= 500, GiftRecord.amount <= 1000)
+        elif amount_filter == '1000-2000':
+            filter_q = filter_q.filter(GiftRecord.amount >= 1000, GiftRecord.amount <= 2000)
+        elif amount_filter == '2000+':
+            filter_q = filter_q.filter(GiftRecord.amount > 2000)
+
+        # 排序
+        if sort_by == 'time_asc':
+            filter_q = filter_q.order_by(GiftRecord.created_at.asc(), GiftRecord.id.asc())
+        elif sort_by == 'amount_desc':
+            filter_q = filter_q.order_by(GiftRecord.amount.desc(), GiftRecord.id.desc())
+        elif sort_by == 'amount_asc':
+            filter_q = filter_q.order_by(GiftRecord.amount.asc(), GiftRecord.id.asc())
+        elif sort_by == 'name_asc':
+            filter_q = filter_q.order_by(GiftRecord.name.asc(), GiftRecord.id.desc())
+        else:
+            filter_q = filter_q.order_by(GiftRecord.created_at.desc(), GiftRecord.id.desc())
+
+        matched_count = filter_q.count()
+        pagination = filter_q.paginate(page=page, per_page=per_page, error_out=False)
+        records = pagination.items
+
+        # 候选收礼记录轻量极速计数（模态框打开时异步获取明细列表）
         if get_accessible_records_query:
             cand_query = get_accessible_records_query(current_user)
         else:
@@ -2050,11 +2156,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             if not (current_user.is_admin or getattr(current_user, 'can_view_others', False)):
                 cand_query = cand_query.filter_by(user_id=current_user.id)
         
-        available_records = cand_query.filter(
+        available_count = cand_query.filter(
             GiftRecord.record_type == 'receive',
             GiftRecord.deleted_at.is_(None),
             db.or_(GiftRecord.banquet_id.is_(None), GiftRecord.banquet_id != b.id)
-        ).order_by(GiftRecord.created_at.desc()).all()
+        ).count()
 
         # 分享链接信息
         share = SharedLedgerLink.query.filter_by(banquet_id=b.id, is_active=True).first()
@@ -2063,13 +2169,22 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             'banquet_detail.html',
             banquet=b,
             records=records,
-            available_records=available_records,
+            pagination=pagination,
+            page=page,
+            per_page=per_page,
+            total_count=total_count,
+            matched_count=matched_count,
+            q=q,
+            amount_filter=amount_filter,
+            sort_by=sort_by,
+            available_count=available_count,
             total_income=total_income,
             banquet_cost=cost,
             net_profit=net_profit,
             recovery_rate=recovery_rate,
             share=share
         )
+
 
     @app.route('/banquet/edit/<int:banquet_id>', methods=['POST'])
     @login_required

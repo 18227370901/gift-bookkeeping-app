@@ -120,6 +120,16 @@
     </div>
 </div>
 
+<!-- 人情往来健康度微卡片 -->
+<div class="alert alert-light border shadow-sm py-2 px-3 mb-4 d-flex align-items-center justify-content-between flex-wrap gap-2" id="healthCommentWrap">
+    <div class="d-flex align-items-center gap-2">
+        <i class="fa-solid fa-heart-pulse text-danger"></i>
+        <strong>人情收支健康度：</strong>
+        <span id="healthCommentText" class="text-muted">正在评估分析中…</span>
+    </div>
+    <span class="badge bg-primary-subtle text-primary px-3 py-2" id="netRateBadge">结余率：--</span>
+</div>
+
 <!-- 图表区域 -->
 <div class="row g-3">
     <!-- 月度/年度收送走势 -->
@@ -395,6 +405,14 @@ function loadDashboardData() {
             netEl.textContent = '¥ ' + (net >= 0 ? '+' : '') + net.toFixed(2);
             netEl.className = 'h3 fw-bold mb-0 mt-1 privacy-blur ' + (net >= 0 ? 'text-success' : 'text-danger');
             document.getElementById('totalCount').textContent = (s.total_count || 0) + ' 笔';
+            if (s.health_comment) {
+                document.getElementById('healthCommentText').textContent = s.health_comment;
+            }
+            if (s.net_rate !== undefined) {
+                var rateBadge = document.getElementById('netRateBadge');
+                rateBadge.textContent = '留存结余率：' + (s.net_rate >= 0 ? '+' : '') + s.net_rate + '%';
+                rateBadge.className = 'badge ' + (s.net_rate >= 0 ? 'bg-success-subtle text-success' : 'bg-warning-subtle text-warning') + ' px-3 py-2';
+            }
             // 渲染图表
             renderTrendChart();
             renderReasonChart();

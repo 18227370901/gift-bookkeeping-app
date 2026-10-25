@@ -45,6 +45,52 @@
     #weatherTrendChart, #compareChart { width: 100%; height: 260px; }
     .region-select { min-width: 0; }
 
+    /* 天气组件渐入动画与微动效 */
+    .weather-fade-in-up {
+        animation: weatherFadeInUp 0.42s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    }
+    @keyframes weatherFadeInUp {
+        from { opacity: 0; transform: translateY(12px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* 骨架屏动态流动光效 */
+    .weather-skeleton-hero {
+        background: var(--app-card-bg);
+        border: 1px solid var(--app-border-soft);
+    }
+    .sk-circle {
+        width: 56px; height: 56px; border-radius: 50%;
+        background: linear-gradient(90deg, rgba(100,116,139,0.12) 25%, rgba(100,116,139,0.28) 50%, rgba(100,116,139,0.12) 75%);
+        background-size: 200% 100%;
+        animation: weatherShimmer 1.5s infinite linear;
+    }
+    .sk-bar {
+        height: 16px; border-radius: 6px;
+        background: linear-gradient(90deg, rgba(100,116,139,0.12) 25%, rgba(100,116,139,0.28) 50%, rgba(100,116,139,0.12) 75%);
+        background-size: 200% 100%;
+        animation: weatherShimmer 1.5s infinite linear;
+    }
+    @keyframes weatherShimmer {
+        0% { background-position: 200% 0; }
+        100% { background-position: -200% 0; }
+    }
+
+    /* 顶部查询进度条（查询时闪烁优雅进度光线） */
+    .weather-query-progress {
+        position: relative; overflow: hidden;
+    }
+    .weather-query-progress::after {
+        content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+        background: linear-gradient(90deg, transparent, #0d6efd, #0dcaf0, transparent);
+        background-size: 200% 100%;
+        animation: queryProgressGlow 1.2s infinite ease-in-out;
+    }
+    @keyframes queryProgressGlow {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+    }
+
     /* ===== V10.11.8 新增样式 ===== */
     /* 生活指数 / 空气质量卡片 */
     .life-item {
@@ -896,7 +942,21 @@
 
     // ===== 统一请求执行（V10.11.8：AbortController 超时 + 请求序号防竞态 + 按钮独立 loading） =====
     // V10.11.26 增加 quiet 静默模式（自动刷新）：成功/失败用弱提示，不打扰用户
+    function showForecastSkeleton() {
+        if (forecastOfflineCard) forecastOfflineCard.style.display = 'none';
+        if (forecastDataContainer) {
+            forecastDataContainer.style.display = '';
+            if (weatherHeroSection) {
+                weatherHeroSection.className = 'mb-3 weather-fade-in-up';
+                weatherHeroSection.innerHTML = '<div class="weather-skeleton-hero p-4 rounded-4 shadow-sm mb-3"><div class="d-flex align-items-center gap-3"><div class="sk-circle"></div><div class="flex-grow-1"><div class="sk-bar w-50 mb-2"></div><div class="sk-bar w-25"></div></div></div></div>';
+            }
+        }
+    }
+
     function execQuery(btnKey, displayName, quiet) {
+        if (!quiet && (!cachedData || !cachedData.daily)) {
+            showForecastSkeleton();
+        }
         var mySeq = ++reqSeq;
         var btn = btnKey === 'cascade' ? cascadeBtn : (btnKey === 'text' ? searchBtn : null);
         if (btn && btnKey) {
@@ -1770,11 +1830,26 @@
             pageCityTitle.innerHTML = '<i class="fa-solid fa-location-dot text-primary me-2"></i>' + escapeHtml(cName) +
                 (data.offline_fallback ? ' <span class="badge bg-secondary ms-1 fs-6"><i class="fa-solid fa-cloud-moon me-1"></i>离线预估</span>' : '');
         }
-        if (weatherHeroSection) weatherHeroSection.innerHTML = renderHero(city, cur, daily[0], data.air_quality);
-        if (weatherTrendWrap) weatherTrendWrap.innerHTML = renderTrendChartWrap(daily);
-        if (weatherDailyGrid) weatherDailyGrid.innerHTML = renderDailyGrid(daily);
-        if (weatherLifeSection) weatherLifeSection.innerHTML = renderLifeSection(cur, daily[0]);
-        if (weatherCompareSection) weatherCompareSection.innerHTML = renderCompareSection();
+        if (weatherHeroSection) {
+            weatherHeroSection.className = 'mb-3 weather-fade-in-up';
+            weatherHeroSection.innerHTML = renderHero(city, cur, daily[0], data.air_quality);
+        }
+        if (weatherTrendWrap) {
+            weatherTrendWrap.className = 'mb-3 weather-fade-in-up';
+            weatherTrendWrap.innerHTML = renderTrendChartWrap(daily);
+        }
+        if (weatherDailyGrid) {
+            weatherDailyGrid.className = 'weather-fade-in-up';
+            weatherDailyGrid.innerHTML = renderDailyGrid(daily);
+        }
+        if (weatherLifeSection) {
+            weatherLifeSection.className = 'mb-3 weather-fade-in-up';
+            weatherLifeSection.innerHTML = renderLifeSection(cur, daily[0]);
+        }
+        if (weatherCompareSection) {
+            weatherCompareSection.className = 'mb-3 weather-fade-in-up';
+            weatherCompareSection.innerHTML = renderCompareSection();
+        }
         renderCompareTags();  // 纯 DOM 渲染（无网络）：显示已保存对比城市标签
         initChartIfNeeded();
         renderCalendarView();

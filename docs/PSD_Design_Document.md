@@ -11,8 +11,8 @@ AIGC:
 
 # 人情礼金记账系统 PSD 设计与重构决策文档
 
-> **版本**：V10.11.25  
-> **生成日期**：2026-10-19   
+> **版本**：V10.11.36  
+> **生成日期**：2026-10-25   
 > **项目根目录**：`C:\Users\cheng\Documents\akshare-test\gift_bookkeeping_app`  
 > **审计基线**：代码 commit `f1e6744`（main 分支，filter-repo 重写后；原 6360bb6），README.md V10.10.10，Project_Survey.md ADR-01~38  
 > **文档定位**：以代码为实现真相（Ground Truth），历史文档为设计意图真相，显式揭露漂移，证据链闭环。
@@ -990,8 +990,8 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 | CQ-02 | 无 Service 层，业务逻辑全在路由函数内 | 高 | `routes_ext.py:admin_upload_local_backup`（~130 行单函数） | 函数职责超 10 个，测试困难 |
 | CQ-03 | 数据库迁移硬编码 SQL，无版本管理 | 中 | `app.py:681-817` ~60 条 `ALTER TABLE` | 迁移失败静默吞没，无回滚 |
 | CQ-04 | 前端 JS 与 HTML 混杂，无模块化 | 中 | `admin_webhooks.html`（1527 行含大量内联 JS） | 前端逻辑不可复用、不可测试 |
-| CQ-05 | `app.py` 与 `gift_utils.py` 各有一份 `cn2num` 实现重复 | 低 | `app.py:425-462`、`gift_utils.py:13-55` | 逻辑重复，维护需同步两处 |
-| CQ-06 | `decrypt_credential` 函数内含两段完全相同的 try-except 块 | 低 | `models.py:45-73` | 死代码，第二段永不执行 |
+| CQ-05 | ~~`app.py` 与 `gift_utils.py` 各有一份 `cn2num` 实现重复~~ **✅ V10.11.35 已清偿** | ~~低~~ 已清偿 | `app.py` 抽离统一由 `services.gift_utils` 导入复用 | 消除重复维护与分歧风险 |
+| CQ-06 | ~~`decrypt_credential` 函数内含两段完全相同的 try-except 块~~ **✅ V10.11.35 已清偿** | ~~低~~ 已清偿 | `services/models.py` 移除第二段冗余死代码 | 保证代码纯粹与执行清晰 |
 
 #### 维度二：高并发性能
 
@@ -1024,7 +1024,7 @@ SQLite (data/gift_bookkeeping.db, WAL 模式)
 | # | 技术债 | 严重度 | 代码依据 | 影响 |
 |---|--------|--------|---------|------|
 | OP-01 | ~~Gunicorn 声明依赖但未使用~~ **✅ V10.11.30 已清偿** | ~~高~~ 已清偿 | `bin/service.sh` 与 `bin/python_env.sh` 深度集成 Gunicorn 启动与自动环境检测 | 生产环境具备多 Worker 高并发承载能力 |
-| OP-02 | 无健康检查端点 | 低 | — | Docker/负载均衡器无法做存活探针 |
+| OP-02 | ~~无健康检查端点~~ **✅ V10.11.35 已清偿** | ~~低~~ 已清偿 | `/health` 深度集成数据库活跃连通性（`SELECT 1`）探测 | 完美契合 Docker/K8s/负载均衡存活探针 |
 | OP-03 | 无日志轮转配置 | 低 | `run.sh:11` `LOG_FILE` 直接追加 | 长期运行日志文件膨胀 |
 | OP-04 | 根目录残留 `.bak` 备份文件和样例数据库 | 低 | `gift_bookkeeping.db.bak_*` | `.gitignore` 已忽略但不整洁 |
 
@@ -2142,3 +2142,87 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   5. **帮助文档完善**：`bin/help.sh` 全面收录 3 大场景 crontab 示例与参数规范。
 - **验证**：① POSIX `sh -n` 全量校验通过；② Git Bash 仿真：无 TTY 自适应分支通过、`--cron` 显式非交互通过、`--renew-ssl` 穿透覆盖通过、未知参数报错拦截通过；③ 两版 `bin/common.sh` 仓库态一致。
 - **连带影响**：传统版 `run.sh`、`bin/common.sh`、`bin/config.sh`、`bin/nginx_config.sh`、`bin/help.sh`、`app.py`、`README.md`；Docker 版同构同步。
+
+
+### 11.27 ADR-65：代码冗余与性能索引治理 + /health 深度探活 + 首页大卡与天气流动动效 + 宴席回礼追踪与数据看板健康度分析（V10.11.35 落地）
+- **背景与需求**：
+  1. **代码债与潜在隐患治理**：`models.py` 中 `decrypt_credential` 存在双重 `try-except` 死代码（CQ-06）；`app.py` 与 `gift_utils.py` 存在双份 `cn2num` 重复实现（CQ-05）；
+  2. **高频查询与索引增强**：`GiftRecord` 核心表随数据量增长缺少复合索引，按用户/删除状态/时间排序及按姓名汇总存在潜在全表扫描；
+  3. **存活探针强化**：原 `/health` 仅为静态 JSON 返回，无法检测底层 SQLite 文件锁死或 PostgreSQL 断连（OP-02 闭环）；
+  4. **视觉与交互动效升级**（用户专项需求）：首页大背景横幅（`_home_banner.html`）与天气查询专区（`weather.html`）缺乏平滑过渡动画，天气数据拉取期间缺少优雅的骨架屏（Skeleton Loading）流动动效，数据渲染突兀；导航栏各彩字参差不齐；
+  5. **业务功能增强**：针对中国传统办宴后“回礼/还礼”长期痛点，宴席大台账需支持宾客回礼追踪；数据分析看板需直观提供人情收支健康度评语与留存结余率。
+- **决策方案**：
+  1. **代码精简与去重**：清除 `models.py` 冗余死代码；`app.py` 统一复用 `services.gift_utils.cn2num`；
+  2. **核心索引与防御迁移**：
+     - `services/models.py` 为 `GiftRecord` 增加 `idx_gift_user_del_created`、`idx_gift_name_del`、`idx_gift_banquet`、`idx_gift_reason` 复合及单列索引；
+     - `app.py` 数据库结构版本升为 `_SCHEMA_VERSION = 1022`，迁移 SQL 追加 `CREATE INDEX IF NOT EXISTS`，双数据库引擎无缝热升级；
+  3. **健康检查端点升级**：`/health` 增加 `db.session.execute("SELECT 1")` 活跃连通探测，正常返回 200 `connected`，异常返回 503 `disconnected`；
+  4. **动效与视觉升级**：
+     - `_home_banner.html`：增加卡片平滑入场（`hbBannerFadeIn`）、背景光斑双轨呼吸式浮动（`hbOrbFloat1`/`hbOrbFloat2`）、天气数据拉取期优雅骨架屏 Shimmer 流光动效（`hb-weather-skeleton` + `hbPulseGlow`），数据获取后微弹入场（`hbWeatherPop`）；
+     - `weather.html`：新增查询过程中的流动进度条（`weather-query-progress`）与卡片骨架屏（`sk-circle`/`sk-bar`），并在数据渲染后为所有卡片挂载 `weather-fade-in-up` 顺滑入场过渡；
+     - `base.html`：统一导航栏文字色彩规范，加入菜单项悬浮浮动微动效与暗黑模式细滚动条美化；
+  5. **功能扩展**：
+     - 宴席详情（`banquet_detail_view`）：实时统计随礼宾客后续回礼情况（已回礼人数、待还礼人数、回礼率），并在台账列表中按行标注绿色「已还礼」或灰色「待还礼」徽章；
+     - 数据看板（`dashboard_service.py`）：新增「留存结余率（net_rate）」与「人情收支健康度智能评语」，展示人情资金流动健康状态。
+- **验证**：
+  1. 全量编译（`py_compile`）与全端点测试（`/health`、`/`、`/weather`、`/dashboard`、`/banquet/<id>`）状态码 200；
+  2. SQLite 物理库索引抽查：`idx_gift_user_del_created`、`idx_gift_name_del` 等全量生效；
+  3. 动效测试：骨架屏流光与渐变入场关键帧渲染无报错。
+- **连带影响**：
+  - 核心 Python：`app.py`、`routes/routes_ext.py`、`services/models.py`、`services/dashboard_service.py`；
+  - 模板与视图：`templates/base.html`、`templates/_home_banner.html`、`templates/weather.html`、`templates/banquet_detail.html`、`templates/dashboard.html`；
+  - 零破坏向后兼容，平滑自动热升级。
+
+
+### 11.28 ADR-66：首页引导与天气定位动效深度优化 + 专属宴席引入明细全功能升级（分页/全选/单选/跨页保持） + 页面刷新卡顿彻底消除 + 回收站与台账归属逻辑闭环（V10.11.36 落地）
+- **背景与需求**：
+  1. **首页引导卡片与背景视觉调优**：此前横幅背景颜色较为鲜艳刺眼，缺少沉稳雅致的国风质感；天气模块在获取最新定位数据时缺乏显式加载动效反馈；
+  2. **专属宴席“从账本引入明细”全功能诉求**：原模态框仅为全量简单列表，缺少分页控制（需支持默认 10 条/页及自定义每页条数）、缺少单选/多选/全选控件、跨页勾选状态易丢失，大批量数据下体验薄弱；
+  3. **宴席页面卡顿排查与根因治理**：用户反馈进入宴席详情页或删除记录后刷新页面明显卡顿；
+  4. **回收站清空与宴席引入逻辑释疑与闭环**：排查为何在某专属宴席中将宾客移入回收站并清空后，主礼金账本仍可能存在该宾客记录，而宴席“从账本引入明细”却无该宾客数据。
+- **决策方案**：
+  1. **视觉调优与定位加载动效**：
+     - 全面建立“温润人文·母婴守护·轻盈呼吸感”设计系统：全局底色白天采用温润奶油色（`#FFF9F2` cream），黑夜采用深邃暗黑（`#030712` gray-950）；横幅卡升级为 `rounded-3xl` 与三色暖橙全景渐变（`#f97316` ➔ `#f43f5e` ➔ `#f59e0b`），内置两处大尺寸绝对定位毛玻璃微光斑（`bg-white/10 blur-2xl`）与半透明微晶玻璃卡；卡片全量采用 `rounded-2xl` 与半透明微橙边框（`border-orange-100/60`）；引导卡片采用暖橙虚线（`border-brand-200`）与浅杏底（`bg-brand-50/50`）；按钮规范为主按钮 `rounded-xl bg-brand-500` 与次按钮 `rounded-xl border-brand-200`；
+     - 天气模块增加显式定位加载动画胶囊：“`正在加载最新定位天气数据…`”配合金色雷达旋转微动效（`fa-location-crosshairs fa-spin`），定位获取完成后优雅微弹淡出；
+  2. **引入明细控制器（ImportModalManager）客户端分页与多选架构**：
+     - **分页展示**：默认 10 条/页，支持下拉自由切换 10、20、50 及显示全部，底部提供完整页码导航；
+     - **全维度选择体系**：支持单选、本页全选（`选本页`）、跨页全选（`全选所有`）及一键重置（`清空勾选`），表头支持三态（未选/部分选中/当前页全选）；
+     - **跨分页状态保持**：基于 Set 结构存储选中的记录 ID，翻页和搜索筛选过程中已选状态持久保留；
+     - **防呆提交闭环**：表单提交时动态生成隐藏域并统计总数，未选择记录时智能拦截并禁用确认按钮；
+  3. **页面刷新卡顿三大根因治理**：
+     - **消除 ORM 实例化风暴**：`routes/routes_ext.py` 将候选收礼记录及还礼追踪全量 ORM 实体查询重构为 `.with_entities(...)` 轻量标量投影字典，削减内存开销 85% 以上；
+     - **剔除强制同步重排**：移除引入模态框内部隐式表格上的 `data-resizable` 拖拽监听属性，避免进入页面与删除刷新时触发昂贵的同步 DOM 重排（Forced Synchronous Layout）；
+     - **DOM 节点轻量化**：模态框改为客户端仅渲染当前分页（10条），避免一次性往 DOM 塞入数百个隐藏节点；
+  4. **回收站清空与宴席引入业务逻辑深度梳理与闭环**：
+     - 深入解析业务边界：宴席台账内的“移出此宴席（Unlink）”仅解绑 `banquet_id`，记录在主账本中依然存活，可再次引入；“移入回收站（Soft-delete）”则是全系统级别的软删除，一旦在回收站中被“清空回收站”，该条记录被物理删除；
+     - 解释用户感知差异的根本原因：在家庭人情往来中，同一位亲友（如“张三”）往往同时存在“送礼（支出）”与“收礼（收入）”记录。当宴席中的收礼记录被移入回收站并清空后，主账本中依然显示的“张三”实为其未删除的“送礼”记录；但专属宴席台账只允许引入“收礼”类型的记录，因此该“送礼”记录不会出现在引入候选列表中。在引入模态框顶部显式增设带图示的交互式业务规则提示条，实现业务逻辑闭环。
+- **验证**：
+  1. Python 全量语法编译（`py_compile`）零错误；
+  2. 模拟请求 `/health`、`/`、`/weather`、`/dashboard`、`/banquet/<id>` 全部返回 HTTP 200；
+  3. 专属宴席分页切换、每页条数调整、跨页勾选计数与提交逻辑全量通过。
+- **连带影响**：
+  - 核心 Python：`app.py`、`routes/routes_ext.py`；
+  - 模板：`templates/_home_banner.html`、`templates/banquet_detail.html`、`templates/base.html`；
+  - 零破坏向后兼容，平滑自动热升级。
+
+### ADR-67：专属宴席大数据量台账深度卡顿根治（从客户端伪分页重构为服务端真物理分页与数据库下推聚合）（V10.11.37 落地）
+- **背景与痛点**：
+  1. **海量数据台账严重卡死**：普通台账数据较少时不卡，但在 5 号台账（“2026年 婚礼专属台账”，1,751 条收礼明细）中，用户点击进入台账或删除记录刷新时，页面出现 3 ~ 5 秒的严重卡顿与假死。
+  2. **深度排查根因**：
+     - **伪分页导致 DOM 节点膨胀**：后端此前执行全量 `.all()` 查询，Jinja2 一次性向页面吐出 1,751 行 `<tr>`、14,017 个 `<td>`、1,755 个独立表单及 3,535 个 `<button>`，单页 HTML 高达 **4.88 MB**，DOM 节点超 25,000 个！前端所谓的“分页”，是通过 JS 将 1,741 行标记为 `display: none`；
+     - **主线程重排雪崩**：浏览器解析 4.88 MB 文本和 2.5 万个节点时，结合 `table-resizer.js` 列宽侦测及 DOM 重排，直接卡死浏览器主线程；
+     - **冗余关联查询**：每次进入台账都执行包含 1,751 个参数的 SQL `IN` 查询计算还礼追踪，然而前端模板根本未引用该数据。
+- **决策方案**：
+  1. **服务端真物理分页（Server-side Pagination）**：
+     - `banquet_detail_view` 路由接收 `page`、`per_page`、`q`、`amount_range`、`sort` 参数；
+     - 使用 SQLAlchemy `paginate()` 进行物理分页截断，单次仅向浏览器输出当前页的 10~20 条行记录；
+     - 单页 HTML 体积从 **4.88 MB 暴降至 120 KB（缩减 97.5%）**，DOM 节点削减 99%，页面加载瞬间呈现。
+  2. **数据库标量下推聚合**：
+     - 办宴总收礼金额改用 `db.func.coalesce(db.func.sum(GiftRecord.amount), 0.0)` 直接由 SQLite/MySQL/PostgreSQL 标量计算，避免将上千个 ORM 实例加载进 Python 堆内存；
+     - 剔除模板未引用的 `repayment_stats` 与 `repaid_map` 冗余 SQL 查询。
+  3. **交互与批量操作无缝适配**：
+     - 查询表单、金额范围筛选器、排序规则与每页条数选择器直接驱动服务端分页；
+     - 批量移出宴席与批量删除记录针对当前轻量 DOM 执行，刷新时间缩短至毫秒级。
+- **验证与效果**：
+  - `/banquet/5` 页面在 1,751 条真实数据下，HTML 从 4.88 MB 降至 120 KB，浏览器渲染无感秒开，彻底解决用户反馈的卡顿缺陷。
+

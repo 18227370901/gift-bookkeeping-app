@@ -75,7 +75,19 @@
         <!-- 右栏：天气实况 -->
         <div class="col-lg-3 col-md-12">
             <div class="hb-weather" id="hbWeatherBox">
-                <i class="fa-solid fa-cloud-sun fa-2x me-2 opacity-50"></i><span class="hb-weather-loading">天气加载中…</span>
+                <div class="hb-weather-skeleton">
+                    <div class="hb-weather-tip mb-2">
+                        <i class="fa-solid fa-location-crosshairs fa-spin me-1 text-warning"></i><span class="hb-tip-text">正在加载最新定位天气数据…</span>
+                    </div>
+                    <div class="d-flex align-items-center justify-content-end gap-2 mb-1">
+                        <i class="fa-solid fa-cloud-sun fa-2x hb-pulse-icon"></i>
+                        <span class="hb-shimmer-bar" style="width: 72px; height: 16px;"></span>
+                    </div>
+                    <div class="d-flex justify-content-end gap-2 align-items-baseline">
+                        <span class="hb-shimmer-bar" style="width: 80px; height: 28px;"></span>
+                        <span class="hb-shimmer-bar" style="width: 48px; height: 16px;"></span>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -83,19 +95,51 @@
 
 <style>
 /* 首页背景横幅：红金渐变主视觉（白天/黑夜双主题，自包含纯 CSS 零图片） */
+/* 组件设计规范 3: 横幅卡（Hero Banner）圆角 rounded-3xl，三色渐变背景，叠加两处大尺寸绝对定位毛玻璃微光斑（bg-white/10 blur-2xl），内嵌半透明玻璃卡片 */
 .hb-banner {
-    position: relative; overflow: hidden; border-radius: 1rem;
-    padding: 1.5rem 1.75rem; color: #fff;
-    background: linear-gradient(135deg, #b71c1c 0%, #d32f2f 48%, #f57c00 100%);
-    box-shadow: 0 0.5rem 1.25rem rgba(183, 28, 28, 0.28);
+    position: relative; overflow: hidden;
+    border-radius: 1.5rem !important; /* rounded-3xl */
+    padding: 1.75rem 2rem; color: #fff;
+    /* bg-gradient-to-r from-orange-500 via-rose-500 to-amber-500 */
+    background: linear-gradient(135deg, #f97316 0%, #f43f5e 50%, #f59e0b 100%) !important;
+    box-shadow: 0 0.75rem 2.5rem rgba(249, 115, 22, 0.28), 0 0.2rem 0.6rem rgba(244, 63, 94, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.22);
 }
 [data-bs-theme="dark"] .hb-banner {
-    background: linear-gradient(135deg, #4a0f0f 0%, #7f1d1d 52%, #9a3412 100%);
-    box-shadow: 0 0.5rem 1.25rem rgba(0, 0, 0, 0.45);
+    background: linear-gradient(135deg, #7c2d12 0%, #881337 50%, #78350f 100%) !important;
+    box-shadow: 0 0.75rem 2.5rem rgba(0, 0, 0, 0.45);
+    border: 1px solid rgba(255, 255, 255, 0.10);
 }
+.hb-banner { animation: hbBannerFadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
+@keyframes hbBannerFadeIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* 两处大尺寸绝对定位毛玻璃微光斑（bg-white/10 blur-2xl） */
 .hb-deco { position: absolute; border-radius: 50%; pointer-events: none; }
-.hb-deco-1 { width: 320px; height: 320px; right: -90px; top: -130px; background: radial-gradient(circle, rgba(255, 255, 255, 0.16) 0%, transparent 70%); }
-.hb-deco-2 { width: 240px; height: 240px; left: -80px; bottom: -120px; background: radial-gradient(circle, rgba(255, 224, 130, 0.14) 0%, transparent 70%); }
+.hb-deco-1 {
+    width: 380px; height: 380px; right: -80px; top: -140px;
+    background: rgba(255, 255, 255, 0.14) !important;
+    filter: blur(48px) !important;
+    -webkit-filter: blur(48px) !important;
+    animation: hbOrbFloat1 12s ease-in-out infinite;
+}
+.hb-deco-2 {
+    width: 320px; height: 320px; left: -70px; bottom: -120px;
+    background: rgba(255, 255, 255, 0.12) !important;
+    filter: blur(40px) !important;
+    -webkit-filter: blur(40px) !important;
+    animation: hbOrbFloat2 10s ease-in-out infinite;
+}
+@keyframes hbOrbFloat1 {
+    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.85; }
+    50% { transform: translate(-14px, 10px) scale(1.08); opacity: 1; }
+}
+@keyframes hbOrbFloat2 {
+    0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.85; }
+    50% { transform: translate(12px, -8px) scale(1.06); opacity: 1; }
+}
 .hb-greet { font-size: 0.95rem; opacity: 0.92; }
 .hb-clock {
     font-size: 2.5rem; font-weight: 700; line-height: 1.15; letter-spacing: 2px;
@@ -113,13 +157,13 @@
 
 /* 中栏微晶玻璃卡片 */
 .hb-mid-card {
-    background: rgba(255, 255, 255, 0.12);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    border-radius: 0.85rem;
-    padding: 0.85rem 1.1rem;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+    background: rgba(255, 255, 255, 0.16) !important; /* bg-white/15 */
+    backdrop-filter: blur(16px) !important; /* backdrop-blur-md */
+    -webkit-backdrop-filter: blur(16px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.22) !important; /* border-white/20 */
+    border-radius: 1rem !important;
+    padding: 0.95rem 1.2rem;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
 }
 [data-bs-theme="dark"] .hb-mid-card {
     background: rgba(0, 0, 0, 0.22);
@@ -165,9 +209,48 @@
     transform: translateY(-1px);
 }
 
-/* 右栏天气 */
+/* 右栏天气与骨架屏入场微动效 */
 .hb-weather { text-align: right; }
 .hb-weather-loading { font-size: 0.9rem; opacity: 0.85; }
+.hb-weather-skeleton { opacity: 0.95; }
+.hb-weather-tip {
+    font-size: 0.74rem; color: #fff;
+    display: inline-flex; align-items: center;
+    background: rgba(0, 0, 0, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.22);
+    backdrop-filter: blur(6px);
+    padding: 2px 10px; border-radius: 999px;
+    animation: hbTipPulse 2s ease-in-out infinite;
+}
+@keyframes hbTipPulse {
+    0%, 100% { opacity: 0.85; transform: scale(0.98); }
+    50% { opacity: 1; transform: scale(1.02); }
+}
+.hb-pulse-icon {
+    opacity: 0.7;
+    animation: hbPulseGlow 1.8s ease-in-out infinite;
+}
+@keyframes hbPulseGlow {
+    0%, 100% { opacity: 0.5; transform: scale(0.96); }
+    50% { opacity: 0.95; transform: scale(1.06); }
+}
+.hb-shimmer-bar {
+    display: inline-block; border-radius: 6px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.15) 25%, rgba(255,255,255,0.32) 50%, rgba(255,255,255,0.15) 75%);
+    background-size: 200% 100%;
+    animation: hbShimmer 1.8s infinite linear;
+}
+@keyframes hbShimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+.hb-weather-content {
+    animation: hbWeatherPop 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes hbWeatherPop {
+    from { opacity: 0; transform: translateY(8px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
 .hb-city { font-size: 0.9rem; opacity: 0.92; }
 .hb-src-badge { font-size: 0.7rem; padding: 1px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.22); margin-left: 6px; }
 .hb-temp-line { display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; margin-top: 2px; }
@@ -336,10 +419,12 @@
             }
 
             el('hbWeatherBox').innerHTML =
+                '<div class="hb-weather-content">' +
                 '<div class="hb-city"><i class="fa-solid fa-location-dot me-1"></i>' + data.city + srcBadge + '</div>' +
                 '<div class="hb-temp-line"><span class="hb-temp">' + tempText + '</span><span class="hb-temp-unit">°C</span><span class="hb-desc">' + iconHtml + (w.desc || '') + '</span></div>' +
                 (minmax ? '<div class="hb-minmax">' + minmax + '</div>' : '') +
-                extraAction;
+                extraAction +
+                '</div>';
         })
         .catch(function () { hideWeather(); });
 
