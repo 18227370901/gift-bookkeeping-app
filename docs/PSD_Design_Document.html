@@ -1705,12 +1705,36 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== ADR-67 ==================== -->
+<div class="section">
+<h1>第 11 部分补充十九：ADR-67 专属宴席大数据量台账深度卡顿根治（从客户端伪分页重构为服务端真物理分页与数据库下推聚合）（V10.11.37 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与痛点</td><td>① <strong>海量数据台账严重假死</strong>：在拥有 1,751 条记录的 5 号婚礼专属台账中，用户访问页面或删除记录刷新时出现 3~5 秒严重卡顿；② <strong>伪分页引发 DOM 爆炸</strong>：此前后端全量渲染 1,751 个 &lt;tr&gt;、14,017 个 &lt;td&gt;、1,755 个表单及 3,535 个按钮，单页 HTML 达 4.88 MB，DOM 节点超 25,000 个，JS 将 1,741 行设为 display:none 导致浏览器主线程重排卡死；③ <strong>冗余关联查询</strong>：每次进入台账均扫描 1,751 个参数的 SQL IN 回礼查询，而前端模板根本未引用。</td></tr>
+<tr><td>决策方案</td><td>① <strong>服务端真物理分页</strong>：banquet_detail_view 接收 page/per_page/q/amount_range/sort 等参数，利用 SQLAlchemy paginate() 物理截断，单次仅向浏览器输出当前页 10~20 条数据；单页 HTML 从 4.88 MB 暴降至 120 KB（缩减 97.5%），DOM 节点削减 99%，秒级瞬开；② <strong>数据库标量下推聚合</strong>：收礼总额改由 db.func.coalesce(db.func.sum(GiftRecord.amount), 0.0) 标量汇总，避免将上千 ORM 实体读入内存；移除前端未引用的 repayment_stats 扫描；③ <strong>交互无缝适配</strong>：搜索框、金额范围筛选器、排序规则与每页条数选择器直接驱动服务端分页，批量操作与删除监听毫秒级响应。</td></tr>
+<tr><td>验证</td><td>/banquet/5 在 1,751 条真实数据下，HTML 从 4.88 MB 降至 120 KB，浏览器秒开，全路由端点测试 100% 通过。</td></tr>
+<tr><td>连带影响</td><td>涉及 routes/routes_ext.py、templates/banquet_detail.html；100% 向后兼容。</td></tr>
+</table>
+</div>
+
+<!-- ==================== ADR-68 ==================== -->
+<div class="section">
+<h1>第 11 部分补充二十：ADR-68 WebDAV 备份与恢复全链路重构——三数据库模式原生闭环 + 双向跨引擎热迁移 + 规范命名 + 前置快照与一键回滚（V10.11.38 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与痛点</td><td>① <strong>PostgreSQL 备份隐形</strong>：此前 WebDAV 列表过滤白名单漏掉 .sql，导致 PG 模式下未加密备份上传后在列表隐形不可见；② <strong>权限与后缀硬编码</strong>：路由多处正则硬编码为 \.(db|zip)，前端上传控件硬编码 accept=".db" 且提示“仅支持 SQLite”，形成互斥死锁；③ <strong>PG 恢复缺陷</strong>：未清表导致唯一键冲突被静默忽略（无法覆盖回滚旧数据）、未推进 Sequence 导致恢复后新增记录引发主键冲突 500、外键无序导致报错；④ <strong>缺乏跨引擎迁移与误操作回滚</strong>：无法在 SQLite 与 PG 之间一键双向迁移，且用户覆盖主库缺乏即时业务级撤销回滚手段。</td></tr>
+<tr><td>决策方案</td><td>① <strong>架构模块化收敛</strong>：新建 services/backup_engine.py，收敛备份命名、特征探测、跨引擎热迁移、快照管理与自愈逻辑；② <strong>标准规范语义命名</strong>：格式为 gift_bookkeeping_backup_{时间}_{数据库类型}_{操作人}_{类型}.{扩展名}（自动标注 sqlite / pg_shared / pg_indep），统一正则 RE_BACKUP_FILENAME，向后 100% 兼容历史格式；③ <strong>双向跨引擎热迁移引擎</strong>：读取文件头前 16 字节魔数（SQLite format 3）或 JSON 元数据智能嗅探引擎类型；严格定义全站 26 张表外键拓扑序；PG 恢复采用单事务 TRUNCATE ... CASCADE 与批量 setval 推进自增游标；普通用户策略 A 重新分配主键并保真 banquet_id 外键父子关联；④ <strong>前置自动快照与一键撤销回滚</strong>：覆盖前自动保存活体库快照至 data/snapshots/（最近 3 份滚动轮转），前端常驻【安全保障条】支持一键回滚；⑤ <strong>五重熔断安全保障</strong>：沙箱预检、活体快照、单事务原子写入、异常秒级自动回滚、恢复后自动调用 init_database() 增量补列自愈；⑥ <strong>页面排版重构与一键折叠展开</strong>：重构为 3 栏独立等高卡片彻底解决解密密码框挤压问题并增加显隐眼睛；全页面支持一键全部折叠/展开与独立卡片平滑折叠，标题区与按钮区解耦防误触；底层全面重构 table-resizer.js 引入 RAF 渲染帧合并与 1200px 自由拖拽范围，彻底消除拖拽掉帧卡顿；重置列宽修复测宽回写缺失并提供动效反馈，结合 window 全局指针监听与表格总宽约束解耦，彻底根除拖拽卡顿、范围受限及点击重置无反应的缺陷。</td></tr>
+<tr><td>验证</td><td>5 项端到端测试全绿（模式自适应、快照轮转、SQLite 本地恢复、一键回滚、SQLite ↔ PG 跨库迁移 3047 条数据零丢失）；服务热重启通过，健康探活 HTTP 200。</td></tr>
+<tr><td>连带影响</td><td>涉及 services/backup_engine.py、services/webdav_utils.py、routes/routes_ext.py、templates/admin_backups.html；100% 向后兼容。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
 <table>
 <tr><th>属性</th><th>值</th></tr>
-<tr><td>文档版本</td><td>V10.11.36</td></tr>
+<tr><td>文档版本</td><td>V10.11.38</td></tr>
 <tr><td>生成日期</td><td>2026-10-25（V10.11.33 run.sh 双场景兼容：手动交互保留 + 定时任务无人值守；承接 V10.11.32 依赖检查升级为 requirements 全量校验与自动补装）</td></tr>
 <tr><td>审计基线</td><td>main 分支 V10.10.29（含 V10.10.16 性能优化同步 + V10.10.17 交互式数据库部署选择 + V10.10.17b run.sh 模块化拆分 + V10.10.18 前端资源本地化与部署链路加固 + V10.10.19 run.sh status 访问信息展示 + V10.10.19b 帮助示例命令名规范化 + V10.10.20 初次部署纯净化 + 独立 PG 镜像策略与 psycopg 驱动修复 + DB_RESET 重选菜单修复与 PG_IMAGE 示例细化 + PG 连接参数全面自定义 + V10.10.21 run.sh 深度模块化拆分 + 配置单点化 + V10.10.22 PG 密码认证修复与 pyzipper 缺失修复与密码固定默认值 + V10.10.23 --reconfig 参数替代 DB_RESET=1 + V10.10.24 Docker 版 PG 默认值差异化隔离 + V10.10.25 共享 PG 状态误判与独立 PG 卷布局崩溃与 peer 认证修复 + V10.10.26 独立 PG unless-stopped 与跨版本共享 PG 检测排除 + V10.10.27 两版首次部署默认数据库差异化 + V10.10.28 独立 PG 版本化数据卷与存量卷自动迁移 + V10.10.29 独立 PG 生命周期闭环（stop 无条件释放与 start 自动重建））</td></tr>
 <tr><td>代码审计范围</td><td>10 个根目录 Python 文件（12,371 行；另有 aibot/ 官方 SDK 副本 9 个文件不计入）+ 21 个 HTML 模板（11,990 行，V10.10.13 主题改造后）+ run.sh + nginx_ssl.conf + requirements.txt + .gitignore</td></tr>

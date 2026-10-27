@@ -26,8 +26,8 @@
     'use strict';
 
     // ===== 配置 =====
-    var DEFAULT_MIN = 60;   // 默认最小列宽 px
-    var DEFAULT_MAX = 480;  // 默认最大列宽 px
+    var DEFAULT_MIN = 30;    // 默认最小列宽 px（放宽下限）
+    var DEFAULT_MAX = 1200;  // 默认最大列宽 px（大幅放宽上限，让管理员随意向右拉伸）
     var MOBILE_MAX = 767.98; // 降级断点（与 Bootstrap md 一致）
     var STORAGE_PREFIX = 'gift_colw_';
 
@@ -45,57 +45,78 @@
         return window.innerWidth < MOBILE_MAX || window.matchMedia('(pointer: coarse) and (max-width: 767.98px)').matches;
     }
 
-    // ===== 可见性感知（V10.11.23） =====
+    // ===== 可见性感知与动画完成判定（V10.11.38 加固） =====
     function isVisibleTable(table) {
         if (!table || !table.isConnected) return false;
+        // 如果处于 Bootstrap 折叠过渡动画中（.collapsing），尺寸尚未稳定，坚决视为不可见
+        if (table.closest('.collapsing')) return false;
+        // 如果处于已折叠隐藏的容器中（.collapse 且无 .show），视为不可见
+        var collapseParent = table.closest('.collapse');
+        if (collapseParent && !collapseParent.classList.contains('show')) return false;
         // display:none 的元素 getClientRects() 为空列表（标准判定）；同时排除 0 尺寸场景
         if (table.getClientRects && table.getClientRects().length === 0) return false;
         var rect = table.getBoundingClientRect();
-        return rect.width > 0 && rect.height > 0;
+        return rect.width > 20 && rect.height > 10;
     }
 
-    // 兜底补扫：老浏览器（无 IntersectionObserver）在 Bootstrap 展开/切换事件后统一扫描未初始化表格
+    // 全局补扫：Bootstrap 展开/切换事件（折叠完成、Tab 切换、弹窗展现）后重新检测未初始化或尺寸畸变的表格
     function retryPendingTables() {
         document.querySelectorAll('table[data-resizable]').forEach(function (t) {
-            if (!t.__colwInit && isVisibleTable(t)) {
+            if ((!t.__colwInit || t.__colwMalformed) && isVisibleTable(t)) {
                 t.__colwPending = false;
-                initTable(t);
+                t.__colwMalformed = false;
+                initTable(t, true);
             }
         });
     }
 
+    // 全局永久监听 Bootstrap 动态展开完成事件（解决现代浏览器动画中早产测宽导致尺寸为0的顽疾）
+    var _globalBootstrapEventsBound = false;
+    function ensureGlobalBootstrapEvents() {
+        if (_globalBootstrapEventsBound) return;
+        _globalBootstrapEventsBound = true;
+        document.addEventListener('shown.bs.collapse', retryPendingTables);
+        document.addEventListener('shown.bs.tab', retryPendingTables);
+        document.addEventListener('shown.bs.modal', retryPendingTables);
+    }
+
     // 不可见表格挂可见性监听：首次真正可见时执行正常初始化（期间不设幂等标记）
     function watchVisibility(table) {
+        ensureGlobalBootstrapEvents();
         if (table.__colwObserver || table.__colwPending) return;   // 防重复挂监听
         if ('IntersectionObserver' in window) {
             var ob = new IntersectionObserver(function (entries) {
                 for (var i = 0; i < entries.length; i++) {
                     if (entries[i].isIntersecting) {
-                        ob.disconnect();
-                        table.__colwObserver = null;
-                        initTable(table);
-                        break;
+                        // 必须确认不在折叠过渡动画中才初始化
+                        if (isVisibleTable(table)) {
+                            ob.disconnect();
+                            table.__colwObserver = null;
+                            initTable(table);
+                            break;
+                        }
                     }
                 }
-            }, { threshold: 0.01 });
+            }, { threshold: 0.1 });
             ob.observe(table);
             table.__colwObserver = ob;
         } else {
             table.__colwPending = true;
-            document.addEventListener('shown.bs.tab', retryPendingTables);
-            document.addEventListener('shown.bs.collapse', retryPendingTables);
-            document.addEventListener('shown.bs.modal', retryPendingTables);
         }
     }
 
     // ===== 单表控制器 =====
-    function initTable(table) {
-        if (!table || table.__colwInit) return;            // 幂等
+    function initTable(table, force) {
+        if (!table) return;
+        if (force && table.__colwInit) {
+            teardown(table);
+        }
+        if (table.__colwInit) return;            // 幂等
         var tableId = table.getAttribute('data-resizable');
         if (!tableId) return;
 
-        // V10.11.23 可见性感知：隐藏容器中的表格不初始化（隐藏时测宽为 0 会导致列宽固化
-        // 异常、分隔条无法拖拽），待首次可见时再执行；可见后不再进入此分支
+        // V10.11.38 可见性感知：隐藏或动画中容器中的表格不初始化（隐藏或动画时测宽会导致列宽为0
+        // 且重置列宽失效），待动画完全结束并真正稳定可见后再执行
         if (!isVisibleTable(table)) {
             watchVisibility(table);
             return;
@@ -112,15 +133,29 @@
             return;
         }
 
-        table.__colwInit = true;
-        table.__colwId = tableId;
-
-        // 1) 固化各列初始自然宽度（auto 布局下测量），作为「默认宽度」
+        // 零宽与畸变尺寸防御（Zero-Width Guard）：
+        // 在 auto 布局测量下，如果任意关键列宽 <= 10px，说明宿主尚未渲染排版完毕，拒绝固化错误尺寸
+        var hasMalformedCol = false;
         var defaults = {};
-        ths.forEach(function (th) {
+        for (var idx = 0; idx < ths.length; idx++) {
+            var th = ths[idx];
             var col = th.getAttribute('data-col');
-            defaults[col] = Math.round(th.getBoundingClientRect().width);
-        });
+            var w = Math.round(th.getBoundingClientRect().width);
+            if (w <= 10) {
+                hasMalformedCol = true;
+                break;
+            }
+            defaults[col] = w;
+        }
+        if (hasMalformedCol) {
+            table.__colwMalformed = true;
+            watchVisibility(table);
+            return;
+        }
+
+        table.__colwInit = true;
+        table.__colwMalformed = false;
+        table.__colwId = tableId;
         table.__colwDefaults = defaults;
 
         // 2) 应用持久化的用户列宽（无记录则保持默认）
@@ -139,7 +174,7 @@
         refreshCellTitles(table);
     }
 
-    function syncTableWidth(table) {
+    function syncTableWidth(table, isDragging) {
         if (!table) return;
         var headRow = table.querySelector('thead tr');
         if (!headRow) return;
@@ -149,9 +184,13 @@
             var w = parseFloat(th.style.width) || th.getBoundingClientRect().width;
             total += w;
         });
+        total = Math.round(total);
         var wrap = table.closest('.table-responsive') || table.parentElement;
         var wrapW = wrap ? wrap.clientWidth : 0;
-        var targetW = Math.max(total, wrapW);
+        
+        // 关键重构：拖拽调整时以用户实际设定的各列总宽为准（允许收窄或向右无限延伸）
+        // 仅在初始未拖动且总宽小于容器时铺满容器
+        var targetW = isDragging ? total : Math.max(total, wrapW);
         table.style.width = targetW + 'px';
         table.style.minWidth = targetW + 'px';
     }
@@ -170,12 +209,13 @@
 
     function colMin(th) {
         var v = parseFloat(th.getAttribute('data-col-min'));
-        return isNaN(v) ? DEFAULT_MIN : v;
+        return isNaN(v) ? DEFAULT_MIN : Math.max(24, Math.min(v, DEFAULT_MIN));
     }
 
     function colMax(th) {
         var v = parseFloat(th.getAttribute('data-col-max'));
-        return isNaN(v) ? DEFAULT_MAX : v;
+        // 如果 HTML 声明了极小的 max（如 60/120），拖拽时放开到至少 800px，让用户真正拥有调整自由
+        return isNaN(v) ? DEFAULT_MAX : Math.max(v, 900);
     }
 
     function clampCol(th, w) {
@@ -190,32 +230,44 @@
         bar.title = '拖动调整列宽；双击自动适应内容宽度';
         th.appendChild(bar);
 
-        // ---- 拖拽（Pointer Events：鼠标/触摸统一）----
+        // ---- 全局窗体级高性能 Pointer 事件（零丢失、零卡顿、任意左右拖动）----
         bar.addEventListener('pointerdown', function (e) {
             e.preventDefault();
             e.stopPropagation();
             var startX = e.clientX;
-            var startW = th.getBoundingClientRect().width;
-            bar.setPointerCapture(e.pointerId);
+            var startW = Math.round(th.getBoundingClientRect().width);
             document.body.classList.add('colw-resizing');
 
-            function onMove(ev) {
-                var w = clampCol(th, startW + (ev.clientX - startX));
-                th.style.width = w + 'px';
-                syncTableWidth(table);
+            var pendingWidth = startW;
+            var rafId = null;
+
+            function onGlobalMove(ev) {
+                pendingWidth = clampCol(th, startW + (ev.clientX - startX));
+                if (!rafId) {
+                    rafId = requestAnimationFrame(function () {
+                        th.style.width = pendingWidth + 'px';
+                        syncTableWidth(table, true);
+                        rafId = null;
+                    });
+                }
             }
-            function onUp() {
-                bar.removeEventListener('pointermove', onMove);
-                bar.removeEventListener('pointerup', onUp);
-                bar.removeEventListener('pointercancel', onUp);
+            function onGlobalUp(ev) {
+                window.removeEventListener('pointermove', onGlobalMove);
+                window.removeEventListener('pointerup', onGlobalUp);
+                window.removeEventListener('pointercancel', onGlobalUp);
+                if (rafId) {
+                    cancelAnimationFrame(rafId);
+                    rafId = null;
+                }
                 document.body.classList.remove('colw-resizing');
-                syncTableWidth(table);
+                th.style.width = pendingWidth + 'px';
+                syncTableWidth(table, true);
                 saveWidths(table);
                 refreshCellTitles(table);
             }
-            bar.addEventListener('pointermove', onMove);
-            bar.addEventListener('pointerup', onUp);
-            bar.addEventListener('pointercancel', onUp);
+            window.addEventListener('pointermove', onGlobalMove);
+            window.addEventListener('pointerup', onGlobalUp);
+            window.addEventListener('pointercancel', onGlobalUp);
         });
 
         // ---- 双击：自动适应内容宽度 ----
@@ -224,7 +276,7 @@
             e.stopPropagation();
             var w = measureContentWidth(table, th);
             th.style.width = clampCol(th, w) + 'px';
-            syncTableWidth(table);
+            syncTableWidth(table, true);
             saveWidths(table);
             refreshCellTitles(table);
         });
@@ -289,15 +341,66 @@
         } catch (e) { /* 存储满等异常静默，不影响功能 */ }
     }
 
-    // 注入「重置列宽」按钮（优雅置于卡片标题栏右侧或独立工具条，绝不遮挡操作列表头）
-    // V10.11.23：优先挂载到模块级作用域容器 .colw-scope 内的 .colw-header-actions 槽位——
-    // 解决「同一卡片内多张表格（如告警操作授权表与推送日志表）重复注入两个按钮」的缺陷；
-    // 无作用域容器时回退原有卡片头逻辑，存量页面行为零变化
+    // 核心重置调度器：清除持久化并让表格原样恢复纯净原生排版
+    function executeTableReset(table, btn) {
+        if (!table) return;
+        var tid = table.__colwId || table.getAttribute('data-resizable');
+        try { localStorage.removeItem(storageKey(tid)); } catch (err) {}
+        
+        // 显式绿色按钮反馈
+        if (btn) {
+            btn.innerHTML = '<i class="fa-solid fa-check me-1 text-success"></i>已重置';
+            btn.classList.remove('btn-outline-secondary');
+            btn.classList.add('btn-outline-success');
+            setTimeout(function() {
+                btn.innerHTML = '<i class="fa-solid fa-rotate-left me-1"></i>重置列宽';
+                btn.classList.remove('btn-outline-success');
+                btn.classList.add('btn-outline-secondary');
+            }, 1200);
+        }
+
+        // 1) 彻底清空所有 th 上的内联定宽
+        var headRow = table.querySelector('thead tr');
+        if (headRow) {
+            headRow.querySelectorAll('th[data-col]').forEach(function (th) {
+                th.style.removeProperty('width');
+            });
+        }
+        // 2) 彻底解绑 fixed 布局与一切总宽限制，恢复纯原生流
+        table.style.removeProperty('table-layout');
+        table.style.removeProperty('width');
+        table.style.removeProperty('min-width');
+        table.classList.remove('colw-fixed');
+
+        // 3) 移除原有把手，重新测量初始化
+        table.querySelectorAll('.colw-resizer').forEach(function(b) { b.remove(); });
+        table.__colwInit = false;
+
+        // 延迟一帧等待浏览器重新渲染出自然宽度
+        requestAnimationFrame(function () {
+            initTable(table, true);
+        });
+    }
+
+    // 全局事件代理：保障所有重置按钮点击 100% 触发，杜绝内联监听器失效
+    document.addEventListener('click', function(e) {
+        var resetBtn = e.target.closest('.colw-reset-btn');
+        if (!resetBtn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var tid = resetBtn.getAttribute('data-table');
+        var table = document.querySelector('table[data-resizable="' + tid + '"]');
+        if (table) {
+            executeTableReset(table, resetBtn);
+        }
+    });
+
+    // 注入「重置列宽」按钮（挂载到操作栏）
     function injectResetBtn(table) {
         var wrap = table.closest('.table-responsive') || table.parentElement;
         if (!wrap) return;
 
-        var tid = table.__colwId || 'default';
+        var tid = table.__colwId || table.getAttribute('data-resizable') || 'default';
         if (document.querySelector('.colw-reset-btn[data-table="' + tid + '"]')) return;
 
         var btn = document.createElement('button');
@@ -306,18 +409,6 @@
         btn.setAttribute('data-table', tid);
         btn.innerHTML = '<i class="fa-solid fa-rotate-left me-1"></i>重置列宽';
         btn.title = '清除已保存的列宽，恢复默认布局';
-        btn.addEventListener('click', function () {
-            try { localStorage.removeItem(storageKey(table.__colwId)); } catch (e) {}
-            var headRow = table.querySelector('thead tr');
-            if (headRow && table.__colwDefaults) {
-                headRow.querySelectorAll('th[data-col]').forEach(function (th) {
-                    var col = th.getAttribute('data-col');
-                    th.style.width = clampCol(th, table.__colwDefaults[col]) + 'px';
-                });
-            }
-            syncTableWidth(table);
-            refreshCellTitles(table);
-        });
 
         // 优先：模块级作用域槽位（同卡片多表时重置按钮各归各模块）
         var scope = table.closest('.colw-scope');
@@ -378,17 +469,19 @@
 
     // ===== 对外 API =====
     var TableResizer = {
-        // 初始化单张表格（动态生成的表格在渲染后手动调用）
-        init: function (table) { initTable(table); },
+        // 初始化单张表格（动态生成的表格在渲染后手动调用，支持 force 参数）
+        init: function (table, force) { initTable(table, !!force); },
         // 全页扫描
-        initAll: function () {
-            document.querySelectorAll('table[data-resizable]').forEach(initTable);
+        initAll: function (force) {
+            document.querySelectorAll('table[data-resizable]').forEach(function (t) {
+                initTable(t, !!force);
+            });
         },
-        // 视口跨越断点时重新适配
+        // 视口跨越断点或展开折叠时重新适配
         rebind: function () {
             document.querySelectorAll('table[data-resizable]').forEach(function (t) {
                 if (isMobile()) { teardown(t); }
-                else { initTable(t); }
+                else { initTable(t, true); }
             });
         }
     };

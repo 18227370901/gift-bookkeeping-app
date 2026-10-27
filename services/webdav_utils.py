@@ -292,7 +292,7 @@ def list_backups(webdav_url_or_config, username=None, password=None, backup_path
             if not filename or is_dir:
                 continue
 
-            if not any(filename.lower().endswith(ext) for ext in ['.db', '.sqlite', '.sqlite3', '.bak', '.zip']):
+            if not any(filename.lower().endswith(ext) for ext in ['.db', '.sqlite', '.sqlite3', '.bak', '.zip', '.sql']):
                 continue
 
             size = 0
@@ -415,7 +415,8 @@ def upload_encrypted_backup(webdav_url_or_config, username=None, password=None, 
             shutil.rmtree(tmp_dir, ignore_errors=True)
     else:
         if not remote_filename:
-            remote_filename = f"gift_bookkeeping_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            _ext = '.sql' if (local_file_path and local_file_path.endswith('.sql')) else '.db'
+            remote_filename = f"gift_bookkeeping_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}{_ext}"
         return upload_backup(webdav_url_or_config, username, password, local_file_path, remote_filename)
 
 

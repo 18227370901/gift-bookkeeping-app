@@ -2,11 +2,36 @@
 
 {% block content %}
 <div class="row mb-4 align-items-center">
-  <div class="col-md-6">
+  <div class="col-md-7 col-12 mb-2 mb-md-0">
     <h3 class="fw-bold mb-1"><i class="fa-solid fa-cloud-arrow-up text-primary me-2"></i>WebDAV 与云端备份</h3>
-    <p class="text-muted mb-0">配置 WebDAV 服务器，实现账本数据库一键云端备份与恢复</p>
+    <p class="text-muted mb-0">配置 WebDAV 服务器，实现账本数据库一键云端备份与恢复（支持跨引擎热迁移）</p>
+  </div>
+  <div class="col-md-5 col-12 text-md-end text-start">
+    <div class="btn-group shadow-sm rounded-pill p-1 bg-white border">
+      <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3 py-1 border-0" id="btnCollapseAll" onclick="setAllModulesCollapse(true)">
+        <i class="fa-solid fa-compress me-1"></i>全部折叠
+      </button>
+      <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1 border-0" id="btnExpandAll" onclick="setAllModulesCollapse(false)">
+        <i class="fa-solid fa-expand me-1"></i>全部展开
+      </button>
+    </div>
   </div>
 </div>
+
+{% if latest_snapshot %}
+<div class="alert alert-warning border-warning shadow-sm rounded-4 mb-4 py-3 px-4 d-flex align-items-center justify-content-between flex-wrap gap-3">
+  <div>
+    <h6 class="fw-bold mb-1 text-dark"><i class="fa-solid fa-clock-rotate-left text-warning me-2"></i>安全保障条：数据覆盖前快照已就绪</h6>
+    <small class="text-muted">系统已于 <strong>{{ latest_snapshot.created_at }}</strong> 自动为您创建了恢复前安全快照（模式: <code>{{ latest_snapshot.db_type }}</code>，操作人: <code>{{ latest_snapshot.operator }}</code>）。若发现新导入的数据有误，可随时一键原样撤回。</small>
+  </div>
+  <form action="{{ url_for('admin_rollback_snapshot') }}" method="POST" class="m-0" onsubmit="return confirm('警告：确定要一键撤回刚才的恢复操作，将数据库完整还原到 {{ latest_snapshot.created_at }} 导入前的状态吗？');">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="btn btn-warning rounded-pill px-3 shadow-sm fw-bold">
+      <i class="fa-solid fa-rotate-left me-1"></i>一键撤销并恢复至导入前状态
+    </button>
+  </form>
+</div>
+{% endif %}
 
 <div class="row g-4">
   <!-- WebDAV 配置 + 备份授权 -->
@@ -15,9 +40,18 @@
     <!-- WebDAV 配置：管理员可编辑 / 普通用户只读状态 -->
     {% if current_user.is_admin %}
     <div class="card border-0 shadow-sm rounded-4 mb-4">
-      <div class="card-header bg-white py-3 border-light">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置</h5>
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center user-select-none">
+        <div class="d-flex align-items-center gap-2 cursor-pointer flex-grow-1" data-bs-toggle="collapse" data-bs-target="#collapseWebdavConfig" aria-expanded="false" role="button">
+          <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置</h5>
+          <span class="badge bg-light text-muted border rounded-pill px-2 py-1 small">服务器配置</span>
+        </div>
+        <div class="d-flex align-items-center gap-2 colw-header-actions">
+          <button type="button" class="btn btn-sm btn-light border-0 rounded-circle text-muted p-1 module-chevron-btn" data-bs-toggle="collapse" data-bs-target="#collapseWebdavConfig" aria-expanded="false" title="切换折叠/展开">
+            <i class="fa-solid fa-chevron-down transition-transform module-chevron"></i>
+          </button>
+        </div>
       </div>
+      <div class="collapse" id="collapseWebdavConfig">
       <div class="card-body">
         <form action="{{ url_for('admin_save_webdav_config') }}" method="POST" id="webdavConfigForm">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -102,13 +136,23 @@
           </div>
         </form>
       </div>
+      </div>
     </div>
     {% else %}
     <!-- 普通用户：可编辑自己的私有 WebDAV 配置 -->
     <div class="card border-0 shadow-sm rounded-4 mb-4">
-      <div class="card-header bg-white py-3 border-light">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置（个人）</h5>
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center user-select-none">
+        <div class="d-flex align-items-center gap-2 cursor-pointer flex-grow-1" data-bs-toggle="collapse" data-bs-target="#collapseWebdavUserConfig" aria-expanded="false" role="button">
+          <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置（个人）</h5>
+          <span class="badge bg-light text-muted border rounded-pill px-2 py-1 small">个人配置</span>
+        </div>
+        <div class="d-flex align-items-center gap-2 colw-header-actions">
+          <button type="button" class="btn btn-sm btn-light border-0 rounded-circle text-muted p-1 module-chevron-btn" data-bs-toggle="collapse" data-bs-target="#collapseWebdavUserConfig" aria-expanded="false" title="切换折叠/展开">
+            <i class="fa-solid fa-chevron-down transition-transform module-chevron"></i>
+          </button>
+        </div>
       </div>
+      <div class="collapse" id="collapseWebdavUserConfig">
       <div class="card-body">
         {% if config_data.adopted_from_admin %}
         <!-- V9: 已引用管理员配置 —— 只显示别称，不回显任何地址/账号/密码 -->
@@ -200,16 +244,28 @@
         </form>
         {% endif %}
       </div>
+      </div>
     </div>
     {% endif %}
 
     <!-- V10.2: WebDAV 备份授权（仅管理员） — 仅备份授权，与定时任务授权拆分 -->
     {% if current_user.is_admin %}
     <div class="card border-0 shadow-sm rounded-4 mb-4">
-      <div class="card-header bg-white py-3 border-light">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-cloud text-warning me-2"></i>WebDAV 备份授权</h5>
-        <div class="form-text small text-muted mt-1"><i class="fa-solid fa-arrows-rotate me-1"></i>授权状态与「用户管理」页面实时同步，无需重复操作</div>
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center user-select-none">
+        <div class="cursor-pointer flex-grow-1" data-bs-toggle="collapse" data-bs-target="#collapseWebdavPerm" aria-expanded="false" role="button">
+          <div class="d-flex align-items-center gap-2">
+            <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-cloud text-warning me-2"></i>WebDAV 备份授权</h5>
+            <span class="badge bg-light text-muted border rounded-pill px-2 py-1 small">用户权限</span>
+          </div>
+          <div class="form-text small text-muted mt-1 mb-0"><i class="fa-solid fa-arrows-rotate me-1"></i>授权状态与「用户管理」页面实时同步</div>
+        </div>
+        <div class="d-flex align-items-center gap-2 colw-header-actions">
+          <button type="button" class="btn btn-sm btn-light border-0 rounded-circle text-muted p-1 module-chevron-btn" data-bs-toggle="collapse" data-bs-target="#collapseWebdavPerm" aria-expanded="false" title="切换折叠/展开">
+            <i class="fa-solid fa-chevron-down transition-transform module-chevron"></i>
+          </button>
+        </div>
       </div>
+      <div class="collapse" id="collapseWebdavPerm">
       <div class="card-body p-0">
         {% if all_users %}
         <div class="table-responsive">
@@ -259,10 +315,21 @@
     <!-- V10.2: 定时任务授权与权限（仅管理员） — 全局开关 + 每用户任务授权，紧邻定时任务列表 -->
     {% if current_user.is_admin %}
     <div class="card border-0 shadow-sm rounded-4 mb-3">
-      <div class="card-header bg-white py-3 border-light">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-user-clock text-success me-2"></i>定时任务授权与权限</h5>
-        <div class="form-text small text-muted mt-1"><i class="fa-solid fa-arrows-rotate me-1"></i>授权状态与「用户管理」页面实时同步</div>
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center user-select-none">
+        <div class="cursor-pointer flex-grow-1" data-bs-toggle="collapse" data-bs-target="#collapseCronPerm" aria-expanded="false" role="button">
+          <div class="d-flex align-items-center gap-2">
+            <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-user-clock text-success me-2"></i>定时任务授权与权限</h5>
+            <span class="badge bg-light text-muted border rounded-pill px-2 py-1 small">调度管控</span>
+          </div>
+          <div class="form-text small text-muted mt-1 mb-0"><i class="fa-solid fa-arrows-rotate me-1"></i>授权状态与「用户管理」页面实时同步</div>
+        </div>
+        <div class="d-flex align-items-center gap-2 colw-header-actions">
+          <button type="button" class="btn btn-sm btn-light border-0 rounded-circle text-muted p-1 module-chevron-btn" data-bs-toggle="collapse" data-bs-target="#collapseCronPerm" aria-expanded="false" title="切换折叠/展开">
+            <i class="fa-solid fa-chevron-down transition-transform module-chevron"></i>
+          </button>
+        </div>
       </div>
+      <div class="collapse" id="collapseCronPerm">
       <div class="card-body">
         <!-- V10.2: 全局权限开关（管理员配置） -->
         <div class="row g-3 mb-3">
@@ -327,18 +394,29 @@
         </div>
         {% endif %}
       </div>
+      </div>
+      </div>
     </div>
     {% endif %}
 
     <!-- 定时任务 -->
     {% if current_user.is_admin or can_use_scheduled_tasks %}
     <div class="card border-0 shadow-sm rounded-4 mb-4">
-      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-clock text-success me-2"></i>定时任务</h5>
-        <button type="button" class="btn btn-sm btn-outline-success rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#scheduledTaskModal">
-          <i class="fa-solid fa-plus me-1"></i>新增
-        </button>
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center user-select-none">
+        <div class="d-flex align-items-center gap-2 cursor-pointer flex-grow-1" data-bs-toggle="collapse" data-bs-target="#collapseCronTasks" aria-expanded="false" role="button">
+          <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-clock text-success me-2"></i>定时任务</h5>
+          <span class="badge bg-light text-muted border rounded-pill px-2 py-1 small">自动调度</span>
+        </div>
+        <div class="d-flex align-items-center gap-2 colw-header-actions">
+          <button type="button" class="btn btn-sm btn-outline-success rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#scheduledTaskModal">
+            <i class="fa-solid fa-plus me-1"></i>新增
+          </button>
+          <button type="button" class="btn btn-sm btn-light border-0 rounded-circle text-muted p-1 module-chevron-btn" data-bs-toggle="collapse" data-bs-target="#collapseCronTasks" aria-expanded="false" title="切换折叠/展开">
+            <i class="fa-solid fa-chevron-down transition-transform module-chevron"></i>
+          </button>
+        </div>
       </div>
+      <div class="collapse" id="collapseCronTasks">
       <div class="card-body p-0">
         {% if scheduled_tasks %}
         <div class="table-responsive">
@@ -424,6 +502,7 @@
         </div>
         {% endif %}
       </div>
+      </div>
     </div>
     {% endif %}
   </div>
@@ -433,14 +512,21 @@
   <div class="col-12">
     <!-- WebDAV 云端备份与恢复 -->
     <div class="card border-0 shadow-sm rounded-4 mb-4">
-      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-clock-rotate-left text-primary me-2"></i>WebDAV 云端备份与恢复</h5>
-        <div class="d-flex gap-2">
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center user-select-none">
+        <div class="d-flex align-items-center gap-2 cursor-pointer flex-grow-1" data-bs-toggle="collapse" data-bs-target="#collapseWebdavCloudBackups" aria-expanded="false" role="button">
+          <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-clock-rotate-left text-primary me-2"></i>WebDAV 云端备份与恢复</h5>
+          <span class="badge bg-light text-muted border rounded-pill px-2 py-1 small">云端存储</span>
+        </div>
+        <div class="d-flex align-items-center gap-2 colw-header-actions">
           <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="loadWebdavBackups()">
             <i class="fa-solid fa-rotate me-1"></i>刷新列表
           </button>
+          <button type="button" class="btn btn-sm btn-light border-0 rounded-circle text-muted p-1 module-chevron-btn" data-bs-toggle="collapse" data-bs-target="#collapseWebdavCloudBackups" aria-expanded="false" title="切换折叠/展开">
+            <i class="fa-solid fa-chevron-down transition-transform module-chevron"></i>
+          </button>
         </div>
       </div>
+      <div class="collapse" id="collapseWebdavCloudBackups">
       <div class="card-body">
         <!-- 手动备份选项 -->
         <div class="alert alert-light border rounded-3 mb-3 p-3">
@@ -506,80 +592,192 @@
           </div>
         </div>
       </div>
+      </div>
     </div>
   </div>
 </div>
 
-<div class="row g-4">
-  <div class="col-lg-6">
-    <!-- 本地数据库备份与恢复 -->
-    <div class="card border-0 shadow-sm rounded-4 mb-4">
-      <div class="card-header bg-white py-3 border-light">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-database text-success me-2"></i>本地数据库备份与恢复</h5>
-      </div>
-      <div class="card-body">
-        {% if not current_user.is_admin %}
-        <!-- V10: 普通用户差异化提示 -->
-        <div class="alert alert-info border-0 rounded-3 mb-3 py-2">
-          <i class="fa-solid fa-shield-halved me-1 text-info"></i>
-          <span class="small">您下载的备份仅包含本人数据；上传恢复时系统将只合并您的数据，不影响其他用户或系统配置。</span>
+<div class="row mb-3 align-items-center">
+  <div class="col-12">
+    <div class="card border-0 shadow-sm rounded-4 mb-0">
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center user-select-none">
+        <div class="d-flex align-items-center gap-2 cursor-pointer flex-grow-1" data-bs-toggle="collapse" data-bs-target="#collapseLocalDataSection" aria-expanded="false" role="button">
+          <h5 class="card-title fw-bold mb-0 text-dark">
+            <i class="fa-solid fa-hard-drive text-success me-2"></i>本地数据与附件运维
+          </h5>
+          <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2 py-1 small">3 项工具</span>
+          <span class="small text-muted d-none d-md-inline ms-2">（本地导出 / 跨库导入 / 附件恢复）</span>
         </div>
-        {% endif %}
-        <div class="row g-3 align-items-center">
-          <div class="col-md-6">
-            <label class="form-label fw-bold">一键下载当前数据库文件</label>
-            {% if current_user.is_admin %}
-            <p class="small text-muted mb-2">直接导出本地 SQLite 完整数据库（.db），安全离线保存至个人电脑或移动硬盘。</p>
-            <a href="{{ url_for('admin_download_local_backup') }}" class="btn btn-success rounded-pill px-3 shadow-sm">
-              <i class="fa-solid fa-download me-1"></i>下载完整数据库备份 (.db)
-            </a>
-            {% else %}
-            <p class="small text-muted mb-2">导出仅包含您本人数据的数据库文件（.db），安全离线保存至个人电脑或移动硬盘。</p>
-            <a href="{{ url_for('admin_download_local_backup') }}" class="btn btn-success rounded-pill px-3 shadow-sm">
-              <i class="fa-solid fa-download me-1"></i>下载我的数据备份 (.db)
-            </a>
-            {% endif %}
+        <div class="d-flex align-items-center gap-2 colw-header-actions">
+          <button type="button" class="btn btn-sm btn-light border-0 rounded-circle text-muted p-1 module-chevron-btn" data-bs-toggle="collapse" data-bs-target="#collapseLocalDataSection" aria-expanded="false" title="切换折叠/展开">
+            <i class="fa-solid fa-chevron-down transition-transform module-chevron"></i>
+          </button>
+        </div>
+      </div>
+      <div class="collapse" id="collapseLocalDataSection">
+      <div class="card-body bg-light-subtle rounded-bottom-4 pt-3">
+<div class="row g-4 mb-0">
+  <!-- 卡片 1: 本地数据库导出下载 -->
+  <div class="col-lg-4 col-md-12">
+    <div class="card border-0 shadow-sm rounded-4 h-100">
+      <div class="card-header bg-white py-3 border-light d-flex align-items-center justify-content-between">
+        <h5 class="card-title fw-bold mb-0 text-dark">
+          <i class="fa-solid fa-cloud-arrow-down text-success me-2"></i>本地数据导出
+        </h5>
+        <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2 py-1 small">
+          <i class="fa-solid fa-download me-1"></i>备份
+        </span>
+      </div>
+      <div class="card-body d-flex flex-column justify-content-between">
+        <div>
+          {% if not current_user.is_admin %}
+          <div class="alert alert-info border-0 rounded-3 mb-3 py-2 px-3 small">
+            <i class="fa-solid fa-shield-halved me-1 text-info"></i>您导出的备份仅包含本人的账目明细与礼金数据。
           </div>
-          <div class="col-md-6 border-start-md">
-            <form action="{{ url_for('admin_upload_local_backup') }}" method="POST" enctype="multipart/form-data" onsubmit="return confirm('警告：上传恢复数据库将{% if current_user.is_admin %}替换现有数据，系统会自动创建历史回滚副本{% else %}合并您的个人数据{% endif %}，是否确认恢复？');">
-              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <label class="form-label fw-bold">上传 .db 备份文件恢复</label>
-              <div class="input-group">
-                <input type="file" name="backup_file" accept=".db" class="form-control" required>
-                <button type="submit" class="btn btn-outline-danger">
-                  <i class="fa-solid fa-upload me-1"></i>上传并覆盖恢复
-                </button>
-              </div>
-              <div class="form-text small text-muted">仅支持 SQLite 数据库文件 (.db)</div>
-            </form>
+          {% endif %}
+          <label class="form-label fw-bold text-dark mb-2">当前运行环境与格式</label>
+          <div class="p-3 bg-light rounded-3 border mb-3">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <span class="small text-muted">运行模式：</span>
+              {% if current_db_type == 'sqlite' %}
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1">SQLite</span>
+              {% elif current_db_type == 'pg_shared' %}
+              <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">共享 PostgreSQL</span>
+              {% elif current_db_type == 'pg_indep' %}
+              <span class="badge bg-info-subtle text-info border border-info-subtle px-2 py-1">独立 PostgreSQL</span>
+              {% else %}
+              <span class="badge bg-secondary">未知模式</span>
+              {% endif %}
+            </div>
+            <div class="d-flex align-items-center justify-content-between mb-0">
+              <span class="small text-muted">导出格式：</span>
+              <span class="fw-semibold small text-dark">
+                {% if current_db_type == 'sqlite' %}
+                标准 <code>.db</code> 原生文件
+                {% else %}
+                结构化 <code>.sql</code> 脚本
+                {% endif %}
+              </span>
+            </div>
           </div>
+          <p class="small text-muted mb-3 leading-relaxed">
+            点击下方按钮将直接生成全量/个人数据备份文件，文件名包含生成时间、数据库类型与操作人标识。
+          </p>
+        </div>
+        <div class="pt-2">
+          <a href="{{ url_for('admin_download_local_backup') }}" class="btn btn-success w-100 rounded-pill py-2 shadow-sm fw-bold">
+            <i class="fa-solid fa-download me-1"></i>一键下载数据库备份 ({% if current_db_type == 'sqlite' %}.db{% else %}.sql{% endif %})
+          </a>
         </div>
       </div>
     </div>
   </div>
-  <div class="col-lg-6">
-    <!-- 附件文件恢复 -->
-    <div class="card border-0 shadow-sm rounded-4 mb-4">
-      <div class="card-header bg-white py-3 border-light">
-        <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-paperclip text-info me-2"></i>附件文件恢复</h5>
+
+  <!-- 卡片 2: 本地数据库恢复与跨库迁移 -->
+  <div class="col-lg-4 col-md-12">
+    <div class="card border-0 shadow-sm rounded-4 h-100">
+      <div class="card-header bg-white py-3 border-light d-flex align-items-center justify-content-between">
+        <h5 class="card-title fw-bold mb-0 text-dark">
+          <i class="fa-solid fa-rotate text-danger me-2"></i>数据恢复与迁移
+        </h5>
+        <span class="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill px-2 py-1 small">
+          <i class="fa-solid fa-bolt me-1"></i>跨引擎
+        </span>
       </div>
-      <div class="card-body">
-        <form action="{{ url_for('admin_upload_attachment') }}" method="POST" enctype="multipart/form-data">
+      <div class="card-body d-flex flex-column justify-content-between">
+        <form action="{{ url_for('admin_upload_local_backup') }}" method="POST" enctype="multipart/form-data" class="d-flex flex-column h-100 justify-content-between" onsubmit="return confirm('警告：上传恢复数据库将{% if current_user.is_admin %}替换现有数据（系统会自动先生成前置快照，支持一键撤销）{% else %}合并您的个人数据（主键重新自动分配并外键保真）{% endif %}，是否确认继续？');">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <label class="form-label fw-bold">上传其他备份文件</label>
-          <div class="input-group">
-            <input type="file" name="attachment_file" accept=".json,.csv,.txt,.xlsx,.docx,.zip" class="form-control" required>
-            <button type="submit" class="btn btn-outline-info">
-              <i class="fa-solid fa-upload me-1"></i>上传附件
+          <div>
+            {% if not current_user.is_admin %}
+            <div class="alert alert-info border-0 rounded-3 mb-3 py-2 px-3 small">
+              <i class="fa-solid fa-user-shield me-1 text-info"></i>恢复时系统将自动为您合并账目，绝不影响其他用户。
+            </div>
+            {% endif %}
+            
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-dark mb-1">选择备份文件 (.db / .sql / .zip)</label>
+              <input type="file" name="backup_file" accept=".db,.sql,.zip" class="form-control form-control-sm rounded-3" required>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-dark mb-1">解密密码 (可选)</label>
+              <div class="input-group input-group-sm">
+                <span class="input-group-text bg-light text-muted"><i class="fa-solid fa-key"></i></span>
+                <input type="password" name="decrypt_password" id="localRestoreDecryptPwd" class="form-control" placeholder="若为 .zip 加密包请输入密码（未加密留空）" autocomplete="new-password">
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('localRestoreDecryptPwd', this)" title="切换密码显隐">
+                  <i class="fa-regular fa-eye"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="p-2 bg-light rounded-3 border mb-3 small text-muted">
+              <div class="d-flex align-items-center gap-1 mb-1 text-dark fw-semibold">
+                <i class="fa-solid fa-circle-check text-success"></i> 智能格式自适应
+              </div>
+              支持开发环境 SQLite 与生产环境 PG 跨引擎热导入，覆盖前自动建立安全快照。
+            </div>
+          </div>
+
+          <div class="pt-2">
+            <button type="submit" class="btn btn-outline-danger w-100 rounded-pill py-2 shadow-sm fw-bold">
+              <i class="fa-solid fa-upload me-1"></i>上传备份文件并恢复
             </button>
           </div>
-          <div class="form-text small text-muted">支持 JSON、CSV、TXT、XLSX、DOCX、ZIP 格式文件</div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 卡片 3: 附件与其它文件恢复 -->
+  <div class="col-lg-4 col-md-12">
+    <div class="card border-0 shadow-sm rounded-4 h-100">
+      <div class="card-header bg-white py-3 border-light d-flex align-items-center justify-content-between">
+        <h5 class="card-title fw-bold mb-0 text-dark">
+          <i class="fa-solid fa-paperclip text-info me-2"></i>附件文件恢复
+        </h5>
+        <span class="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-2 py-1 small">
+          <i class="fa-solid fa-file me-1"></i>附加资源
+        </span>
+      </div>
+      <div class="card-body d-flex flex-column justify-content-between">
+        <form action="{{ url_for('admin_upload_attachment') }}" method="POST" enctype="multipart/form-data" class="d-flex flex-column h-100 justify-content-between">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div>
+            <label class="form-label fw-bold text-dark mb-1">选择附件或其他备份文件</label>
+            <p class="small text-muted mb-3">支持将导出的账单报表、账本表格或打包附件文件上传还原至系统存储区。</p>
+            
+            <div class="mb-3">
+              <input type="file" name="attachment_file" accept=".json,.csv,.txt,.xlsx,.docx,.zip" class="form-control form-control-sm rounded-3" required>
+            </div>
+
+            <div class="p-3 bg-light rounded-3 border mb-3">
+              <div class="small text-dark fw-semibold mb-2"><i class="fa-solid fa-layer-group text-info me-1"></i>兼容格式清单</div>
+              <div class="d-flex flex-wrap gap-1">
+                <span class="badge bg-white text-secondary border">JSON</span>
+                <span class="badge bg-white text-secondary border">CSV</span>
+                <span class="badge bg-white text-secondary border">XLSX</span>
+                <span class="badge bg-white text-secondary border">DOCX</span>
+                <span class="badge bg-white text-secondary border">TXT</span>
+                <span class="badge bg-white text-secondary border">ZIP</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-2">
+            <button type="submit" class="btn btn-outline-info w-100 rounded-pill py-2 shadow-sm fw-bold">
+              <i class="fa-solid fa-cloud-arrow-up me-1"></i>上传并恢复附件
+            </button>
+          </div>
         </form>
       </div>
     </div>
   </div>
 </div>
-
+      </div>
+      </div>
+    </div>
+  </div>
+</div>
 <!-- 定时任务 Modal -->
 <div class="modal fade" id="scheduledTaskModal" tabindex="-1">
   <div class="modal-dialog">
@@ -930,9 +1128,20 @@ function loadWebdavBackups() {
                 <input type="hidden" name="filename" value="${file.name}">
                 <button type="submit" class="btn btn-sm btn-outline-danger" ${restoreDisabled} title="${restoreTitle}"><i class="fa-solid fa-${restoreIcon} me-1"></i>恢复</button>
               </form>`;
+          let dbBadge = '';
+          const rawDb = (file.db_type || '').toLowerCase();
+          if (rawDb === 'sqlite' || file.name.includes('_sqlite_') || file.name.endsWith('.db')) {
+            dbBadge = '<span class="badge bg-primary-subtle text-primary border border-primary-subtle me-1">SQLite</span>';
+          } else if (rawDb === 'pg_shared' || file.name.includes('_pg_shared_')) {
+            dbBadge = '<span class="badge bg-success-subtle text-success border border-success-subtle me-1">共享PG</span>';
+          } else if (rawDb === 'pg_indep' || file.name.includes('_pg_indep_')) {
+            dbBadge = '<span class="badge bg-info-subtle text-info border border-info-subtle me-1">独立PG</span>';
+          } else if (file.name.endsWith('.sql')) {
+            dbBadge = '<span class="badge bg-success-subtle text-success border border-success-subtle me-1">PG</span>';
+          }
           rowsHtml += `<tr>
             <td>${checkboxCell}</td>
-            <td class="ps-1 fw-bold"><i class="fa-solid fa-${isZip ? 'lock' : 'database'} text-${isZip ? 'warning' : 'secondary'} me-2"></i>${file.name}</td>
+            <td class="ps-1 fw-bold">${dbBadge}<i class="fa-solid fa-${isZip ? 'lock' : 'database'} text-${isZip ? 'warning' : 'secondary'} me-1"></i>${file.name}</td>
             <td class="text-end pe-3">${sizeStr}</td>
             <td><small class="text-muted">${timeStr}</small></td>
             <td><span class="badge bg-info-subtle text-info">${createdBy}</span></td>
@@ -943,6 +1152,11 @@ function loadWebdavBackups() {
           </tr>`;
         });
         tbody.innerHTML = rowsHtml;
+        // 动态渲染后立即重新初始化并绑定列宽调整手柄
+        const webdavTable = document.querySelector('table[data-resizable="admin_webdav_backups"]');
+        if (webdavTable && window.TableResizer) {
+          setTimeout(function() { window.TableResizer.init(webdavTable, true); }, 50);
+        }
       } else if (data.success) {
         tbody.innerHTML = '<tr><td colspan="6" class="text-center py-5 text-muted"><i class="fa-solid fa-cloud-arrow-up fa-3x mb-3 text-secondary opacity-50"></i><p class="mb-1 fw-bold text-dark">云端目录暂无数据库备份文件</p><small class="text-muted">点击上方"立即上传备份至 WebDAV"即可创建第一份云端快照</small></td></tr>';
       } else {
@@ -1147,7 +1361,7 @@ function showExecutionLogs(taskId) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-  loadWebdavBackups();
+  // 默认处于折叠状态，懒加载：仅在用户手动展开「WebDAV 云端备份与恢复」时拉取列表
 });
 
 // 测试 WebDAV 连接（仅管理员页面有此按钮）
@@ -1250,4 +1464,78 @@ if (btnTestWebdavUser) {
   });
 }
 </script>
+<style>
+.cursor-pointer { cursor: pointer; }
+.transition-transform { transition: transform 0.25s ease-in-out; }
+.rotate-180 { transform: rotate(180deg); }
+.card-header .cursor-pointer:hover { opacity: 0.85; }
+.colw-header-actions { position: relative; z-index: 2; }
+.module-chevron-btn:hover { background-color: rgba(0, 0, 0, 0.06) !important; }
+</style>
+
+<script>
+// 全局一键折叠 / 一键展开控制器
+const ALL_MODULE_COLLAPSE_IDS = [
+  'collapseWebdavConfig',
+  'collapseWebdavUserConfig',
+  'collapseWebdavPerm',
+  'collapseCronPerm',
+  'collapseCronTasks',
+  'collapseWebdavCloudBackups',
+  'collapseLocalDataSection'
+];
+
+function setAllModulesCollapse(collapse) {
+  ALL_MODULE_COLLAPSE_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      const bsCollapse = bootstrap.Collapse.getOrCreateInstance(el, { toggle: false });
+      if (collapse) {
+        bsCollapse.hide();
+      } else {
+        bsCollapse.show();
+      }
+    }
+  });
+}
+
+// 监听折叠动画，联动旋转指示箭头并按需懒加载云端数据
+document.addEventListener('DOMContentLoaded', function() {
+  ALL_MODULE_COLLAPSE_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    // 找到对应的触发 header 与其中的箭头图标
+    const header = document.querySelector(`[data-bs-target="#${id}"]`);
+    const chevron = header ? header.querySelector('.module-chevron') : null;
+
+    el.addEventListener('show.bs.collapse', function() {
+      if (chevron) {
+        chevron.classList.add('rotate-180');
+      }
+      // 如果展开的是 WebDAV 云端备份列表，且列表尚未拉取过，则触发一次安全拉取
+      if (id === 'collapseWebdavCloudBackups' && !window._webdavLoadedOnce) {
+        loadWebdavBackups();
+        window._webdavLoadedOnce = true;
+      }
+    });
+
+    el.addEventListener('shown.bs.collapse', function() {
+      // 动画完全结束、容器真实尺寸展开稳定后，重新对该容器内的表格校准并初始化列宽手柄
+      if (window.TableResizer) {
+        el.querySelectorAll('table[data-resizable]').forEach(function(t) {
+          window.TableResizer.init(t, true);
+        });
+      }
+    });
+
+    el.addEventListener('hide.bs.collapse', function() {
+      if (chevron) {
+        chevron.classList.remove('rotate-180');
+      }
+    });
+  });
+});
+</script>
+
 {% endblock %}

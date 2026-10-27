@@ -84,290 +84,26 @@ import tempfile as _tempfile
 import json as _backup_json
 
 
-# ===================== V10.10.17 PostgreSQL 备份/恢复兼容层 =====================
+# ===================== 通用备份与恢复引擎兼容接入层 =====================
+from services.backup_engine import (
+    _is_pg_mode,
+    get_current_db_type,
+    generate_backup_filename,
+    parse_backup_filename_info,
+    _ALL_TABLES_ORDERED,
+    _PG_USER_TABLES,
+    _PG_GLOBAL_TABLES,
+    _pg_export_database,
+    sniff_backup_file,
+    build_user_scoped_backup_db,
+    merge_user_scoped_backup,
+    create_prerestore_snapshot,
+    get_latest_prerestore_snapshot,
+    rollback_prerestore_snapshot,
+    universal_restore_database
+)
 
-def _is_pg_mode():
-    """检查当前是否为 PostgreSQL 模式"""
-    return os.environ.get('DATABASE_URL', '').strip().startswith('postgresql://')
-
-# PG 业务表清单（与 SQLite 完全一致，22 张表）
-_PG_ALL_TABLES = [
-    'users', 'gift_records', 'operation_logs', 'system_settings',
-    'registration_tokens', 'login_risks', 'security_risks',
-    'broadcasts', 'broadcast_reads', 'webhook_configs', 'webhook_logs',
-    'shared_ledger_links', 'backup_configs', 'banquets',
-    'anniversary_reminders', 'chat_sessions', 'chat_messages',
-    'ai_query_logs', 'scheduled_backup_tasks', 'backup_attachments',
-    'permission_tickets', 'scheduled_task_execution_logs',
-    'family_groups', 'family_members', 'alert_push_configs', 'alert_push_grants'
-]
-_PG_USER_TABLES = ['gift_records', 'banquets', 'anniversary_reminders']
-_PG_GLOBAL_TABLES = [t for t in _PG_ALL_TABLES if t not in _PG_USER_TABLES]
-
-def _pg_export_database(output_path, user_filter=None):
-    """
-    PG 模式：使用 psycopg2 导出数据库到 JSON 文件
-    user_filter: 非 None 时仅导出该用户的 3 张业务表
-    返回 output_path
-    """
-    import psycopg2
-    from datetime import date as _date, decimal as _decimal
-    db_url = os.environ.get('DATABASE_URL', '').strip()
-    conn = psycopg2.connect(db_url)
-    cursor = conn.cursor()
-    result = {}
-    tables_to_export = _PG_USER_TABLES if user_filter else _PG_ALL_TABLES
-    for table in tables_to_export:
-        query = f'SELECT * FROM "{table}"'
-        if user_filter and table in _PG_USER_TABLES:
-            query += f' WHERE user_id = {int(user_filter)}'
-        try:
-            cursor.execute(query)
-            colnames = [desc[0] for desc in cursor.description]
-            rows = cursor.fetchall()
-            result[table] = {'columns': colnames, 'rows': [list(r) for r in rows]}
-        except Exception:
-            result[table] = {'columns': [], 'rows': []}
-    conn.close()
-    def _default(o):
-        if isinstance(o, (datetime, _date)):
-            return o.isoformat()
-        if isinstance(o, _decimal.Decimal):
-            return float(o)
-        if isinstance(o, bytes):
-            return o.decode('utf-8', errors='replace')
-        return str(o)
-    with open(output_path, 'w', encoding='utf-8') as f:
-        _backup_json.dump(result, f, ensure_ascii=False, default=_default)
-    return output_path
-
-def _pg_import_database(input_path, user_filter=None):
-    """
-    PG 模式：从 JSON 文件恢复数据库
-    user_filter: 非 None 时仅恢复该用户的 3 张业务表（数据级合并）
-    返回 (success, message, stats)
-    """
-    import psycopg2
-    db_url = os.environ.get('DATABASE_URL', '').strip()
-    try:
-        with open(input_path, 'r', encoding='utf-8') as f:
-            data = _backup_json.load(f)
-        conn = psycopg2.connect(db_url)
-        cursor = conn.cursor()
-        stats = {}
-        tables_to_import = _PG_USER_TABLES if user_filter else list(data.keys())
-        for table_name, table_data in data.items():
-            if user_filter and table_name not in _PG_USER_TABLES:
-                continue
-            columns = table_data.get('columns', [])
-            rows = table_data.get('rows', [])
-            if not columns or not rows:
-                continue
-            # 合并模式：先删除该用户旧数据
-            if user_filter and table_name in _PG_USER_TABLES:
-                cursor.execute(f'DELETE FROM "{table_name}" WHERE user_id = %s', (int(user_filter),))
-            col_str = ', '.join(f'"{c}"' for c in columns)
-            ph_str = ', '.join(['%s'] * len(columns))
-            for row in rows:
-                try:
-                    cursor.execute(f'INSERT INTO "{table_name}" ({col_str}) VALUES ({ph_str})', row)
-                except Exception:
-                    pass  # 跳过类型不符或约束冲突的行
-            stats[table_name] = len(rows)
-        conn.commit()
-        conn.close()
-        return True, f'恢复完成: {stats}', stats
-    except Exception as e:
-        return False, f'恢复失败: {e}', {}
-
-
-
-# V7 修复：普通用户备份越权漏洞
-# 原逻辑直接复制完整数据库文件上传/下载，普通用户可获取他人数据。
-# 本函数将主库复制到临时文件后用 SQL 删除非本人数据，仅保留本人礼金/宴席/纪念日。
-# 管理员或拥有跨用户查看权限的用户返回原始库路径，无需过滤。
-# V8 增强：普通用户备份时额外 DROP 所有系统全局表（users、WebDAV 配置、定时任务、
-# Webhook、AI 配置、日志等），仅保留本人业务数据，杜绝全局配置泄露。
-def build_user_scoped_backup_db(db_path, user):
-    """
-    为普通用户生成仅含本人数据的临时备份数据库。
-    - 管理员 / can_view_others_for('ledger') 用户：直接返回原始 db_path（有权查看全库）
-    - 普通用户：复制主库到临时文件，删除非本人数据 + 删除系统全局表后返回临时文件路径
-    返回 (temp_db_path, is_temp) —— is_temp=True 表示调用方用完需自行删除临时文件
-    """
-    # V10.10.17: PG 模式用 JSON 导出替代 SQLite 文件复制
-    if _is_pg_mode():
-        if not user or not hasattr(user, 'is_admin'):
-            return db_path, False
-        if getattr(user, 'is_admin', False):
-            return db_path, False
-        if hasattr(user, 'can_view_others_for') and user.can_view_others_for('ledger'):
-            return db_path, False
-        # 普通用户：导出本人数据到临时 .sql 文件
-        tmp_dir = _tempfile.mkdtemp(prefix='gift_pg_scope_')
-        tmp_sql = os.path.join(tmp_dir, 'scoped_backup.sql')
-        _pg_export_database(tmp_sql, user_filter=user.id)
-        return tmp_sql, True
-
-    if not user or not hasattr(user, 'is_admin'):
-        return db_path, False
-    if getattr(user, 'is_admin', False):
-        return db_path, False
-    # 有跨用户查看权限的用户也能看到全库，无需过滤
-    if hasattr(user, 'can_view_others_for') and user.can_view_others_for('ledger'):
-        return db_path, False
-    # 普通用户：生成仅含本人数据的临时库
-    tmp_dir = _tempfile.mkdtemp(prefix='gift_user_scope_')
-    tmp_db = os.path.join(tmp_dir, 'scoped_backup.db')
-    # V9 修复：主库为 WAL 模式时，shutil.copy2 只复制主文件会丢失 -wal 日志中未落盘的最新数据。
-    #       改用 SQLite 在线备份 API（Connection.backup），获得包含 WAL 数据的一致性快照，
-    #       不受主文件 LastWriteTime 滞后影响。
-    _src_conn = _sqlite3.connect(db_path)
-    _dst_conn = _sqlite3.connect(tmp_db)
-    with _dst_conn:
-        _src_conn.backup(_dst_conn)
-    _src_conn.close()
-    _dst_conn.close()
-    try:
-        conn = _sqlite3.connect(tmp_db)
-        c = conn.cursor()
-        # 1) 用户业务数据按 user_id 过滤：仅保留本人礼金/宴席/纪念日
-        c.execute("DELETE FROM gift_records WHERE user_id != ?", (user.id,))
-        c.execute("DELETE FROM banquets WHERE user_id != ?", (user.id,))
-        c.execute("DELETE FROM anniversary_reminders WHERE user_id != ?", (user.id,))
-        conn.commit()
-        # 2) 系统全局敏感表：直接 DROP，杜绝普通用户备份中携带其他用户/全局配置数据
-        #    （含用户表、WebDAV 配置、定时任务、Webhook、AI 会话、操作日志、广播等）
-        _global_tables = [
-            'users', 'backup_configs', 'scheduled_backup_tasks',
-            'scheduled_task_execution_logs', 'webhook_configs', 'webhook_logs',
-            'operation_logs', 'login_risks', 'security_risks', 'system_settings',
-            'registration_tokens', 'broadcasts', 'broadcast_reads',
-            'shared_ledger_links', 'backup_attachments', 'permission_tickets',
-            'chat_sessions', 'chat_messages', 'ai_query_logs',
-            'family_groups', 'family_members', 'alert_push_configs', 'alert_push_grants',
-        ]
-        for tbl in _global_tables:
-            try:
-                c.execute(f'DROP TABLE IF EXISTS "{tbl}"')
-            except Exception:
-                pass
-        conn.commit()
-        conn.close()
-        return tmp_db, True
-    except Exception:
-        # 出错时回退到原始库（宁可功能不可用也不暴露数据）
-        try:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-        except Exception:
-            pass
-        raise
-
-
-# V9 修复：普通用户恢复 .db 备份导致系统崩溃
-# 根因：普通用户备份是"过滤库"（19 张全局表被 DROP、仅含本人 3 张业务表数据），
-#       但恢复流程却用该文件"文件级替换"整个主库 → users 等核心表丢失 → 全站 500。
-# 方案：普通用户恢复改为"数据级合并"——只把备份中本人三张业务表的数据合回主库，
-#       不触碰主库文件结构与其他用户/全局数据；管理员保持原文件级替换。
-def merge_user_scoped_backup(db_path, backup_db_path, user):
-    """
-    将普通用户的过滤备份（仅含 gift_records/banquets/anniversary_reminders 三表）
-    以数据级合并方式恢复到主库：仅覆盖该用户本人的三张业务表数据。
-    返回 (success: bool, message: str, stats: dict)
-    """
-    # V10.10.17: PG 模式用 JSON 导入替代 SQLite ATTACH 合并
-    if _is_pg_mode():
-        if not user or not hasattr(user, 'is_admin'):
-            return False, '无效用户', {}
-        return _pg_import_database(backup_db_path, user_filter=user.id)
-
-    if not user or not hasattr(user, 'is_admin'):
-        return False, '无效用户', {}
-    user_id = user.id
-    user_tables = ['gift_records', 'banquets', 'anniversary_reminders']
-    stats = {}
-    try:
-        # 防锁：写主库前先把 Flask 的 SQLAlchemy session 里的未提交事务落盘
-        # （如操作日志等），避免主库写锁冲突
-        try:
-            from flask import has_app_context
-            if has_app_context():
-                from flask_sqlalchemy import SQLAlchemy  # noqa: F401
-                from flask import current_app as _cur_app
-                _ext = _cur_app.extensions.get('sqlalchemy')
-                if _ext is not None:
-                    _ext.session.commit()  # 提交/结束当前请求未提交事务
-        except Exception:
-            pass
-        src = _sqlite3.connect(backup_db_path)
-        src.row_factory = _sqlite3.Row
-        # 防锁：给合并连接设置忙等待，遇主库瞬时写锁时重试而非立即报错
-        src.execute('PRAGMA busy_timeout = 8000')
-        # 校验备份中实际存在的业务表
-        existing = {r[0] for r in src.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
-        # V10.7：完整库拦截——非管理员上传的备份若含 users 等全局表（说明是完整库/他人库），
-        # 明确拒绝，防止用他人或管理员完整备份覆盖本人数据
-        if not getattr(user, 'is_admin', False) and 'users' in existing:
-            src.close()
-            return False, '检测到上传的是完整备份文件（含全局用户表），普通用户仅可恢复本人生成的过滤备份，请联系管理员处理', {}
-        missing = [t for t in user_tables if t not in existing]
-        if missing:
-            src.close()
-            return False, f'备份文件中缺少业务表: {", ".join(missing)}，无法恢复', {}
-
-        # V10.7：结构兼容性校验——三张业务表必须包含 user_id 列（旧版/异构表结构直接报错，避免 SQL 异常导致 500）
-        for tbl in user_tables:
-            _tbl_cols = {r[1] for r in src.execute(f'PRAGMA table_info("{tbl}")').fetchall()}
-            if 'user_id' not in _tbl_cols:
-                src.close()
-                return False, f'备份文件 [{tbl}] 表缺少 user_id 列，数据库结构不兼容，无法恢复', {}
-
-        # ATTACH 主库，在同一连接内完成数据合并（自动处理跨库约束）
-        src.execute("ATTACH DATABASE ? AS main_db", (db_path,))
-        for tbl in user_tables:
-            # V10: 空库保护——DELETE 前先检查备份库中该用户是否有数据，若为 0 则跳过该表
-            # 避免上传空库导致本人现有数据被清空且无新数据写入
-            backup_count = src.execute(
-                f'SELECT COUNT(*) FROM "{tbl}" WHERE user_id = ?', (user_id,)
-            ).fetchone()[0]
-            if backup_count == 0:
-                stats[tbl] = 0
-                continue  # 跳过该表，保留本人现有数据不动
-            # 1) 删除主库中该用户本人的旧数据
-            src.execute(f'DELETE FROM main_db."{tbl}" WHERE user_id = ?', (user_id,))
-            # 2) 从备份导入该用户数据（列对齐：取备份表与主表共有列，排除 id 由 SQLite 重新分配主键）
-            # 注意：PRAGMA 的 schema 前缀格式为 PRAGMA main_db.table_info("表名")，不能写成 PRAGMA table_info(main_db."表名")
-            main_cols = {r[1] for r in src.execute(f'PRAGMA main_db.table_info("{tbl}")').fetchall()}
-            _backup_cols = [r[1] for r in src.execute(f'PRAGMA table_info("{tbl}")').fetchall()]
-            src_cols = [c for c in _backup_cols if c in main_cols and c != 'id']
-            col_list = ', '.join(f'"{c}"' for c in src_cols)
-            placeholders = ', '.join('?' for _ in src_cols)
-            # V10.7：SELECT 前置 user_id 过滤（数据隔离双保险，不再全表扫描再逐行过滤）
-            rows = src.execute(
-                f'SELECT {col_list} FROM "{tbl}" WHERE user_id = ?', (user_id,)
-            ).fetchall()
-            inserted = 0
-            for row in rows:
-                # 备份按 user_id 过滤生成，这里再防御性校验一次
-                d = dict(row)
-                if d.get('user_id') != user_id:
-                    continue
-                src.execute(
-                    f'INSERT INTO main_db."{tbl}" ({col_list}) VALUES ({placeholders})',
-                    tuple(d[c] for c in src_cols)
-                )
-                inserted += 1
-            stats[tbl] = inserted
-        # 修复：必须先 commit 结束写事务，再 DETACH——
-        # SQLite 不允许 DETACH 一个存在未提交事务的数据库（会报 database is locked）
-        src.commit()
-        src.execute('DETACH DATABASE main_db')
-        src.close()
-        total = sum(stats.values())
-        return True, f'数据级合并完成，共恢复 {total} 条本人数据', stats
-    except Exception as e:
-        return False, f'数据级合并失败: {str(e)}', {}
+_PG_ALL_TABLES = _ALL_TABLES_ORDERED
 
 
 def parse_target_date_obj(date_val, today=None):
@@ -837,7 +573,15 @@ def _backup_scheduler_worker(flask_app):
                                         db.session.commit()
                                         continue
 
-                            success, msg = upload_encrypted_backup(config, local_file_path=_scoped_path, encrypt_password=encrypt_pwd)
+                            _sched_user_tag = _task_creator.username if _task_creator else 'admin'
+                            _sched_db_type = get_current_db_type()
+                            _sched_remote_filename = generate_backup_filename(
+                                _sched_user_tag,
+                                db_type=_sched_db_type,
+                                task_type='db_backup',
+                                is_encrypted=bool(encrypt_pwd)
+                            )
+                            success, msg = upload_encrypted_backup(config, local_file_path=_scoped_path, encrypt_password=encrypt_pwd, remote_filename=_sched_remote_filename)
                             # V7: 清理临时库
                             if _is_temp:
                                 try:
@@ -4202,7 +3946,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             allow_edit_others_tasks=getattr(global_config, 'allow_edit_others_tasks', False),
             allow_delete_others_tasks=getattr(global_config, 'allow_delete_others_tasks', False),
             can_edit_others_tasks=current_user.can_edit_others_scheduled_tasks(),
-            can_delete_others_tasks=current_user.can_delete_others_scheduled_tasks()
+            can_delete_others_tasks=current_user.can_delete_others_scheduled_tasks(),
+            current_db_type=get_current_db_type(),
+            latest_snapshot=get_latest_prerestore_snapshot(current_user)
         )
 
     @app.route('/admin/backups/reference_admin_config', methods=['GET'])
@@ -4289,25 +4035,22 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     _admin_usernames = {u.username for u in _admin_users}
                 for item in res:
                     fn = item.get('filename', '') or item.get('name', '')
-                    # 解析文件名格式: {timestamp}_{username}_{type}.db 或旧格式 gift_bookkeeping_backup_*.db
-                    m = _re.match(r'(\d{8}_\d{6})_(.+?)_(db_backup|file_backup|custom)\.(db|zip)', fn)
-                    if m:
-                        item['created_by'] = m.group(2)
-                    else:
-                        # V6: 旧格式备份——查找实际管理员用户名，不硬编码 'admin'
+                    info = parse_backup_filename_info(fn)
+                    item['created_by'] = info['created_by']
+                    item['db_type'] = info['db_type']
+                    item['task_type'] = info['task_type']
+                    if not info['matched']:
                         item['created_by'] = next(iter(_admin_usernames)) if _admin_usernames else 'unknown'
-                    # V6: 三级权限判断 + 管理员数据保护
                     _creator = item['created_by']
                     _is_creator_admin = _creator in _admin_usernames
                     _is_own = (_creator == current_user.username)
-                    # 管理员创建的备份：只有管理员可删除/恢复
                     if _is_creator_admin:
                         item['can_restore'] = current_user.is_admin
                         item['can_delete'] = current_user.is_admin
                     else:
                         item['can_restore'] = current_user.is_admin or _is_own or current_user.can_edit_others_backup()
                         item['can_delete'] = current_user.is_admin or _is_own or current_user.can_delete_others_backup()
-                return jsonify({'success': True, 'configured': True, 'backups': res, 'current_user': current_user.username, 'is_admin': current_user.is_admin})
+                return jsonify({'success': True, 'configured': True, 'backups': res, 'current_user': current_user.username, 'is_admin': current_user.is_admin, 'current_db_type': get_current_db_type()})
             else:
                 return jsonify({'success': False, 'configured': True, 'message': str(res), 'backups': []})
         except Exception as e:
@@ -4434,14 +4177,13 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 flash('已选择加密备份，但未提供加密密码！请输入密码或在配置中预设。', 'warning')
                 return redirect(url_for('admin_backups'))
 
-        # V3: 备份文件名中嵌入用户标识
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        username_tag = current_user.username
-        _backup_ext = '.sql' if _is_pg_mode() else '.db'
-        remote_filename = f"{timestamp}_{username_tag}_db_backup{_backup_ext}"
-        if encrypt_password:
-            remote_filename = f"{timestamp}_{username_tag}_db_backup.zip"
-
+        _cur_db_type = get_current_db_type()
+        remote_filename = generate_backup_filename(
+            username=current_user.username,
+            db_type=_cur_db_type,
+            task_type='db_backup',
+            is_encrypted=bool(encrypt_password)
+        )
         # 使用 upload_encrypted_backup 但指定 remote_filename
         if encrypt_password:
             success, msg = upload_encrypted_backup(config, local_file_path=_scoped_db_path, encrypt_password=encrypt_password, remote_filename=remote_filename)
@@ -4496,8 +4238,12 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
         # V10.10.17: PG 模式用 JSON 导出替代文件下载
         if _is_pg_mode():
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"gift_bookkeeping_backup_{timestamp}.sql"
+            filename = generate_backup_filename(
+                username=current_user.username,
+                db_type=get_current_db_type(),
+                task_type='db_backup',
+                is_encrypted=False
+            )
             safe_log('下载本地备份', f"下载了当前数据库备份文件: {filename}")
             tmp_dir = _tempfile.mkdtemp(prefix='gift_pg_dl_')
             tmp_sql = os.path.join(tmp_dir, filename)
@@ -4520,8 +4266,12 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('数据库文件不存在！', 'danger')
             return redirect(url_for('admin_backups'))
 
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"gift_bookkeeping_backup_{timestamp}.db"
+        filename = generate_backup_filename(
+            username=current_user.username,
+            db_type='sqlite',
+            task_type='db_backup',
+            is_encrypted=False
+        )
         safe_log('下载本地备份', f"下载了当前数据库备份文件: {filename}")
         try:
             trigger_webhook_event(
@@ -4569,7 +4319,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @app.route('/admin/backup/upload_local', methods=['POST'])
     @login_required
     def admin_upload_local_backup():
-        """上传本地 .db 备份文件并恢复"""
+        """上传本地备份文件并恢复（支持 .db、.sql 与 .zip 格式，支持全自动跨引擎热迁移）"""
         if not current_user.is_admin and not current_user.can_use_backup():
             flash('权限不足', 'danger')
             return redirect(url_for('index'))
@@ -4579,192 +4329,58 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('请选择需要上传恢复的备份文件！', 'warning')
             return redirect(url_for('admin_backups'))
 
-        # V10.10.17: PG 模式接受 .sql 文件
-        is_pg = _is_pg_mode()
-        _valid_ext = '.sql' if is_pg else '.db'
-        if not file.filename.endswith(_valid_ext):
-            flash(f'仅支持恢复 {_valid_ext} 格式的备份文件！', 'danger')
+        allowed_exts = ('.db', '.sql', '.zip')
+        if not any(file.filename.lower().endswith(ext) for ext in allowed_exts):
+            flash('仅支持恢复 .db（SQLite）、.sql（PostgreSQL）或 .zip（加密压缩包）格式的备份文件！', 'danger')
             return redirect(url_for('admin_backups'))
 
-        # V10.10.17: PG 模式恢复分支——使用 _pg_import_database 替代文件级替换
-        if is_pg:
-            import tempfile
-            tmp_dir = tempfile.mkdtemp(prefix='gift_pg_restore_')
-            tmp_sql = os.path.join(tmp_dir, 'uploaded.sql')
-            file.save(tmp_sql)
-            try:
-                if current_user.is_admin:
-                    ok, msg, stats = _pg_import_database(tmp_sql)
-                else:
-                    ok, msg, stats = _pg_import_database(tmp_sql, user_filter=current_user.id)
-                if ok:
-                    safe_log('上传恢复备份', f'PG恢复成功: {msg}')
-                    flash(f'恢复成功: {msg}', 'success')
-                else:
-                    flash(f'恢复失败: {msg}', 'danger')
-            except Exception as e:
-                flash(f'恢复失败: {str(e)}', 'danger')
-            finally:
+        if not current_user.is_admin:
+            info = parse_backup_filename_info(file.filename)
+            if info['matched'] and info['created_by'] != current_user.username:
+                if not current_user.can_edit_others_backup():
+                    flash('权限不足：您上传的文件属于其他用户，只能恢复自己创建的备份文件！', 'danger')
+                    return redirect(url_for('admin_backups'))
+
+        tmp_dir = _tempfile.mkdtemp(prefix='gift_upload_')
+        tmp_path = os.path.join(tmp_dir, file.filename)
+        file.save(tmp_path)
+
+        actual_restore_path = tmp_path
+        if file.filename.lower().endswith('.zip'):
+            from services.webdav_utils import decrypt_encrypted_zip
+            decrypt_password = request.form.get('decrypt_password', '').strip()
+            if not decrypt_password:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
-            return redirect(url_for('admin_backups'))
+                flash('此备份是加密压缩包，请输入解密密码后再恢复！', 'warning')
+                return redirect(url_for('admin_backups'))
+            extracted_path = os.path.join(tmp_dir, 'extracted_file')
+            ok_dec, msg_dec = decrypt_encrypted_zip(tmp_path, decrypt_password, extracted_path)
+            if not ok_dec:
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                flash(f'解密失败：{msg_dec}', 'danger')
+                return redirect(url_for('admin_backups'))
+            actual_restore_path = extracted_path
 
-        db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
         try:
-            # V9 修复：普通用户的过滤备份不能文件级替换主库（会导致 users 表丢失、全站 500），
-            # 改为数据级合并：只把备份中本人三张业务表数据合回主库
-            # V10.7 收紧：文件级替换仅限管理员；拥有他人查看权限（ledger level>=1）的普通用户
-            # 也必须走数据级合并，防止上传他人/完整/结构不一致的 .db 文件级覆盖主库导致全站 500
-            _is_full_restore = current_user.is_admin
-            if not _is_full_restore:
-                import tempfile
-                tmp_dir = tempfile.mkdtemp(prefix='gift_upload_')
-                tmp_db_path = os.path.join(tmp_dir, 'uploaded.db')
-                file.save(tmp_db_path)
-
-                # V10.7：文件归属校验——仅允许上传本人系统生成的备份文件
-                # 兼容两种系统命名格式：
-                #   1) WebDAV/定时备份格式: YYYYMMDD_HHMMSS_用户名_db_backup.db
-                #   2) 本地下载格式:       gift_bookkeeping_backup_YYYYMMDD_HHMMSS.db（不含用户名，跳过归属比对）
-                import re as _re_upload
-                _fn = file.filename or ''
-                _fn_m = _re_upload.match(r'(\d{8}_\d{6})_(.+?)_(db_backup|file_backup|custom)\.(db|zip)', _fn)
-                _fn_local = _re_upload.match(r'gift_bookkeeping_backup_(\d{8}_\d{6})\.db$', _fn)
-                if not _fn_m and not _fn_local:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                    flash('恢复失败：上传文件不符合系统备份命名规则，仅支持上传本人在本系统生成的备份文件！', 'danger')
-                    return redirect(url_for('admin_backups'))
-                if _fn_m and _fn_m.group(2) != current_user.username:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                    flash('恢复失败：该备份文件不属于当前账号，仅能恢复本人的备份文件！', 'danger')
-                    return redirect(url_for('admin_backups'))
-
-                # 校验上传的数据库文件完整性
-                import sqlite3 as _sqlite3
+            ok, msg, stats = universal_restore_database(actual_restore_path, current_user, target_filename=file.filename)
+            if ok:
+                safe_log('上传本地备份恢复', f"恢复成功: {msg}，文件: {file.filename}")
                 try:
-                    test_conn = _sqlite3.connect(tmp_db_path)
-                    integrity = test_conn.execute('PRAGMA integrity_check').fetchone()[0]
-                    test_conn.close()
-                    if integrity != 'ok':
-                        shutil.rmtree(tmp_dir, ignore_errors=True)
-                        flash(f'恢复失败：上传的数据库文件完整性检查未通过 ({integrity})，可能文件已损坏', 'danger')
-                        return redirect(url_for('admin_backups'))
-                except Exception as ie:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                    flash(f'恢复失败：无法读取上传的数据库文件 ({str(ie)})', 'danger')
-                    return redirect(url_for('admin_backups'))
-
-                # 防锁：合并前先提交请求内未提交事务并释放连接池，确保主库写锁可获取
-                try:
-                    db.session.commit()
+                    trigger_webhook_event(
+                        WebhookConfig.query.filter_by(is_enabled=True).all(), 'restore',
+                        f'{current_user.username} 上传恢复备份',
+                        f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{file.filename} | 结果：{msg}',
+                        page_key='admin_backups', user_name=current_user.username, operator_id=current_user.id
+                    )
                 except Exception:
                     pass
-                db.engine.dispose()
-
-                ok, msg, stats = merge_user_scoped_backup(db_path, tmp_db_path, current_user)
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-                if ok:
-                    safe_log('上传恢复本地备份', f"普通用户 {current_user.username} 数据级合并恢复成功: {msg}")
-                    # V10.3: 补充普通用户恢复推送
-                    try:
-                        trigger_webhook_event(
-                            WebhookConfig.query.filter_by(is_enabled=True).all(), 'restore',
-                            f'{current_user.username} 恢复本地备份',
-                            f'操作人：{current_user.username} | 页面：WebDAV备份 | 操作：上传恢复 | 方式：数据级合并 | 结果：成功',
-                            page_key='admin_backups', user_name=current_user.username, operator_id=current_user.id
-                        )
-                    except Exception:
-                        pass
-                    flash(f'已成功恢复您的个人数据（{msg}），系统与其他用户数据不受影响。', 'success')
-                else:
-                    flash(f'恢复失败：{msg}', 'danger')
-                return redirect(url_for('admin_backups'))
-
-            # 管理员：保持原文件级替换逻辑（V5: 改用 sqlite3.backup() 原子操作，避免 WAL 不一致）
-            # 第1步：释放数据库连接池，防止覆盖正在使用的文件导致损坏
-            db.engine.dispose()
-            import time as _time
-            _time.sleep(0.5)
-
-            # 第2步：保存上传文件到临时路径，验证完整性后再替换
-            import tempfile
-            tmp_dir = tempfile.mkdtemp(prefix='gift_upload_')
-            tmp_db_path = os.path.join(tmp_dir, 'uploaded.db')
-            file.save(tmp_db_path)
-
-            # 第3步：验证上传的数据库文件完整性
-            import sqlite3 as _sqlite3
-            try:
-                test_conn = _sqlite3.connect(tmp_db_path)
-                integrity = test_conn.execute('PRAGMA integrity_check').fetchone()[0]
-                test_conn.close()
-                if integrity != 'ok':
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                    flash(f'恢复失败：上传的数据库文件完整性检查未通过 ({integrity})，可能文件已损坏', 'danger')
-                    return redirect(url_for('admin_backups'))
-            except Exception as ie:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-                flash(f'恢复失败：无法读取上传的数据库文件 ({str(ie)})', 'danger')
-                return redirect(url_for('admin_backups'))
-
-            # 第4步：备份现有数据库防止损坏
-            if os.path.exists(db_path):
-                # V10.11.21 结构重组：历史库备份归入 logs/ 目录（仅本地留存，不入库不上传）
-                _bak_dir = os.path.abspath(os.path.join(os.path.dirname(db_path), '..', 'logs'))
-                os.makedirs(_bak_dir, exist_ok=True)
-                shutil.copy2(db_path, os.path.join(_bak_dir, os.path.basename(db_path) + f".bak_{int(time.time())}"))
-
-            # 第5步：用 sqlite3.backup() 原子性替换数据库内容（不操作文件，避免 WAL 不一致）
-            try:
-                # 先删除 WAL/SHM 文件，确保干净状态
-                for suffix in ('-wal', '-shm'):
-                    p = db_path + suffix
-                    if os.path.exists(p):
-                        try:
-                            os.remove(p)
-                        except Exception:
-                            pass
-                src_conn = _sqlite3.connect(tmp_db_path)
-                dst_conn = _sqlite3.connect(db_path)
-                src_conn.backup(dst_conn)
-                dst_conn.close()
-                src_conn.close()
-            except Exception as backup_err:
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-                flash(f'恢复失败：数据库原子复制失败 ({str(backup_err)})', 'danger')
-                return redirect(url_for('admin_backups'))
-
-            # 第6步：清理 WAL/SHM 文件（此时连接已关闭，文件句柄已释放）
-            for suffix in ('-wal', '-shm'):
-                wal_path = db_path + suffix
-                if os.path.exists(wal_path):
-                    try:
-                        os.remove(wal_path)
-                    except Exception:
-                        pass
-
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            
-            # 重新执行数据库初始化（补建缺失的表/字段）
-            try:
-                from app import init_database
-                init_database()
-            except Exception as e:
-                safe_log('数据库迁移', f"init_database 执行失败: {e}")
-            
-            safe_log('上传恢复本地备份', f"成功恢复了上传的数据库文件: {file.filename}")
-            # V10.3: 补充管理员恢复推送
-            try:
-                trigger_webhook_event(
-                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'restore',
-                    f'{current_user.username} 恢复本地备份',
-                    f'操作人：{current_user.username} | 页面：WebDAV备份 | 操作：上传恢复 | 方式：文件级替换 | 文件：{file.filename} | 结果：成功',
-                    page_key='admin_backups', user_name=current_user.username, operator_id=current_user.id
-                )
-            except Exception:
-                pass
-            flash('本地数据库已成功恢复，请刷新页面确认数据更新。', 'success')
+                flash(f'{msg}，请刷新页面确认数据更新。', 'success')
+            else:
+                flash(f'{msg}', 'danger')
         except Exception as e:
-            flash(f'恢复数据库文件失败: {e}', 'danger')
+            flash(f'恢复数据库发生异常: {str(e)}', 'danger')
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
         return redirect(url_for('admin_backups'))
 
@@ -4830,7 +4446,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @app.route('/admin/backups/restore/<path:filename>', methods=['POST'])
     @login_required
     def admin_restore_webdav_backup(filename=None):
-        """从 WebDAV 恢复备份"""
+        """从 WebDAV 恢复备份（支持同构恢复、跨引擎迁移与自动前置快照）"""
         if not current_user.is_admin and not current_user.can_use_backup():
             flash('权限不足', 'danger')
             return redirect(url_for('index'))
@@ -4840,186 +4456,60 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('未指定备份文件', 'warning')
             return redirect(url_for('admin_backups'))
 
-        # V6: 三级权限判断 - 管理员数据保护 + 级别权限
-        import re as _re
-        m = _re.match(r'(\d{8}_\d{6})_(.+?)_(db_backup|file_backup|custom)\.(db|zip)', target_filename)
-        if m:
-            created_by = m.group(2)
-            # V6: 查询管理员用户名列表
-            _admin_usernames = {u.username for u in User.query.filter_by(is_admin=True).all()}
-            _is_creator_admin = created_by in _admin_usernames
-            if _is_creator_admin and not current_user.is_admin:
-                flash('权限不足：管理员创建的备份只有管理员可恢复', 'danger')
+        # 权限校验：管理员备份仅管理员可操作
+        info = parse_backup_filename_info(target_filename)
+        created_by = info['created_by']
+        _admin_usernames = {u.username for u in User.query.filter_by(is_admin=True).all()}
+        _is_creator_admin = created_by in _admin_usernames
+        if _is_creator_admin and not current_user.is_admin:
+            flash('权限不足：管理员创建的备份只有管理员可恢复', 'danger')
+            return redirect(url_for('admin_backups'))
+        if not current_user.is_admin and created_by != current_user.username:
+            if not current_user.can_edit_others_backup():
+                flash('权限不足：只能恢复自己创建的备份文件', 'danger')
                 return redirect(url_for('admin_backups'))
-            if not current_user.is_admin and created_by != current_user.username:
-                if not current_user.can_edit_others_backup():
-                    flash('权限不足：只能恢复自己创建的备份文件', 'danger')
-                    return redirect(url_for('admin_backups'))
 
-        # V3: 按用户获取配置
         config = BackupConfig.get_config(None if current_user.is_admin else current_user.id)
-        db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
-        
-        # 判断是否是加密 zip 文件
         is_encrypted_zip = target_filename.lower().endswith('.zip')
         decrypt_password = request.form.get('decrypt_password', '').strip() if is_encrypted_zip else None
-        
-        if is_encrypted_zip and not decrypt_password:
-            # 加密文件但未提供密码，重定向回页面并提示需要密码
-            flash(f'备份文件「{target_filename}」是加密文件，请输入加密密码后恢复。', 'warning')
-            return redirect(url_for('admin_backups'))
-        
-        try:
-            # 修复：先释放数据库连接池，防止覆盖正在使用的文件导致损坏
-            db.engine.dispose()
-            
-            # 下载到临时文件，验证完整性后再替换
-            import tempfile
-            tmp_dir = tempfile.mkdtemp(prefix='gift_restore_')
 
-            # V10.10.17: PG 模式恢复分支
-            _is_pg = _is_pg_mode()
-            if _is_pg:
-                tmp_db_path = os.path.join(tmp_dir, 'restored.sql')
-            else:
-                tmp_db_path = os.path.join(tmp_dir, 'restored.db')
+        if is_encrypted_zip and not decrypt_password:
+            flash(f'备份文件「{target_filename}」是加密文件，请输入解密密码后再恢复！', 'warning')
+            return redirect(url_for('admin_backups'))
+
+        try:
+            tmp_dir = _tempfile.mkdtemp(prefix='gift_restore_')
+            tmp_save_path = os.path.join(tmp_dir, 'downloaded_backup')
 
             if is_encrypted_zip:
-                # 加密 zip：下载并解密到临时文件
-                success, msg = download_and_decrypt_backup(config, remote_filename=target_filename, save_path=tmp_db_path, decrypt_password=decrypt_password)
+                success, msg = download_and_decrypt_backup(config, remote_filename=target_filename, save_path=tmp_save_path, decrypt_password=decrypt_password)
             else:
-                # 普通 .db/.sql：直接下载到临时文件
-                success, msg = download_webdav_backup(config, remote_filename=target_filename, save_path=tmp_db_path)
+                success, msg = download_webdav_backup(config, remote_filename=target_filename, save_path=tmp_save_path)
 
             if success:
-                # V10.10.17: PG 模式恢复
-                if _is_pg:
+                ok, msg, stats = universal_restore_database(tmp_save_path, current_user, target_filename=target_filename)
+                shutil.rmtree(tmp_dir, ignore_errors=True)
+                if ok:
+                    safe_log('恢复WebDAV备份', f"恢复成功，文件: {target_filename}，详情: {msg}")
                     try:
-                        if current_user.is_admin:
-                            ok, msg, stats = _pg_import_database(tmp_db_path)
-                        else:
-                            ok, msg, stats = _pg_import_database(tmp_db_path, user_filter=current_user.id)
-                        shutil.rmtree(tmp_dir, ignore_errors=True)
-                        if ok:
-                            safe_log('恢复WebDAV备份', f"PG恢复成功（文件: {target_filename}）: {msg}")
-                            flash(f'恢复成功: {msg}', 'success')
-                        else:
-                            flash(f'恢复失败: {msg}', 'danger')
-                    except Exception as e:
-                        shutil.rmtree(tmp_dir, ignore_errors=True)
-                        flash(f'恢复失败: {str(e)}', 'danger')
-                    return redirect(url_for('admin_backups'))
-
-                # 验证下载数据库的完整性
-                import sqlite3 as _sqlite3
-                try:
-                    test_conn = _sqlite3.connect(tmp_db_path)
-                    integrity = test_conn.execute('PRAGMA integrity_check').fetchone()[0]
-                    test_conn.close()
-                    if integrity != 'ok':
-                        shutil.rmtree(tmp_dir, ignore_errors=True)
-                        flash(f'恢复失败：下载数据库文件完整性检查未通过 ({integrity})，可能文件已损坏', 'danger')
-                        return redirect(url_for('admin_backups'))
-                except Exception as ie:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                    flash(f'恢复失败：无法读取下载数据库文件 ({str(ie)})', 'danger')
-                    return redirect(url_for('admin_backups'))
-
-                # V9 修复：普通用户的过滤备份不能文件级替换主库（users 表丢失 → 全站 500），
-                # 改为数据级合并：只把备份中本人三张业务表数据合回主库
-                # V10.7：文件级恢复仅限管理员（含他人查看权限的普通用户也必须数据级合并）
-                _is_full_restore = current_user.is_admin
-                if not _is_full_restore:
-                    # 防锁：合并前先提交请求内未提交事务并释放连接池，确保主库写锁可获取
-                    try:
-                        db.session.commit()
+                        trigger_webhook_event(
+                            WebhookConfig.query.filter_by(is_enabled=True).all(), 'restore',
+                            f'{current_user.username} 恢复WebDAV备份',
+                            f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{target_filename} | 结果：{msg}',
+                            page_key='admin_backups', user_name=current_user.username, operator_id=current_user.id
+                        )
                     except Exception:
                         pass
-                    db.engine.dispose()
-
-                    ok, msg, stats = merge_user_scoped_backup(db_path, tmp_db_path, current_user)
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                    if ok:
-                        safe_log('恢复WebDAV备份', f"普通用户 {current_user.username} 数据级合并恢复成功（文件: {target_filename}）: {msg}")
-                        try:
-                            trigger_webhook_event(
-                                WebhookConfig.query.filter_by(is_enabled=True).all(), 'restore',
-                                f'恢复WebDAV备份',
-                                f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{target_filename} | 方式：数据级合并',
-                                page_key='admin_backups', user_name=current_user.username,
-                                operator_id=current_user.id
-                            )
-                        except Exception:
-                            pass
-                        flash(f'已成功恢复您的个人数据（{msg}），系统与其他用户数据不受影响。', 'success')
-                    else:
-                        flash(f'恢复失败：{msg}', 'danger')
-                    return redirect(url_for('admin_backups'))
-
-                # 管理员：保持原文件级替换逻辑（V5: 改用 sqlite3.backup() 原子操作，避免 WAL 不一致）
-                # 第4步：备份当前数据库防止恢复失败
-                if os.path.exists(db_path):
-                    # V10.11.21 结构重组：历史库备份归入 logs/ 目录（仅本地留存，不入库不上传）
-                    _bak_dir = os.path.abspath(os.path.join(os.path.dirname(db_path), '..', 'logs'))
-                    os.makedirs(_bak_dir, exist_ok=True)
-                    shutil.copy2(db_path, os.path.join(_bak_dir, os.path.basename(db_path) + f".bak_{int(time.time())}"))
-
-                # 第5步：用 sqlite3.backup() 原子性替换数据库内容（不操作文件，避免 WAL 不一致）
-                try:
-                    # 先删除 WAL/SHM 文件，确保干净状态
-                    for suffix in ('-wal', '-shm'):
-                        p = db_path + suffix
-                        if os.path.exists(p):
-                            try:
-                                os.remove(p)
-                            except Exception:
-                                pass
-                    src_conn = _sqlite3.connect(tmp_db_path)
-                    dst_conn = _sqlite3.connect(db_path)
-                    src_conn.backup(dst_conn)
-                    dst_conn.close()
-                    src_conn.close()
-                except Exception as backup_err:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-                    flash(f'恢复失败：数据库原子复制失败 ({str(backup_err)})', 'danger')
-                    return redirect(url_for('admin_backups'))
-
-                # 第6步：清理 WAL/SHM 文件（连接已关闭，文件句柄已释放）
-                for suffix in ('-wal', '-shm'):
-                    wal_path = db_path + suffix
-                    if os.path.exists(wal_path):
-                        try:
-                            os.remove(wal_path)
-                        except Exception:
-                            pass
-
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-                
-                # 重新执行数据库初始化（补建缺失的表/字段）
-                try:
-                    from app import init_database
-                    init_database()
-                except Exception as e:
-                    safe_log('数据库迁移', f"init_database 执行失败: {e}")
-                
-                safe_log('恢复WebDAV备份', f"文件名: {target_filename}")
-                try:
-                    trigger_webhook_event(
-                        WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
-                    f'恢复WebDAV备份',
-                    f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{target_filename}',
-                    page_key='admin_backups', user_name=current_user.username,
-                    operator_id=current_user.id
-                    )
-                except Exception:
-                    pass
-                flash('备份已成功恢复，请刷新页面确认数据更新。', 'success')
+                    flash(f'{msg}，请刷新页面确认数据更新。', 'success')
+                else:
+                    flash(f'{msg}', 'danger')
             else:
                 shutil.rmtree(tmp_dir, ignore_errors=True)
-                flash(f'恢复失败: {msg}', 'danger')
+                flash(f'下载/解密备份失败: {msg}', 'danger')
         except Exception as e:
-            flash(f'恢复备份时发生异常: {str(e)}', 'danger')
-            safe_log('恢复WebDAV备份失败', f"文件名: {target_filename}, 错误: {str(e)}")
+            flash(f'恢复过程中发生异常: {str(e)}', 'danger')
+            safe_log('恢复WebDAV备份失败', f"文件: {target_filename}, 错误: {str(e)}")
+
         return redirect(url_for('admin_backups'))
 
     @app.route('/admin/backups/test_connection', methods=['POST'])
@@ -5085,20 +4575,18 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         _admin_users = User.query.filter_by(is_admin=True).all()
         _admin_usernames = {u.username for u in _admin_users}
         for fn in filenames:
-            # V6: 三级权限判断 + 管理员数据保护
-            m = _re.match(r'(\d{8}_\d{6})_(.+?)_(db_backup|file_backup|custom)\.(db|zip)', fn)
-            if m:
-                created_by = m.group(2)
-                _is_creator_admin = created_by in _admin_usernames
-                if _is_creator_admin and not current_user.is_admin:
-                    results.append({'filename': fn, 'success': False, 'message': '权限不足：管理员创建的备份只有管理员可删除'})
+            info = parse_backup_filename_info(fn)
+            created_by = info['created_by']
+            _is_creator_admin = created_by in _admin_usernames
+            if _is_creator_admin and not current_user.is_admin:
+                results.append({'filename': fn, 'success': False, 'message': '权限不足：管理员创建的备份只有管理员可删除'})
+                all_success = False
+                continue
+            if not current_user.is_admin and created_by != current_user.username:
+                if not current_user.can_delete_others_backup():
+                    results.append({'filename': fn, 'success': False, 'message': '权限不足：只能删除自己创建的备份'})
                     all_success = False
                     continue
-                if not current_user.is_admin and created_by != current_user.username:
-                    if not current_user.can_delete_others_backup():
-                        results.append({'filename': fn, 'success': False, 'message': '权限不足：只能删除自己创建的备份'})
-                        all_success = False
-                        continue
             ok, msg = delete_webdav_backup(config, remote_filename=fn)
             results.append({'filename': fn, 'success': ok, 'message': msg})
             if not ok:
@@ -5116,6 +4604,31 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         except Exception:
             pass
         return jsonify({'success': all_success, 'results': results})
+
+    @app.route('/admin/backups/rollback_snapshot', methods=['POST'])
+    @login_required
+    def admin_rollback_snapshot():
+        """一键撤回恢复操作，将数据库完整还原到恢复前快照状态"""
+        if not current_user.is_admin and not current_user.can_use_backup():
+            flash('权限不足', 'danger')
+            return redirect(url_for('index'))
+
+        ok, msg, stats = rollback_prerestore_snapshot(current_user)
+        if ok:
+            safe_log('一键回滚快照', f"操作成功: {msg}")
+            try:
+                trigger_webhook_event(
+                    WebhookConfig.query.filter_by(is_enabled=True).all(), 'restore',
+                    f'{current_user.username} 一键撤回恢复快照',
+                    f'操作人：{current_user.username} | 页面：WebDAV备份 | 结果：{msg}',
+                    page_key='admin_backups', user_name=current_user.username, operator_id=current_user.id
+                )
+            except Exception:
+                pass
+            flash(msg, 'success')
+        else:
+            flash(msg, 'danger')
+        return redirect(url_for('admin_backups'))
 
     # ===================== 定时备份任务管理 =====================
 
