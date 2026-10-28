@@ -660,5 +660,50 @@
         {% endif %}
     })();
     </script>
+
+    <!-- 全局异步操作通用 Toast 提示容器 -->
+    <div class="toast-container position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 2050;">
+        <div id="globalAppToast" class="toast align-items-center text-white border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div class="toast-body d-flex align-items-center gap-2" id="globalAppToastBody">
+                    <i class="fa-solid fa-circle-check fs-6" id="globalAppToastIcon"></i>
+                    <span id="globalAppToastMsg">操作成功</span>
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    function showAppToast(msg, type) {
+        type = type || "success";
+        var toastEl = document.getElementById("globalAppToast");
+        var bodyEl = document.getElementById("globalAppToastBody");
+        var msgEl = document.getElementById("globalAppToastMsg");
+        var iconEl = document.getElementById("globalAppToastIcon");
+        if (!toastEl) {
+            alert(msg);
+            return;
+        }
+        toastEl.className = "toast align-items-center text-white border-0 shadow";
+        if (type === "success") {
+            toastEl.classList.add("bg-success");
+            iconEl.className = "fa-solid fa-circle-check fs-6";
+        } else if (type === "danger" || type === "error") {
+            toastEl.classList.add("bg-danger");
+            iconEl.className = "fa-solid fa-circle-xmark fs-6";
+        } else if (type === "warning") {
+            toastEl.classList.add("bg-warning", "text-dark");
+            iconEl.className = "fa-solid fa-triangle-exclamation fs-6";
+        } else {
+            toastEl.classList.add("bg-primary");
+            iconEl.className = "fa-solid fa-circle-info fs-6";
+        }
+        msgEl.textContent = msg;
+        var bsToast = bootstrap.Toast.getInstance(toastEl) || new bootstrap.Toast(toastEl, { delay: 3500 });
+        bsToast.show();
+    }
+    window.showAppToast = showAppToast;
+    </script>
 </body>
 </html>

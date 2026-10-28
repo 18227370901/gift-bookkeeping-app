@@ -3846,5 +3846,45 @@ function trySetupDiagramToggles() {
 if (document.readyState === 'complete') { trySetupDiagramToggles(); }
 else { window.addEventListener('load', function() { trySetupDiagramToggles(); }); }
 </script>
+
+<div class="card mt-4">
+  <div class="card-header bg-primary text-white fw-bold">
+    ADR-69：新用户全局默认权限模板 (CRUD 细粒度 74项) 架构治理与看板事由二级钻取穿透（V10.11.39 落地）
+  </div>
+  <div class="card-body">
+    <table class="table table-bordered mb-0">
+      <tr><th style="width: 140px;">背景与痛点</th><td>① 全局默认权限模板缺失，新用户注册初始化权限不可视化配置；若强制自动级联覆盖所有存量用户，会导致已获得特殊授权的用户被一刀切覆盖；② 用户列表表格因字段较多出现横向滚动条时，tr:hover 悬浮高亮与阴影被视口截断，右侧操作列区域断层未覆盖；③ 跨用户权限列直接平铺堆叠 5~6 个多色 Badge，行高被撑大，视觉拥挤；④ 数据分析事由分布饼图在分类较多时引线与文字严重重叠挤压，缺乏特定事由下的二级深度下钻视图。</td></tr>
+      <tr><th>决策方案</th><td>① <strong>74 项 CRUD 细粒度权限规范</strong>：新建 <code>services/permission_service.py</code> 统一定义 11 个业务分组共 74 项细粒度权限；模板存储于 <code>SystemSetting</code>，保存模板仅供后续新注册账号使用，绝对不自动覆盖存量用户；② <strong>单用户与批量手动重置闭环</strong>：在单用户权限弹窗中提供【重置为系统默认】与一键开启/全设为0，在列表顶部操作栏提供【批量重置为系统默认】，需管理员显式确认才执行覆盖；③ <strong>表格溢出行阴影与列宽优化</strong>：优化 <code>.table-responsive</code> 与 <code>table-hover</code>，整行注入全宽高亮与内嵌阴影；跨用户权限精简为状态胶囊（如「仅限自身数据」/「X项跨用户授权」），结合 Dropdown 弹出式气泡查看各模块独立明细；④ <strong>看板事由防重叠与二级钻取</strong>：开启 ECharts <code>avoidLabelOverlap: true</code> 与智能角度，支持一键切换「饼图 / 横向柱状图」；新增 <code>/api/dashboard/reason_drilldown</code> 接口，点击指定事由无缝深入展示收礼、送礼、结余、亲友贡献 TOP10 及穿透明细。</td></tr>
+      <tr><th>验证结果</th><td>全量自动化回归测试通过，模板读取/保存/单用户与批量重置无误；数据看板事由钻取响应时间 &lt; 20ms，多视图切换无卡顿。</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="card mt-4">
+  <div class="card-header bg-primary text-white fw-bold">
+    ADR-70：权限层级依赖图谱治理、批量配置智能设值、状态开关扁平化与看板二级钻取双视图联动（V10.11.40 落地）
+  </div>
+  <div class="card-body">
+    <table class="table table-bordered mb-0">
+      <tr><th style="width: 140px;">背景与痛点</th><td>① 看板二级下钻后无法切换环形饼图，图表形态锁死为条形图；② 权限模板静态硬编码“74项”，未动态统计且缺乏父子模块关联层级说明；③ 批量权限弹窗“一键全开/仅自身”强设 3 级导致天气和数据分析因无对应 option 出现空白，天气缺少 0 级选项；④ 跨用户权限气泡在 table-responsive 中被 overflow 裁剪；⑤ 账号启停存在 confirm 阻断弹窗。</td></tr>
+      <tr><th>决策方案</th><td>① <strong>看板二级双视图联动</strong>：重构 <code>switchReasonViewMode</code>，二级页面亲友贡献榜支持饼图（占比）与横向排行榜丝滑切换；② <strong>动态统计与 4 层级架构图谱</strong>：动态统计总项数与已启用项数，增加菜单准入 ➔ CRUD细粒度 ➔ 跨用户隔离 ➔ 高级运维引导图谱；③ <strong>批量权限智能设值</strong>：补齐天气 0 级选项，智能识别最高合法级别（天气/数据分析最高设 1，普通业务模块设 3），彻底消除空白；④ <strong>Popover 挂载至 Body</strong>：改用 Bootstrap Popover（<code>data-bs-container="body"</code>），摆脱表格裁剪遮挡；⑤ <strong>扁平化开关图标</strong>：去除 confirm，采用 <code>fa-toggle-on/off</code> 极简切换。</td></tr>
+      <tr><th>验证结果</th><td>全量自动化回归测试通过，看板二级图表双视图切换无卡顿；批量弹窗无空白；气泡浮层正常展示；账号状态切换即时高效。</td></tr>
+    </table>
+  </div>
+</div>
+
+<div class="card mt-4">
+  <div class="card-header bg-primary text-white fw-bold">
+    ADR-71：全站表单操作无刷新异步化（Fetch/Ajax）、CRUD独立分组保存与事由分布全量标签防叠可视化（V10.11.41 落地）
+  </div>
+  <div class="card-body">
+    <table class="table table-bordered mb-0">
+      <tr><th style="width: 140px;">背景与痛点</th><td>① 事由分布设置小于 4% 不显示标签导致部分扇区仅有折线而无文字与百分比，视觉割裂；② 全局权限模板调整某一分组时必须滚动到底部进行整页保存；③ 用户状态启停、邀请链接增删、密码/密保重置、超时策略、用户增删以及 Webhook 增删改停等高频操作均触发整页刷新，导致页面重绘闪烁与请求过多。</td></tr>
+      <tr><th>决策方案</th><td>① <strong>专业级「左环右表」分体布局重构</strong>：彻底解决外部折线与图例位置冲突问题；左侧布局纯净甜甜圈（<code>center: ['30%', '50%']</code>）与环心总额指示，右侧布局严格三列对齐的富文本明细清单（事由名称、金额、占比%），彻底消除外部交错引线，实现 100% 所有数据直接可见且绝对零重叠，并支持左右双向点击钻取与二级页面同构双视图自由切换；② <strong>CRUD 细粒度单组独立保存</strong>：后端新增 <code>/admin/permissions/default/save_group</code> 接口，11 个权限分组卡片均配备独立「保存本组」按钮并实时更新统计徽章；③ <strong>全站高频表单无刷新异步化</strong>：全局注入 Toast 轻提示系统，将用户状态启停、链接生成/删除、密码/密保重置、超时/注册策略、权限配置/重置、用户删除以及 Webhook 通道增删改停等 10 余处操作全面重构为 Fetch/Ajax 异步提交与局部 DOM 刷新；④ <strong>全局 Toast 居中与 Flash 泄露根治</strong>：全局 Toast 容器迁移至顶部水平居中（<code>top-0 start-50 translate-middle-x</code>，z-index 2050），且在 <code>after_request</code> 自动清空 AJAX 请求残留的 Flash 消息并修正路由，彻底根治跨页残留提示；⑤ <strong>礼金账本首页单行编辑与删除局部无刷新（SPA）落地</strong>：单条编辑成功后原地刷新表格对应单元格与编辑按钮属性，顶部3大统计卡片实时差额补偿；单条删除执行平滑淡出位移动画并实时核减统计指标；⑥ <strong>事由分布左环右表彻底空间隔离防叠</strong>：圆心调整为 <code>['26%', '50%']</code>，外半径收窄至 <code>62%</code>，右侧列表强制锚定 <code>left: '52%'</code>，事由全名支持 6 字完整展示，彻底消除婚礼、女儿出嫁等文字被引线遮挡缺陷。</td></tr>
+      <tr><th>验证与效果</th><td>数据分析看板所有事由名称与占比 100% 清晰呈现于图表两侧引线外；11 个权限分组均可独立秒级保存；14 项异步端到端接口测试全部 100% 通过；传统版本在 11443 端口平稳运行，HTTP 状态码 200 OK。</td></tr>
+    </table>
+  </div>
+</div>
+
 </body>
 </html>

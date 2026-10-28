@@ -149,15 +149,74 @@
     </div>
     <!-- 事由分布饼图 -->
     <div class="col-lg-5">
-        <div class="card border-0 shadow-sm">
-            <div class="card-header">
-                <span class="fw-bold"><i class="fa-solid fa-chart-pie text-warning me-2"></i>事由分布</span>
+        <div class="card border-0 shadow-sm" id="reasonCardWrapper">
+            <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="fw-bold"><i class="fa-solid fa-chart-pie text-warning me-2"></i><span id="reasonCardTitle">事由分布全景</span></span>
+                    <button type="button" class="btn btn-xs btn-outline-secondary rounded-pill d-none" id="reasonBackBtn" onclick="backToAllReasons()" style="font-size: 0.75rem; padding: 2px 8px;">
+                        <i class="fa-solid fa-arrow-left me-1"></i>返回全景
+                    </button>
+                </div>
+                <div class="d-flex align-items-center gap-2" id="reasonControls">
+                    <div class="btn-group btn-group-sm shadow-sm" role="group">
+                        <button type="button" class="btn btn-outline-secondary btn-sm active" id="reasonViewPieBtn" onclick="switchReasonViewMode('pie')" title="环形饼图">
+                            <i class="fa-solid fa-chart-pie"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary btn-sm" id="reasonViewBarBtn" onclick="switchReasonViewMode('bar')" title="横向排行柱状图">
+                            <i class="fa-solid fa-chart-bar"></i>
+                        </button>
+                    </div>
+                </div>
             </div>
             <div class="card-body">
-                <div id="reasonChart" style="width: 100%; height: 350px;"></div>
-                <div class="text-center text-muted small mt-2 d-none" id="reasonEmpty">
-                    <i class="fa-solid fa-folder-open fa-2x mb-2 opacity-50 d-block"></i>
-                    暂无事由数据
+                <!-- 全景事由图表区 -->
+                <div id="reasonOverviewArea">
+                    <div id="reasonChart" style="width: 100%; height: 350px;"></div>
+                    <div class="text-center text-muted small mt-2 d-none" id="reasonEmpty">
+                        <i class="fa-solid fa-folder-open fa-2x mb-2 opacity-50 d-block"></i>
+                        暂无事由数据
+                    </div>
+                    <div class="small text-muted text-center mt-1" style="font-size: 0.78rem;">
+                        <i class="fa-solid fa-hand-pointer me-1 text-primary"></i>提示：点击扇区或柱形条，可深度钻取查看该事由下的收支构成与亲友贡献榜
+                    </div>
+                </div>
+
+                <!-- 二级深入钻取分析区 -->
+                <div id="reasonDrilldownArea" class="d-none">
+                    <div class="row g-2 mb-3">
+                        <div class="col-sm-4">
+                            <div class="p-2 border rounded bg-light text-center">
+                                <div class="text-muted small" style="font-size: 0.75rem;">该事由收礼总额</div>
+                                <div class="fw-bold text-success fs-6 privacy-blur" id="drilldownReceived">¥ 0.00</div>
+                                <div class="text-muted" style="font-size: 0.7rem;" id="drilldownReceivedCount">0 笔</div>
+                            </div>
+                        </div>
+                        <div class="col-sm-4">
+                            <div class="p-2 border rounded bg-light text-center">
+                                <div class="text-muted small" style="font-size: 0.75rem;">该事由随礼支出</div>
+                                <div class="fw-bold text-danger fs-6 privacy-blur" id="drilldownSent">¥ 0.00</div>
+                                <div class="text-muted" style="font-size: 0.7rem;" id="drilldownSentCount">0 笔</div>
+                            </div>
+                        </div>
+                        <div class="col-sm-4">
+                            <div class="p-2 border rounded bg-light text-center">
+                                <div class="text-muted small" style="font-size: 0.75rem;">事由人情结余</div>
+                                <div class="fw-bold fs-6 privacy-blur" id="drilldownNet">¥ 0.00</div>
+                                <div class="text-muted" style="font-size: 0.7rem;" id="drilldownAvg">笔均: ¥ 0.00</div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- 亲友往来贡献 TOP5 迷你条形图 -->
+                    <div class="mb-2">
+                        <div class="fw-bold small text-muted mb-1"><i class="fa-solid fa-medal text-warning me-1"></i>亲友往来贡献 TOP10：</div>
+                        <div id="reasonContactsChart" style="width: 100%; height: 210px;"></div>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mt-2 pt-2 border-top">
+                        <span class="text-muted small" id="drilldownRecordsCountInfo">共计 0 笔明细</span>
+                        <a href="{{ url_for('index') }}" id="drilldownJumpLedgerBtn" class="btn btn-outline-primary btn-sm rounded-pill px-3" style="font-size: 0.78rem;">
+                            <i class="fa-solid fa-arrow-up-right-from-square me-1"></i>在账本中查看明细
+                        </a>
+                    </div>
                 </div>
             </div>
         </div>
@@ -200,6 +259,7 @@ function getEChartsTheme() {
     var isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
     return {
         textColor: isDark ? '#e6eaef' : '#212529',
+        textMuted: isDark ? '#9ca3af' : '#6c757d',
         bgColor: 'transparent',
         splitLineColor: isDark ? '#2b354a' : '#e9ecef',
         axisLineColor: isDark ? '#2b354a' : '#dee2e6',
@@ -224,6 +284,7 @@ function initCharts() {
         if (trendChart) trendChart.resize();
         if (reasonChart) reasonChart.resize();
         if (top10Chart) top10Chart.resize();
+        if (reasonContactsChart) reasonContactsChart.resize();
     });
 }
 
@@ -279,7 +340,27 @@ function renderTrendChart() {
     });
 }
 
-// ===== 渲染事由饼图 =====
+// ===== 事由模式与钻取图表 =====
+var reasonViewMode = 'pie'; // 'pie' or 'bar'
+var currentDrilldownReason = null;
+    currentDrilldownData = null;
+var reasonContactsChart = null;
+
+var currentDrilldownData = null;
+
+function switchReasonViewMode(mode) {
+    reasonViewMode = mode;
+    document.getElementById('reasonViewPieBtn').classList.toggle('active', mode === 'pie');
+    document.getElementById('reasonViewBarBtn').classList.toggle('active', mode === 'bar');
+    if (currentDrilldownReason && currentDrilldownData) {
+        // 如果当前处于二级钻取视图，切换二级亲友贡献榜的【柱状图 / 环形饼图】
+        renderReasonContactsDrilldownChart(currentDrilldownData);
+    } else {
+        renderReasonChart();
+    }
+}
+
+// ===== 渲染事由图表（支持饼图/环形图与横向柱状图，解决标签重叠） =====
 function renderReasonChart() {
     if (!dashboardData) return;
     var theme = getEChartsTheme();
@@ -292,20 +373,403 @@ function renderReasonChart() {
     }
     document.getElementById('reasonEmpty').classList.add('d-none');
 
-    var pieData = reasonData.map(function(d) {
-        return { name: d.reason, value: d.amount };
+    // 每次绘制前清空旧配置，避免不同模式间的 title 或坐标系残留
+    reasonChart.clear();
+
+    var totalAmt = reasonData.reduce(function(sum, d) { return sum + (d.amount || 0); }, 0);
+
+    if (reasonViewMode === 'bar') {
+        // 横向柱形图展现（永不重叠，适合事由项较多的场景）
+        var sortedReasons = reasonData.slice().reverse();
+        var yData = sortedReasons.map(function(d) { return d.reason; });
+        var xData = sortedReasons.map(function(d) { return d.amount || 0; });
+        var countData = sortedReasons.map(function(d) { return d.count || 0; });
+
+        reasonChart.setOption({
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: { type: 'shadow' },
+                backgroundColor: theme.tooltipBg,
+                borderColor: theme.tooltipBorder,
+                textStyle: { color: theme.textColor },
+                formatter: function(params) {
+                    var p = params[0];
+                    var idx = p.dataIndex;
+                    var pct = totalAmt > 0 ? ((p.value / totalAmt) * 100).toFixed(1) : 0;
+                    return '<strong>' + p.name + '</strong><br/>' +
+                           '金额：¥' + Number(p.value).toLocaleString() + '<br/>' +
+                           '笔数：' + countData[idx] + ' 笔<br/>' +
+                           '占比：' + pct + '%<br/>' +
+                           '<span class="text-primary" style="font-size:0.75rem;">(点击深入二级钻取分析)</span>';
+                }
+            },
+            grid: { left: '3%', right: '12%', bottom: '3%', top: '5%', containLabel: true },
+            xAxis: {
+                type: 'value',
+                axisLabel: { color: theme.textColor, formatter: '¥{value}' },
+                splitLine: { lineStyle: { color: theme.splitLineColor } },
+                axisLine: { lineStyle: { color: theme.axisLineColor } }
+            },
+            yAxis: {
+                type: 'category',
+                data: yData,
+                axisLabel: { color: theme.textColor },
+                axisLine: { lineStyle: { color: theme.axisLineColor } }
+            },
+            series: [{
+                name: '事由金额',
+                type: 'bar',
+                data: xData,
+                itemStyle: {
+                    color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                        { offset: 0, color: '#f59e0b' },
+                        { offset: 1, color: '#fbbf24' }
+                    ]),
+                    borderRadius: [0, 4, 4, 0]
+                },
+                label: {
+                    show: true,
+                    position: 'right',
+                    color: theme.textColor,
+                    formatter: function(params) {
+                        return '¥' + Math.round(params.value).toLocaleString();
+                    }
+                }
+            }]
+        }, true);
+    } else {
+        // 环形饼图重构：左侧纯净甜甜圈 + 环心汇总 + 右侧富文本对齐明细表，彻底告别文字引线交叉与重叠
+        var pieData = reasonData.map(function(d) {
+            return { name: d.reason, value: d.amount, count: d.count };
+        });
+
+        var displayAmtStr = totalAmt >= 1000000 
+            ? (totalAmt / 10000).toFixed(1) + '万' 
+            : (totalAmt >= 10000 ? (totalAmt / 10000).toFixed(1) + '万' : Math.round(totalAmt).toLocaleString());
+
+        reasonChart.setOption({
+            title: [{
+                text: '¥' + displayAmtStr,
+                subtext: '共 ' + reasonData.length + ' 种事由',
+                left: '26%',
+                top: '42%',
+                textAlign: 'center',
+                textStyle: { fontSize: 15, fontWeight: 'bold', color: theme.textColor },
+                subtextStyle: { fontSize: 11, color: theme.textMuted }
+            }],
+            tooltip: {
+                trigger: 'item',
+                backgroundColor: theme.tooltipBg,
+                borderColor: theme.tooltipBorder,
+                textStyle: { color: theme.textColor },
+                formatter: function(params) {
+                    var pct = totalAmt > 0 ? ((params.value / totalAmt) * 100).toFixed(1) : 0;
+                    return '<strong>' + params.name + '</strong><br/>' +
+                           '金额：¥' + Number(params.value).toLocaleString() + '<br/>' +
+                           '笔数：' + (params.data.count || 0) + ' 笔<br/>' +
+                           '占比：' + pct + '%<br/>' +
+                           '<span class="text-primary" style="font-size:0.75rem;">(点击深入二级钻取分析)</span>';
+                }
+            },
+            legend: {
+                type: 'scroll',
+                orient: 'vertical',
+                left: '52%',
+                right: '2%',
+                top: 'middle',
+                height: '88%',
+                icon: 'circle',
+                itemWidth: 8,
+                itemHeight: 8,
+                itemGap: 9,
+                pageIconColor: theme.textColor,
+                pageIconInactiveColor: theme.textMuted,
+                pageTextStyle: { color: theme.textColor },
+                textStyle: {
+                    color: theme.textColor,
+                    fontSize: 12,
+                    rich: {
+                        name: { width: 90, color: theme.textColor, fontSize: 12 },
+                        amt: { width: 75, align: 'right', color: theme.textMuted, fontSize: 11 },
+                        pct: { width: 45, align: 'right', color: '#0d6efd', fontWeight: 'bold', fontSize: 11 }
+                    }
+                },
+                formatter: function(name) {
+                    var item = reasonData.find(function(d) { return d.reason === name; });
+                    if (!item) return name;
+                    var pct = totalAmt > 0 ? ((item.amount / totalAmt) * 100).toFixed(1) + '%' : '0%';
+                    var amtStr = '¥' + Math.round(item.amount).toLocaleString();
+                    var displayName = name.length > 6 ? name.slice(0, 5) + '…' : name;
+                    return '{name|' + displayName + '}{amt|' + amtStr + '}{pct|' + pct + '}';
+                }
+            },
+            series: [{
+                name: '事由分布',
+                type: 'pie',
+                radius: ['38%', '62%'],
+                center: ['26%', '50%'],
+                avoidLabelOverlap: true,
+                minAngle: 2,
+                data: pieData,
+                label: {
+                    show: true,
+                    position: 'inside',
+                    formatter: function(p) {
+                        return p.percent >= 6 ? p.percent + '%' : '';
+                    },
+                    color: '#ffffff',
+                    fontSize: 10,
+                    fontWeight: 'bold'
+                },
+                labelLine: {
+                    show: false
+                },
+                emphasis: {
+                    scale: true,
+                    scaleSize: 6,
+                    itemStyle: {
+                        shadowBlur: 10,
+                        shadowOffsetX: 0,
+                        shadowColor: 'rgba(0, 0, 0, 0.2)'
+                    }
+                },
+                itemStyle: {
+                    borderRadius: 4,
+                    borderColor: theme.bgColor,
+                    borderWidth: 2
+                }
+            }]
+        }, true);
+    }
+
+    // 绑定扇区与图例点击钻取事件
+    reasonChart.off('click');
+    reasonChart.on('click', function(params) {
+        var clickedReason = params.name;
+        if (clickedReason) {
+            drilldownReason(clickedReason);
+        }
     });
 
-    reasonChart.setOption({
-        tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)', backgroundColor: theme.tooltipBg, borderColor: theme.tooltipBorder, textStyle: { color: theme.textColor } },
-        legend: { orient: 'vertical', left: 'left', textStyle: { color: theme.textColor } },
-        series: [{
-            type: 'pie', radius: ['40%', '70%'], center: ['55%', '50%'],
-            data: pieData,
-            label: { color: theme.textColor, formatter: '{b}\n{d}%' },
-            itemStyle: { borderRadius: 8, borderColor: theme.bgColor, borderWidth: 2 }
-        }]
+    reasonChart.off('legendselectchanged');
+    reasonChart.on('legendselectchanged', function(params) {
+        reasonChart.dispatchAction({
+            type: 'legendSelect',
+            name: params.name
+        });
+        drilldownReason(params.name);
     });
+}
+
+// ===== 二级深入钻取分析 =====
+function drilldownReason(reasonName) {
+    currentDrilldownReason = reasonName;
+    document.getElementById('reasonCardTitle').textContent = '事由分析 > ' + reasonName;
+    document.getElementById('reasonBackBtn').classList.remove('d-none');
+    document.getElementById('reasonOverviewArea').classList.add('d-none');
+    document.getElementById('reasonDrilldownArea').classList.remove('d-none');
+
+    // 设置在账本中查看明细的跳转链接
+    var jumpBtn = document.getElementById('drilldownJumpLedgerBtn');
+    if (jumpBtn) {
+        jumpBtn.href = '{{ url_for("index") }}?search=' + encodeURIComponent(reasonName);
+    }
+
+    var params = 'reason=' + encodeURIComponent(reasonName) + getDateRangeParams();
+    fetch('/api/dashboard/reason_drilldown?' + params, {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' }
+    })
+    .then(function(res) { return res.json(); })
+    .then(function(resData) {
+        if (resData.code === 200 && resData.data) {
+            renderReasonDrilldownContent(resData.data);
+        }
+    })
+    .catch(function(err) {
+        console.error('Drilldown load failed:', err);
+    });
+}
+
+function renderReasonDrilldownContent(d) {
+    var s = d.summary || {};
+    document.getElementById('drilldownReceived').textContent = '¥ ' + (s.total_received || 0).toLocaleString(undefined, {minimumFractionDigits: 2});
+    document.getElementById('drilldownReceivedCount').textContent = (s.received_count || 0) + ' 笔';
+    document.getElementById('drilldownSent').textContent = '¥ ' + (s.total_sent || 0).toLocaleString(undefined, {minimumFractionDigits: 2});
+    document.getElementById('drilldownSentCount').textContent = (s.sent_count || 0) + ' 笔';
+
+    var net = (s.net_amount || 0);
+    var netEl = document.getElementById('drilldownNet');
+    netEl.textContent = '¥ ' + (net >= 0 ? '+' : '') + net.toLocaleString(undefined, {minimumFractionDigits: 2});
+    netEl.className = 'fw-bold fs-6 privacy-blur ' + (net >= 0 ? 'text-success' : 'text-danger');
+    document.getElementById('drilldownAvg').textContent = '笔均: ¥ ' + (s.avg_amount || 0).toFixed(2);
+    document.getElementById('drilldownRecordsCountInfo').textContent = '共计 ' + (s.total_count || 0) + ' 笔人情明细';
+
+    currentDrilldownData = d;
+    renderReasonContactsDrilldownChart(d);
+}
+
+
+function renderReasonContactsDrilldownChart(d) {
+    if (!d) return;
+    var theme = getEChartsTheme();
+    var topContacts = d.top_contacts || [];
+    var chartDom = document.getElementById('reasonContactsChart');
+    if (!chartDom) return;
+
+    if (!reasonContactsChart) {
+        reasonContactsChart = echarts.getInstanceByDom(chartDom) || echarts.init(chartDom);
+    }
+
+    // 每次切换视图前清除上一次图表实例配置，防止 pie 与 bar 坐标系与 series 残留冲突
+    reasonContactsChart.clear();
+
+    if (!topContacts || topContacts.length === 0) {
+        return;
+    }
+
+    if (reasonViewMode === 'pie') {
+        // 二级深度钻取：左侧亲友往来占比环形图 + 环心汇总 + 右侧亲友贡献明细表
+        var totalContactsAmt = topContacts.reduce(function(sum, c) { return sum + (c.total || 0); }, 0);
+        var pieData = topContacts.map(function(c) {
+            return {
+                name: c.name,
+                value: c.total,
+                received: c.received || 0,
+                sent: c.sent || 0,
+                count: c.count || 0
+            };
+        });
+
+        var displayContactsAmtStr = totalContactsAmt >= 10000 
+            ? (totalContactsAmt / 10000).toFixed(1) + '万' 
+            : Math.round(totalContactsAmt).toLocaleString();
+
+        reasonContactsChart.setOption({
+            title: [{
+                text: '¥' + displayContactsAmtStr,
+                subtext: '亲友贡献榜',
+                left: '26%',
+                top: '40%',
+                textAlign: 'center',
+                textStyle: { fontSize: 13, fontWeight: 'bold', color: theme.textColor },
+                subtextStyle: { fontSize: 10, color: theme.textMuted }
+            }],
+            tooltip: {
+                trigger: 'item',
+                backgroundColor: theme.tooltipBg,
+                borderColor: theme.tooltipBorder,
+                textStyle: { color: theme.textColor },
+                formatter: function(params) {
+                    var data = params.data || {};
+                    return '<strong>' + params.name + '</strong><br/>' +
+                           '往来总额：¥' + Number(params.value).toLocaleString() + ' (' + params.percent + '%)<br/>' +
+                           '其中收礼：¥' + Number(data.received).toLocaleString() + '<br/>' +
+                           '其中随礼：¥' + Number(data.sent).toLocaleString() + '<br/>' +
+                           '往来笔数：' + (data.count || 0) + ' 笔';
+                }
+            },
+            legend: {
+                type: 'scroll',
+                orient: 'vertical',
+                left: '52%',
+                right: '2%',
+                top: 'middle',
+                height: '88%',
+                icon: 'circle',
+                itemWidth: 8,
+                itemHeight: 8,
+                itemGap: 7,
+                pageIconColor: theme.textColor,
+                pageIconInactiveColor: theme.textMuted,
+                pageTextStyle: { color: theme.textColor },
+                textStyle: {
+                    color: theme.textColor,
+                    fontSize: 11,
+                    rich: {
+                        name: { width: 85, color: theme.textColor, fontSize: 11 },
+                        amt: { width: 65, align: 'right', color: theme.textMuted, fontSize: 11 },
+                        pct: { width: 42, align: 'right', color: '#0d6efd', fontWeight: 'bold', fontSize: 11 }
+                    }
+                },
+                formatter: function(name) {
+                    var item = topContacts.find(function(c) { return c.name === name; });
+                    if (!item) return name;
+                    var pct = totalContactsAmt > 0 ? ((item.total / totalContactsAmt) * 100).toFixed(1) + '%' : '0%';
+                    var amtStr = '¥' + Math.round(item.total).toLocaleString();
+                    var displayName = name.length > 5 ? name.slice(0, 4) + '…' : name;
+                    return '{name|' + displayName + '}{amt|' + amtStr + '}{pct|' + pct + '}';
+                }
+            },
+            series: [{
+                name: '亲友贡献',
+                type: 'pie',
+                radius: ['38%', '62%'],
+                center: ['26%', '50%'],
+                avoidLabelOverlap: true,
+                minAngle: 2,
+                data: pieData,
+                label: {
+                    show: true,
+                    position: 'inside',
+                    formatter: function(p) {
+                        return p.percent >= 8 ? p.percent + '%' : '';
+                    },
+                    color: '#ffffff',
+                    fontSize: 9,
+                    fontWeight: 'bold'
+                },
+                labelLine: {
+                    show: false
+                },
+                emphasis: {
+                    scale: true,
+                    scaleSize: 5,
+                    itemStyle: {
+                        shadowBlur: 8,
+                        shadowOffsetX: 0,
+                        shadowColor: 'rgba(0, 0, 0, 0.2)'
+                    }
+                },
+                itemStyle: { borderRadius: 4, borderColor: theme.bgColor, borderWidth: 2 }
+            }]
+        }, true);
+    } else {
+        // 二级深度钻取：横向堆叠排行榜柱状图
+        var sortedContacts = topContacts.slice().reverse();
+        var cNames = sortedContacts.map(function(c) { return c.name; });
+        var cReceived = sortedContacts.map(function(c) { return c.received || 0; });
+        var cSent = sortedContacts.map(function(c) { return c.sent || 0; });
+
+        reasonContactsChart.setOption({
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: theme.tooltipBg, borderColor: theme.tooltipBorder, textStyle: { color: theme.textColor } },
+            legend: { data: ['收礼', '送礼'], textStyle: { color: theme.textColor }, top: 0 },
+            grid: { left: '3%', right: '8%', bottom: '3%', top: '18%', containLabel: true },
+            xAxis: { type: 'value', axisLabel: { color: theme.textColor, formatter: '¥{value}' }, splitLine: { lineStyle: { color: theme.splitLineColor } }, axisLine: { lineStyle: { color: theme.axisLineColor } } },
+            yAxis: { type: 'category', data: cNames, axisLabel: { color: theme.textColor }, axisLine: { lineStyle: { color: theme.axisLineColor } } },
+            series: [
+                { name: '收礼', type: 'bar', stack: 'total', data: cReceived, itemStyle: { color: '#198754' } },
+                { name: '送礼', type: 'bar', stack: 'total', data: cSent, itemStyle: { color: '#dc3545' } }
+            ]
+        }, true);
+    }
+
+    // 延时重设自适应宽高，确保二级页面无论是柱状图还是环形图均完美展开
+    setTimeout(function() {
+        if (reasonContactsChart) reasonContactsChart.resize();
+    }, 50);
+}
+
+function backToAllReasons() {
+    currentDrilldownReason = null;
+    currentDrilldownData = null;
+    document.getElementById('reasonCardTitle').textContent = '事由分布全景';
+    document.getElementById('reasonBackBtn').classList.add('d-none');
+    document.getElementById('reasonDrilldownArea').classList.add('d-none');
+    document.getElementById('reasonOverviewArea').classList.remove('d-none');
+    if (reasonChart) {
+        renderReasonChart();
+        reasonChart.resize();
+    }
 }
 
 // ===== 渲染 TOP10 榜单 =====

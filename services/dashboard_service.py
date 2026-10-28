@@ -193,3 +193,117 @@ def calculate_poster_stats(user, root_url=None):
         'reasons': reasons,
         'qr_url': qr_url
     }
+
+
+def calculate_reason_drilldown_stats(user, reason, start_month=None, end_month=None, start_year=None, end_year=None):
+    """
+    事由二级深度钻取分析：
+    展示指定事由（如乔迁之喜、升学宴等）下的收礼/送礼金额、收支差额、参与亲友TOP10、时间走势与代表性明细
+    """
+    query = get_accessible_gift_query(user)
+    if not reason:
+        reason = "未分类"
+    if reason == "其他" or reason == "未分类":
+        query = query.filter((GiftRecord.event_reason == reason) | (GiftRecord.event_reason == None) | (GiftRecord.event_reason == ""))
+    else:
+        query = query.filter(GiftRecord.event_reason == reason)
+
+    # 日期范围筛选
+    if start_month and end_month:
+        try:
+            start_date = datetime.strptime(start_month + "-01", "%Y-%m-%d")
+            end_date = datetime.strptime(end_month + "-01", "%Y-%m-%d")
+            if end_date.month == 12:
+                end_date = end_date.replace(day=31)
+            else:
+                end_date = end_date.replace(month=end_date.month + 1, day=1) - timedelta(days=1)
+            query = query.filter(GiftRecord.created_at >= start_date, GiftRecord.created_at <= end_date)
+        except Exception:
+            pass
+    elif start_year and end_year:
+        try:
+            start_date = datetime(int(start_year), 1, 1)
+            end_date = datetime(int(end_year), 12, 31, 23, 59, 59)
+            query = query.filter(GiftRecord.created_at >= start_date, GiftRecord.created_at <= end_date)
+        except Exception:
+            pass
+
+    records = query.order_by(GiftRecord.created_at.desc()).all()
+
+    total_received = 0.0
+    total_sent = 0.0
+    received_count = 0
+    sent_count = 0
+
+    contacts_map = {}
+    monthly_trend_map = {}
+
+    recent_items = []
+    for r in records:
+        amt = float(r.amount or 0.0)
+        is_give = (r.record_type in ("send", "give"))
+        if is_give:
+            total_sent += amt
+            sent_count += 1
+        else:
+            total_received += amt
+            received_count += 1
+
+        # 联系人统计
+        cname = (r.name or "匿名").strip() or "匿名"
+        if cname not in contacts_map:
+            contacts_map[cname] = {"name": cname, "received": 0.0, "sent": 0.0, "count": 0}
+        if is_give:
+            contacts_map[cname]["sent"] += amt
+        else:
+            contacts_map[cname]["received"] += amt
+        contacts_map[cname]["count"] += 1
+
+        # 月度时间走势
+        mkey = r.created_at.strftime("%Y-%m") if r.created_at else "未知"
+        if mkey not in monthly_trend_map:
+            monthly_trend_map[mkey] = {"month": mkey, "received": 0.0, "sent": 0.0}
+        if is_give:
+            monthly_trend_map[mkey]["sent"] += amt
+        else:
+            monthly_trend_map[mkey]["received"] += amt
+
+        # 前 20 笔明细
+        if len(recent_items) < 20:
+            recent_items.append({
+                "id": r.id,
+                "name": r.name or "匿名",
+                "record_type": r.record_type or "receive",
+                "amount": round(amt, 2),
+                "created_at": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "",
+                "notes": r.notes or ""
+            })
+
+    for v in contacts_map.values():
+        v["total"] = round(v["received"] + v["sent"], 2)
+        v["received"] = round(v["received"], 2)
+        v["sent"] = round(v["sent"], 2)
+    top_contacts = sorted(contacts_map.values(), key=lambda x: x["total"], reverse=True)[:10]
+
+    trend_list = sorted(monthly_trend_map.values(), key=lambda x: x["month"])
+    for t in trend_list:
+        t["received"] = round(t["received"], 2)
+        t["sent"] = round(t["sent"], 2)
+
+    net_amount = total_received - total_sent
+
+    return {
+        "reason": reason,
+        "summary": {
+            "total_count": len(records),
+            "received_count": received_count,
+            "sent_count": sent_count,
+            "total_received": round(total_received, 2),
+            "total_sent": round(total_sent, 2),
+            "net_amount": round(net_amount, 2),
+            "avg_amount": round((total_received + total_sent) / len(records), 2) if records else 0.0
+        },
+        "top_contacts": top_contacts,
+        "monthly_trend": trend_list,
+        "recent_items": recent_items
+    }

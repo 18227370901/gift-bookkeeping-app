@@ -119,7 +119,7 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="text-muted small fw-bold">礼金记录总笔数</div>
-                        <div class="h3 fw-bold mb-0 text-dark mt-1">{{ total_count }} <span class="fs-6 fw-normal text-muted">笔</span></div>
+                        <div class="h3 fw-bold mb-0 text-dark mt-1" id="statTotalCount">{{ total_count }} <span class="fs-6 fw-normal text-muted">笔</span></div>
                     </div>
                     <div class="bg-danger bg-opacity-10 p-3 rounded-circle text-danger">
                         <i class="fa-solid fa-list-check fa-xl"></i>
@@ -134,7 +134,7 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="text-muted small fw-bold">收到礼金总金额</div>
-                        <div class="h3 fw-bold mb-0 text-success mt-1 privacy-blur">¥ {{ "%.2f"|format(total_amount) }}</div>
+                        <div class="h3 fw-bold mb-0 text-success mt-1 privacy-blur" id="statTotalAmount">¥ {{ "%.2f"|format(total_amount) }}</div>
                     </div>
                     <div class="bg-success bg-opacity-10 p-3 rounded-circle text-success">
                         <i class="fa-solid fa-sack-dollar fa-xl"></i>
@@ -149,7 +149,7 @@
                 <div class="d-flex justify-content-between align-items-center">
                     <div>
                         <div class="text-muted small fw-bold">平均单笔礼金</div>
-                        <div class="h3 fw-bold mb-0 text-info mt-1 privacy-blur">¥ {{ "%.2f"|format(avg_amount) }}</div>
+                        <div class="h3 fw-bold mb-0 text-info mt-1 privacy-blur" id="statAvgAmount">¥ {{ "%.2f"|format(avg_amount) }}</div>
                     </div>
                     <div class="bg-info bg-opacity-10 p-3 rounded-circle text-info">
                         <i class="fa-solid fa-calculator fa-xl"></i>
@@ -258,7 +258,7 @@
                 <tbody>
                     {% if records %}
                     {% for record in records %}
-                    <tr>
+                    <tr id="recordRow_{{ record.id }}" data-record-id="{{ record.id }}">
                         <td class="ps-3">
                             {% if can_user_delete_record(current_user, record) %}
                             <input class="form-check-input record-checkbox" type="checkbox" name="record_ids" value="{{ record.id }}" onchange="updateBatchDeleteBtn()">
@@ -266,20 +266,20 @@
                             <input class="form-check-input" type="checkbox" disabled title="无删除权限">
                             {% endif %}
                         </td>
-                        <td class="text-muted">{{ loop.index }}</td>
-                        <td class="fw-bold text-dark">{{ record.name }}</td>
-                        <td>
+                        <td class="text-muted cell-seq">{{ loop.index }}</td>
+                        <td class="fw-bold text-dark cell-name">{{ record.name }}</td>
+                        <td class="cell-type">
                             {% if record.record_type in ('send', 'give') %}
                             <span class="badge bg-danger-subtle text-danger border border-danger-subtle"><i class="fa-solid fa-paper-plane me-1"></i>送礼</span>
                             {% else %}
                             <span class="badge bg-success-subtle text-success border border-success-subtle"><i class="fa-solid fa-hand-holding-dollar me-1"></i>收礼</span>
                             {% endif %}
                         </td>
-                        <td>{{ record.age if record.age else '-' }}</td>
-                        <td>{{ record.phone if record.phone else '-' }}</td>
-                        <td class="text-end fw-bold {{ 'text-danger' if record.record_type in ('send', 'give') else 'text-success' }} privacy-blur">¥ {{ "%.2f"|format(record.amount) }}</td>
-                        <td class="text-muted small fw-bold privacy-blur">{{ num2cn(record.amount) }}</td>
-                        <td>
+                        <td class="cell-age">{{ record.age if record.age else '-' }}</td>
+                        <td class="cell-phone">{{ record.phone if record.phone else '-' }}</td>
+                        <td class="text-end fw-bold {{ 'text-danger' if record.record_type in ('send', 'give') else 'text-success' }} privacy-blur cell-amount">¥ {{ "%.2f"|format(record.amount) }}</td>
+                        <td class="text-muted small fw-bold privacy-blur cell-amount-cn">{{ num2cn(record.amount) }}</td>
+                        <td class="cell-reason">
                             <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25">{{ record.event_reason }}</span>
                             {% if record.banquet and not record.banquet.deleted_at %}
                             <div class="mt-1">
@@ -289,9 +289,9 @@
                             </div>
                             {% endif %}
                         </td>
-                        <td class="text-truncate" style="max-width: 140px;" title="{{ record.address }}">{{ record.address if record.address else '-' }}</td>
-                        <td class="text-truncate" style="max-width: 140px;" title="{{ record.notes }}">{{ record.notes if record.notes else '-' }}</td>
-                        <td class="small text-muted">{{ record.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td class="text-truncate cell-address" style="max-width: 140px;" title="{{ record.address }}">{{ record.address if record.address else '-' }}</td>
+                        <td class="text-truncate cell-notes" style="max-width: 140px;" title="{{ record.notes }}">{{ record.notes if record.notes else '-' }}</td>
+                        <td class="small text-muted cell-created">{{ record.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                         {% if current_user.is_admin or current_user.can_view_others_for('ledger') %}
                         <td><span class="badge bg-light border text-dark">{{ record.owner.username if record.owner else '未知' }}</span></td>
                         {% endif %}
@@ -808,6 +808,52 @@ function changePerPage(val) {
     window.location.search = urlParams.toString();
 }
 
+function updateTopSummaryAfterDelete(delAmount, delType) {
+    const countEl = document.getElementById('statTotalCount');
+    let count = 0;
+    if (countEl) {
+        count = parseInt(countEl.textContent.replace(/[^\d]/g, '')) || 0;
+        count = Math.max(0, count - 1);
+        countEl.innerHTML = count + ' <span class="fs-6 fw-normal text-muted">笔</span>';
+    }
+    const totalAmtEl = document.getElementById('statTotalAmount');
+    let curTotal = 0;
+    if (totalAmtEl) {
+        curTotal = parseFloat(totalAmtEl.textContent.replace(/[^\d.-]/g, '')) || 0;
+        if (delType === 'receive' || delType === '入礼' || !delType) {
+            curTotal = Math.max(0, curTotal - (parseFloat(delAmount) || 0));
+        }
+        totalAmtEl.textContent = '¥ ' + curTotal.toFixed(2);
+    }
+    const avgEl = document.getElementById('statAvgAmount');
+    if (avgEl && countEl) {
+        let avg = count > 0 ? (curTotal / count) : 0;
+        avgEl.textContent = '¥ ' + avg.toFixed(2);
+    }
+}
+
+function updateTopSummaryAfterEdit(oldAmount, oldType, newAmount, newType) {
+    const totalAmtEl = document.getElementById('statTotalAmount');
+    if (!totalAmtEl) return;
+    let curTotal = parseFloat(totalAmtEl.textContent.replace(/[^\d.-]/g, '')) || 0;
+    if (oldType === 'receive' || oldType === '入礼') {
+        curTotal -= oldAmount;
+    }
+    if (newType === 'receive' || newType === '入礼') {
+        curTotal += newAmount;
+    }
+    if (curTotal < 0) curTotal = 0;
+    totalAmtEl.textContent = '¥ ' + curTotal.toFixed(2);
+    const countEl = document.getElementById('statTotalCount');
+    const avgEl = document.getElementById('statAvgAmount');
+    if (countEl && avgEl) {
+        let count = parseInt(countEl.textContent.replace(/[^\d]/g, '')) || 0;
+        if (count > 0) {
+            avgEl.textContent = '¥ ' + (curTotal / count).toFixed(2);
+        }
+    }
+}
+
 function deleteSingleRecord(recordId, recordName) {
     if (confirm('确定要将客人 [' + recordName + '] 的这笔礼金记录移入回收站吗？')) {
         const csrfToken = document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '{{ csrf_token }}';
@@ -822,13 +868,38 @@ function deleteSingleRecord(recordId, recordName) {
         .then(res => res.json())
         .then(data => {
             if (data.code === 200) {
-                window.location.reload();
+                // 平滑淡出并移除 DOM 行
+                const row = document.getElementById('recordRow_' + recordId);
+                if (row) {
+                    row.style.transition = 'all 0.35s ease';
+                    row.style.opacity = '0';
+                    row.style.transform = 'translateX(25px)';
+                    setTimeout(() => {
+                        row.remove();
+                        const tbody = document.querySelector('table[data-resizable="gift_ledger"] tbody');
+                        if (tbody && tbody.querySelectorAll('tr[id^="recordRow_"]').length === 0) {
+                            window.location.reload();
+                        }
+                    }, 350);
+                }
+                updateTopSummaryAfterDelete(data.amount, data.record_type);
+                if (window.showAppToast) {
+                    showAppToast(data.message || '记录已移入回收站！', 'success');
+                }
             } else {
-                alert(data.message || '删除失败');
+                if (window.showAppToast) {
+                    showAppToast(data.message || '删除失败', 'danger');
+                } else {
+                    alert(data.message || '删除失败');
+                }
             }
         })
         .catch(() => {
-            alert('网络请求异常，删除失败');
+            if (window.showAppToast) {
+                showAppToast('网络请求异常，删除失败', 'danger');
+            } else {
+                alert('网络请求异常，删除失败');
+            }
         });
     }
 }
@@ -926,11 +997,93 @@ document.addEventListener('DOMContentLoaded', function() {
             })
             .then(res => res.json().then(data => ({ status: res.status, data: data })))
             .then(({ status, data }) => {
-                if (status === 200) {
+                if (status === 200 && (data.code === 200 || !data.code)) {
                     const modalEl = document.getElementById('editRecordModal');
                     const modal = bootstrap.Modal.getInstance(modalEl);
                     if (modal) modal.hide();
-                    window.location.reload();
+
+                    const item = data.data;
+                    if (item) {
+                        const row = document.getElementById('recordRow_' + item.id);
+                        if (row) {
+                            const editBtn = row.querySelector('button[data-bs-target="#editRecordModal"]');
+                            const oldAmount = editBtn ? parseFloat(editBtn.getAttribute('data-amount') || '0') : 0;
+                            const oldType = editBtn ? (editBtn.getAttribute('data-type') || 'receive') : 'receive';
+
+                            const nameCell = row.querySelector('.cell-name');
+                            if (nameCell) nameCell.textContent = item.name;
+
+                            const typeCell = row.querySelector('.cell-type');
+                            if (typeCell) {
+                                if (item.record_type === 'send' || item.record_type === 'give') {
+                                    typeCell.innerHTML = '<span class="badge bg-danger-subtle text-danger border border-danger-subtle"><i class="fa-solid fa-paper-plane me-1"></i>送礼</span>';
+                                } else {
+                                    typeCell.innerHTML = '<span class="badge bg-success-subtle text-success border border-success-subtle"><i class="fa-solid fa-hand-holding-dollar me-1"></i>收礼</span>';
+                                }
+                            }
+
+                            const ageCell = row.querySelector('.cell-age');
+                            if (ageCell) ageCell.textContent = item.age ? item.age : '-';
+
+                            const phoneCell = row.querySelector('.cell-phone');
+                            if (phoneCell) phoneCell.textContent = item.phone ? item.phone : '-';
+
+                            const amountCell = row.querySelector('.cell-amount');
+                            if (amountCell) {
+                                amountCell.className = 'text-end fw-bold privacy-blur cell-amount ' + (item.record_type === 'send' ? 'text-danger' : 'text-success');
+                                amountCell.textContent = '¥ ' + item.amount_formatted;
+                            }
+
+                            const amountCnCell = row.querySelector('.cell-amount-cn');
+                            if (amountCnCell) amountCnCell.textContent = item.amount_cn;
+
+                            const reasonCell = row.querySelector('.cell-reason');
+                            if (reasonCell) {
+                                var rHtml = '<span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25">' + item.event_reason + '</span>';
+                                if (item.banquet_id && item.banquet_title) {
+                                    rHtml += '<div class="mt-1"><a href="/banquet/' + item.banquet_id + '" class="badge bg-primary-subtle text-primary border border-primary-subtle text-decoration-none" title="点击穿透前往专属大账本"><i class="fa-solid fa-champagne-glasses me-1"></i>' + item.banquet_title + '</a></div>';
+                                }
+                                reasonCell.innerHTML = rHtml;
+                            }
+
+                            const addrCell = row.querySelector('.cell-address');
+                            if (addrCell) {
+                                addrCell.textContent = item.address ? item.address : '-';
+                                addrCell.title = item.address ? item.address : '';
+                            }
+
+                            const noteCell = row.querySelector('.cell-notes');
+                            if (noteCell) {
+                                noteCell.textContent = item.notes ? item.notes : '-';
+                                noteCell.title = item.notes ? item.notes : '';
+                            }
+
+                            const createdCell = row.querySelector('.cell-created');
+                            if (createdCell) createdCell.textContent = item.created_at;
+
+                            if (editBtn) {
+                                editBtn.setAttribute('data-name', item.name);
+                                editBtn.setAttribute('data-type', item.record_type);
+                                editBtn.setAttribute('data-age', item.age);
+                                editBtn.setAttribute('data-address', item.address);
+                                editBtn.setAttribute('data-phone', item.phone);
+                                editBtn.setAttribute('data-amount', item.amount);
+                                editBtn.setAttribute('data-reason', item.event_reason);
+                                editBtn.setAttribute('data-banquet-id', item.banquet_id || '');
+                                editBtn.setAttribute('data-created', item.created_at_input || '');
+                                editBtn.setAttribute('data-notes', item.notes);
+                            }
+
+                            row.classList.add('table-warning');
+                            setTimeout(() => row.classList.remove('table-warning'), 1500);
+
+                            updateTopSummaryAfterEdit(oldAmount, oldType, item.amount, item.record_type);
+                        }
+                    }
+
+                    if (window.showAppToast) {
+                        showAppToast(data.message || '记录修改成功！', 'success');
+                    }
                 } else {
                     // 保留用户在弹窗中修改的输入项
                     if (alertBox) {

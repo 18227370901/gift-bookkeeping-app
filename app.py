@@ -227,6 +227,8 @@ def add_header(response):
     response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        session.pop('_flashes', None)
     return response
 
 @app.before_request
@@ -1617,7 +1619,8 @@ def register():
         user = User(username=username)
         user.set_password(password)
         user.set_security_answers(q1, a1, q2, a2)
-        user.allowed_menus = ''  # 新注册用户默认无任何菜单权限，需通过工单申请
+        from services.permission_service import apply_default_permissions_to_user
+        apply_default_permissions_to_user(user, force_save=False)
 
         # 增加 token 使用次数，达到上限标记为已使用（自由注册模式下 reg_token 可能为 None）
         if reg_token:
@@ -2036,7 +2039,28 @@ def edit_record(record_id):
     except Exception:
         pass
     if is_ajax:
-        return jsonify({'code': 200, 'message': f'记录 [{name}] 修改成功！'})
+        b_title = record.banquet.title if (record.banquet and not record.banquet.deleted_at) else ''
+        return jsonify({
+            'code': 200,
+            'message': f'记录 [{name}] 修改成功！',
+            'data': {
+                'id': record.id,
+                'name': record.name,
+                'age': record.age if record.age else '',
+                'address': record.address if record.address else '',
+                'phone': record.phone if record.phone else '',
+                'amount': record.amount,
+                'amount_formatted': f'{record.amount:.2f}',
+                'amount_cn': num2cn(record.amount),
+                'event_reason': record.event_reason,
+                'record_type': record.record_type,
+                'banquet_id': record.banquet_id,
+                'banquet_title': b_title,
+                'notes': record.notes if record.notes else '',
+                'created_at': record.created_at.strftime('%Y-%m-%d %H:%M') if record.created_at else '',
+                'created_at_input': record.created_at.strftime('%Y-%m-%dT%H:%M') if record.created_at else ''
+            }
+        })
     flash(f'记录 [{name}] 修改成功！', 'success')
     return redirect(url_for('index'))
 
@@ -2059,6 +2083,7 @@ def delete_record(record_id):
 
     record_name = record.name
     record_amount = record.amount
+    record_type = record.record_type
     record.deleted_at = datetime.now()
     db.session.commit()
     try:
@@ -2073,7 +2098,14 @@ def delete_record(record_id):
         pass
     log_action('删除记录至回收站', f'删除记录 ID #{record_id}: 姓名 [{record_name}] 进入回收站')
     if is_ajax:
-        return jsonify({'code': 200, 'message': f'记录 [{record_name}] 已移入回收站！'})
+        return jsonify({
+            'code': 200,
+            'message': f'记录 [{record_name}] 已移入回收站！',
+            'record_id': record_id,
+            'record_name': record_name,
+            'amount': record_amount,
+            'record_type': record_type
+        })
     flash('记录已移入回收站！', 'success')
     return redirect(url_for('index'))
 
@@ -2306,13 +2338,19 @@ def admin_users():
         active_users_count=active_users_count,
         total_records_count=total_records_count,
         registration_mode=SystemSetting.get_val('registration_mode', 'invite_only'),
+        permission_groups=__import__('services.permission_service', fromlist=['PERMISSION_GROUPS']).PERMISSION_GROUPS,
+        system_default_permissions=__import__('services.permission_service', fromlist=['get_system_default_permissions']).get_system_default_permissions(),
+        all_permission_definitions=__import__('services.permission_service', fromlist=['ALL_PERMISSION_DEFINITIONS']).ALL_PERMISSION_DEFINITIONS,
         now=datetime.now()
     )
 
 @app.route('/admin/settings/timeout', methods=['POST'])
 @login_required
 def update_session_timeout():
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax:
+            return jsonify({'code': 403, 'message': '只有超级管理员才能更改系统设置！'}), 403
         flash('只有超级管理员才能更改系统设置！', 'danger')
         return redirect(url_for('index'))
 
@@ -2323,33 +2361,44 @@ def update_session_timeout():
         lockout_sec = int(request.form.get('login_lockout_seconds', '60'))
 
         if minutes < 1 or minutes > 10080:
-            flash('超时时间必须在 1 到 10080 分钟之间！', 'danger')
+            msg = '超时时间必须在 1 到 10080 分钟之间！'
+            if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+            flash(msg, 'danger')
         elif attempts < 1 or attempts > 20:
-            flash('允许密码最大尝试次数必须在 1 到 20 次之间！', 'danger')
+            msg = '登录最大重试次数必须在 1 到 20 次之间！'
+            if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+            flash(msg, 'danger')
         elif sec_attempts < 1 or sec_attempts > 20:
-            flash('允许密保最大尝试次数必须在 1 到 20 次之间！', 'danger')
+            msg = '密保最大重试次数必须在 1 到 20 次之间！'
+            if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+            flash(msg, 'danger')
         elif lockout_sec < 0 or lockout_sec > 86400:
-            flash('锁定时长必须在 0 到 86400 秒之间！', 'danger')
+            msg = '锁定时间必须在 0 到 86400 秒之间！'
+            if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+            flash(msg, 'danger')
         else:
             SystemSetting.set_val('session_timeout_minutes', minutes)
             SystemSetting.set_val('max_login_attempts', attempts)
             SystemSetting.set_val('max_security_attempts', sec_attempts)
             SystemSetting.set_val('login_lockout_seconds', lockout_sec)
-            log_action('更新系统配置', f'设置超时时间为 {minutes} 分钟，密码最大尝试次数为 {attempts} 次，密保最大尝试次数为 {sec_attempts} 次，锁定时长为 {lockout_sec} 秒')
-            # V10.3: 补充系统安全配置推送
+            log_action('修改系统设置', f'设置超时时间为 {minutes} 分钟，登录重试次数为 {attempts} 次，密保重试次数为 {sec_attempts} 次，锁定时间为 {lockout_sec} 秒')
             try:
                 trigger_webhook_event(
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
                     f'{current_user.username} 更新安全配置',
-                    f'操作人：{current_user.username} | 页面：用户管理 | 操作：更新系统安全配置',
+                    f'操作人：{current_user.username} | 页面：用户管理 | 操作：修改系统安全配置',
                     page_key='admin_users', user_name=current_user.username,
                     operator_id=current_user.id
                 )
             except Exception:
                 pass
-            flash('系统安全与登录设置修改成功！', 'success')
+            if is_ajax:
+                return jsonify({'code': 200, 'message': '系统安全及超时参数修改成功！'})
+            flash('系统安全及超时参数修改成功！', 'success')
     except (ValueError, TypeError):
-        flash('无效的配置参数！', 'danger')
+        msg = '请输入有效的数值！'
+        if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+        flash(msg, 'danger')
 
     return redirect(url_for('admin_users'))
 @app.route('/admin/logs')
@@ -2500,7 +2549,24 @@ def generate_invite_link():
         )
     except Exception:
         pass
-    flash(f'注册邀请链接已成功生成（可使用 {max_uses} 次）！', 'success')
+    msg = f'注册邀请链接已成功生成（可使用 {max_uses} 次）！'
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        reg_url = request.host_url.rstrip('/') + url_for('register') + f'?token={token_str}'
+        return jsonify({
+            'code': 200,
+            'message': msg,
+            'data': {
+                'id': reg_token.id,
+                'token': token_str,
+                'url': reg_url,
+                'created_at': reg_token.created_at.strftime('%Y-%m-%d %H:%M') if reg_token.created_at else '',
+                'expires_at': reg_token.expires_at.strftime('%Y-%m-%d %H:%M') if reg_token.expires_at else '',
+                'max_uses': max_uses,
+                'use_count': 0,
+                'status': '有效'
+            }
+        })
+    flash(msg, 'success')
     return redirect(url_for('admin_users'))
 
 @app.route('/admin/invite_link/delete/<int:token_id>', methods=['POST'])
@@ -2526,45 +2592,28 @@ def admin_delete_invite_link(token_id):
         )
     except Exception:
         pass
-    flash('邀请链接已成功删除！', 'success')
+    msg = '邀请链接已成功删除！'
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({'code': 200, 'message': msg, 'token_id': token_id})
+    flash(msg, 'success')
     return redirect(url_for('admin_users'))
 
 @app.route('/admin/invite_link/batch_delete', methods=['POST'])
 @login_required
 def admin_batch_delete_invite_links():
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax:
+            return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
 
-    token_ids = request.form.getlist('token_ids')
+    token_ids = request.form.getlist('token_ids') or request.form.getlist('token_ids[]')
     if not token_ids:
+        if is_ajax:
+            return jsonify({'code': 400, 'message': '请先勾选需要删除的注册邀请链接！'}), 400
         flash('请先勾选需要删除的注册邀请链接！', 'warning')
         return redirect(url_for('admin_users'))
-
-    try:
-        token_ids_int = [int(i) for i in token_ids]
-        tokens = RegistrationToken.query.filter(RegistrationToken.id.in_(token_ids_int)).all()
-        deleted_count = len(tokens)
-        for t in tokens:
-            db.session.delete(t)
-        db.session.commit()
-        log_action('批量删除注册邀请链接', f'管理员批量删除了 {deleted_count} 个注册邀请链接')
-        try:
-            trigger_webhook_event(
-                WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
-                f'批量删除 {deleted_count} 个邀请链接',
-                f'操作人：{current_user.username} | 页面：邀请链接 | 数量：{deleted_count}',
-                page_key='invites', user_name=current_user.username,
-                operator_id=current_user.id
-            )
-        except Exception:
-            pass
-        flash(f'成功批量删除 {deleted_count} 个注册邀请链接！', 'success')
-    except Exception as e:
-        db.session.rollback()
-        flash(f'批量删除注册邀请链接失败: {str(e)}', 'danger')
-
-    return redirect(url_for('admin_users'))
 
 @app.route('/admin/log/delete/<int:log_id>', methods=['POST'])
 @login_required
@@ -2646,17 +2695,19 @@ def admin_save_audit_log_config():
 @app.route('/admin/settings/registration_mode', methods=['POST'])
 @login_required
 def admin_set_registration_mode():
-    """管理员设置用户注册模式（自由注册 vs 仅邀请链接注册）"""
+    """管理员设置用户注册模式（开放注册 vs 仅邀请码注册）"""
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax:
+            return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
     mode = request.form.get('registration_mode', 'invite_only').strip()
     if mode not in ('free', 'invite_only'):
         mode = 'invite_only'
     SystemSetting.set_val('registration_mode', mode)
-    mode_name = '自由开放注册' if mode == 'free' else '仅邀请链接注册'
-    log_action('修改注册策略', f"管理员将系统注册模式调整为: [{mode_name}]")
-    # V10.3: 补充注册模式变更推送
+    mode_name = '自由开放注册' if mode == 'free' else '仅凭邀请链接注册'
+    log_action('修改注册策略', f"管理员将系统注册模式设置为: [{mode_name}]")
     try:
         trigger_webhook_event(
             WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
@@ -2667,107 +2718,167 @@ def admin_set_registration_mode():
         )
     except Exception:
         pass
-    flash(f'注册模式已成功调整为：【{mode_name}】！', 'success')
+    if is_ajax:
+        return jsonify({'code': 200, 'message': f'注册模式已成功设置为：【{mode_name}】！', 'registration_mode': mode})
+    flash(f'注册模式已成功设置为：【{mode_name}】！', 'success')
     return redirect(url_for('admin_users'))
 
 
 @app.route('/admin/users/batch_permissions', methods=['POST'])
 @login_required
 def admin_batch_user_permissions():
-    """管理员批量配置某一组用户的菜单权限与各菜单独立数据权限"""
+    """管理员批量为勾选的用户配置菜单权限及子菜单跨用户数据权限"""
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax:
+            return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
 
     user_ids = request.form.getlist('user_ids') or request.form.getlist('user_ids[]')
     if not user_ids:
+        if is_ajax:
+            return jsonify({'code': 400, 'message': '请勾选需要批量配置权限的用户！'}), 400
         flash('请勾选需要批量配置权限的用户！', 'warning')
         return redirect(url_for('admin_users'))
 
-    menus_list = request.form.getlist('allowed_menus') or request.form.getlist('allowed_menus[]')
-    # V10.11.13 保存归一：天气权限级别为 0（无天气访问权限）时，从勾选列表中剔除 weather
-    # （修复「勾选天气 + 选 0 级 → 用户仍可访问天气页」的双轨语义冲突：运行时
-    #   can_access_menu('weather') 只看 allowed_menus，无视 menu_permissions 的 0 值）
-    _wperm_raw = request.form.get('menu_perm_weather')
-    if _wperm_raw is None:
-        _wperm_raw = request.form.get('menu_perms[weather]')
-    if _wperm_raw is not None and str(_wperm_raw).isdigit() and int(_wperm_raw) == 0:
-        menus_list = [m for m in menus_list if m != 'weather']
-    allowed_menus_str = ",".join(menus_list)
+# ==================== 全局默认权限模板与一键重置路由 ====================
+@app.route('/admin/permissions/default/save_group', methods=['POST'])
+@login_required
+def admin_save_group_default_permissions():
+    """独立保存指定分组的全局默认权限模板 (CRUD细粒度单组保存)"""
+    if not current_user.is_admin:
+        return jsonify({'code': 403, 'message': '权限不足！'}), 403
 
-    # 补齐 webhooks
-    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks']
-    menu_perms = {}
-    for m in ALL_MENUS:
-        val = request.form.get(f'menu_perm_{m}')
-        if val is None:
-            val = request.form.get(f'menu_perms[{m}]')
-        if val is not None and str(val).isdigit():
-            menu_perms[m] = int(val)
-        else:
-            legacy_p = request.form.get('perm_level', '0')
-            menu_perms[m] = int(legacy_p) if str(legacy_p).isdigit() else 0
+    from services.permission_service import PERMISSION_GROUPS, save_system_group_permissions
+    group_key = request.form.get('group_key', '').strip()
+    target_group = next((g for g in PERMISSION_GROUPS if g['key'] == group_key), None)
+    if not target_group:
+        return jsonify({'code': 400, 'message': '无效的权限分组标识'}), 400
 
-    # 针对天气只读工具菜单：未勾选天气则权限级别归零，勾选则设为 1
-    if 'weather' not in menus_list:
-        menu_perms['weather'] = 0
-    else:
-        menu_perms['weather'] = 1
+    group_perms = {}
+    for p in target_group['permissions']:
+        val = request.form.get(f'perm_{p["key"]}')
+        group_perms[p['key']] = (val == '1' or val == 'on')
 
-    # 批量备份授权（修复 C1）
-    backup_auth = request.form.get('backup_authorized', '')
-    backup_auth_val = (backup_auth == '1' or backup_auth == 'on')
+    updated = save_system_group_permissions(group_key, group_perms)
+    group_active = sum(1 for p in target_group['permissions'] if updated.get(p['key']))
+    total_active = sum(1 for v in updated.values() if v)
 
-    # 批量 Webhook 授权
-    webhook_auth = request.form.get('webhook_authorized', '')
-    webhook_auth_val = (webhook_auth == '1' or webhook_auth == 'on' or 'webhooks' in menus_list)
+    log_action('配置全局权限模板', f'管理员独立保存【{target_group["name"]}】分组默认权限，已开启 {group_active}/{len(target_group["permissions"])} 项')
+    return jsonify({
+        'code': 200,
+        'message': f'【{target_group["name"]}】默认权限已独立保存！',
+        'group_key': group_key,
+        'group_active': group_active,
+        'total_active': total_active
+    })
 
-    # V3: 批量 AI 助手授权
-    ai_auth = request.form.get('ai_authorized', '')
-    ai_auth_val = (ai_auth == '1' or ai_auth == 'on')
+@app.route('/admin/permissions/default/save', methods=['POST'])
+@login_required
+def admin_save_default_permissions():
+    """保存新用户全局默认权限模板 (74项细粒度) - 仅作为后续新用户或手动重置的基准，不级联覆盖存量用户"""
+    if not current_user.is_admin:
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
 
-    # V6: 批量定时任务授权
-    task_auth = request.form.get('scheduled_task_authorized', '')
-    task_auth_val = (task_auth == '1' or task_auth == 'on')
+    from services.permission_service import DEFAULT_USER_PERMISSIONS, save_system_default_permissions
+    perms_dict = {}
+    for k in DEFAULT_USER_PERMISSIONS:
+        val = request.form.get(f'perm_{k}')
+        perms_dict[k] = (val == '1' or val == 'on')
 
+    save_system_default_permissions(perms_dict)
+    active_count = sum(1 for v in perms_dict.values() if v)
+    log_action('配置全局权限模板', f'管理员更新全局默认权限模板(74项)，已开启 {active_count}/{len(perms_dict)} 项，存量用户需手动重置生效')
+    flash(f'全局默认权限模板已成功保存！当前启用 {active_count}/{len(perms_dict)} 项权限。提示：该模板已自动应用于后续新注册用户，存量用户不会被强制变更，可在用户列表中手动【重置为系统默认】生效。', 'success')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/user/<int:user_id>/reset_default_permissions', methods=['POST'])
+@login_required
+def admin_reset_user_default_permissions(user_id):
+    """将指定普通用户的全部权限一键重置为系统最新的全局默认权限模板"""
+    if not current_user.is_admin:
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
+
+    user = User.query.get_or_404(user_id)
+    if user.is_admin or user.id == current_user.id:
+        flash('无法重置超级管理员账号权限！', 'warning')
+        return redirect(url_for('admin_users'))
+
+    from services.permission_service import apply_default_permissions_to_user
+    apply_default_permissions_to_user(user, force_save=True)
+    log_action('重置用户权限', f'管理员将用户 [{user.username}] 的权限一键重置为系统默认模板')
+    msg = f'用户 [{user.username}] 的权限已成功重置为系统全局默认权限！'
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        p_labels = {0: "仅自身", 1: "查他人", 2: "查改他人", 3: "完全"}
+        m_names = {"ledger": "账本", "banquets": "宴席", "reconciliation": "对账", "reminders": "备忘", "recycle_bin": "回收", "backups": "备份"}
+        active_cnt = sum(1 for mk in m_names if user.get_menu_perm(mk) > 0)
+        max_lvl = max(user.get_menu_perm(mk) for mk in m_names)
+        details = {mk: {"name": m_names[mk], "level": user.get_menu_perm(mk), "label": p_labels[user.get_menu_perm(mk)]} for mk in m_names}
+        return jsonify({
+            'code': 200,
+            'message': msg,
+            'user_id': user.id,
+            'username': user.username,
+            'active_count': active_cnt,
+            'max_level': max_lvl,
+            'details': details
+        })
+    flash(msg, 'success')
+    return redirect(url_for('admin_users'))
+
+
+@app.route('/admin/users/batch_reset_default_permissions', methods=['POST'])
+@login_required
+def admin_batch_reset_default_permissions():
+    """批量将选中的普通用户一键重置为系统最新的全局默认权限模板"""
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+    if not current_user.is_admin:
+        if is_ajax:
+            return jsonify({'code': 403, 'message': '权限不足！'}), 403
+        flash('权限不足！', 'danger')
+        return redirect(url_for('index'))
+
+    user_ids = request.form.getlist('user_ids') or request.form.getlist('user_ids[]')
+    if not user_ids:
+        if is_ajax:
+            return jsonify({'code': 400, 'message': '请先勾选需要重置权限的用户！'}), 400
+        flash('请先勾选需要重置权限的用户！', 'warning')
+        return redirect(url_for('admin_users'))
+
+    from services.permission_service import apply_default_permissions_to_user
     count = 0
-    for uid_str in user_ids:
-        try:
-            uid = int(uid_str)
-            u = db.session.get(User, uid)
+    names = []
+    for uid in user_ids:
+        if str(uid).isdigit():
+            u = User.query.get(int(uid))
             if u and not u.is_admin and u.id != current_user.id:
-                u.allowed_menus = allowed_menus_str
-                u.set_menu_permissions(menu_perms)
-                ledger_p = menu_perms.get('ledger', 0)
-                u.can_view_others = (ledger_p >= 1)
-                u.can_edit_others = (ledger_p >= 2)
-                u.can_delete_others = (ledger_p >= 3)
-                u.ai_authorized = ai_auth_val
-                u.scheduled_task_authorized = task_auth_val
-                u.backup_authorized = backup_auth_val
-                u.webhook_authorized = webhook_auth_val
+                apply_default_permissions_to_user(u, force_save=False)
                 count += 1
-        except Exception:
-            continue
+                names.append(u.username)
+    db.session.commit()
+    log_action('批量重置用户权限', f'管理员批量重置了 {count} 位普通用户的权限为系统默认模板：{", ".join(names[:5])}')
+    if is_ajax:
+        return jsonify({'code': 200, 'message': f'已成功将选中的 {count} 位普通用户的权限全部重置为系统全局默认模板！', 'count': count})
+    flash(f'已成功将选中的 {count} 位普通用户的权限全部重置为系统全局默认模板！', 'success')
+    return redirect(url_for('admin_users'))
 
-    if count > 0:
-        db.session.commit()
-        log_action('批量配置权限', f"管理员批量更新了 {count} 位用户的菜单与各菜单独立数据权限")
-        # V10.3: 补充批量配置权限推送
-        try:
-            trigger_webhook_event(
-                WebhookConfig.query.filter_by(is_enabled=True).all(), 'update',
-                f'{current_user.username} 批量配置 {count} 位用户权限',
-                f'操作人：{current_user.username} | 页面：用户管理 | 操作：批量配置权限 | 数量：{count}',
-                page_key='admin_users', user_name=current_user.username,
-                operator_id=current_user.id
-            )
-        except Exception:
-            pass
-        flash(f'成功批量更新了 {count} 位用户的菜单访问与各菜单独立数据权限！', 'success')
-    else:
-        flash('未找到符合批量更新条件的普通用户！', 'warning')
-
+    from services.permission_service import apply_default_permissions_to_user
+    count = 0
+    names = []
+    for uid in user_ids:
+        if str(uid).isdigit():
+            u = User.query.get(int(uid))
+            if u and not u.is_admin and u.id != current_user.id:
+                apply_default_permissions_to_user(u, force_save=False)
+                count += 1
+                names.append(u.username)
+    db.session.commit()
+    log_action('批量重置用户权限', f'管理员批量重置了 {count} 位普通用户的权限为系统默认模板：{", ".join(names[:5])}')
+    flash(f'已成功将选中的 {count} 位普通用户的权限全部重置为系统全局默认模板！', 'success')
     return redirect(url_for('admin_users'))
 
 @app.route('/admin/user/permissions/<int:user_id>', methods=['POST'])
@@ -2886,7 +2997,9 @@ def admin_update_user_permissions(user_id):
 @app.route('/admin/user/reset_security/<int:user_id>', methods=['POST'])
 @login_required
 def admin_reset_user_security(user_id):
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax: return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
 
@@ -2896,10 +3009,59 @@ def admin_reset_user_security(user_id):
     q2 = request.form.get('security_question_2', '').strip()
     a2 = request.form.get('security_answer_2', '').strip()
 
-    # 校验：密保问题 2 与答案 2 必须成对出现（两个都填或两个都空）
     if (q2 and not a2) or (a2 and not q2):
-        flash('新密保问题 2 与答案 2 必须成对填写！', 'warning')
+        msg = '若填密保问题 2 则 2 的答案也必须填写！'
+        if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+        flash(msg, 'warning')
         return redirect(url_for('admin_users'))
+    if q1 and q2 and q1 == q2:
+        msg = '两个密保问题不能相同，请输入不同的问题！'
+        if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+        flash(msg, 'warning')
+        return redirect(url_for('admin_users'))
+
+    if user.is_admin:
+        old_pwd = request.form.get('old_password', '').strip()
+        old_ans1 = request.form.get('old_security_answer_1', '').strip() or request.form.get('old_security_answer', '').strip()
+        old_ans2 = request.form.get('old_security_answer_2', '').strip()
+
+        verified = False
+        if old_pwd and user.check_password(old_pwd):
+            verified = True
+        elif old_ans1 and (user.check_any_security_answer(old_ans1) or user.check_security_answers(old_ans1, old_ans2)):
+            verified = True
+
+        if not verified:
+            msg = f'重置管理员 [{user.username}] 密保失败，必须验证原密码或原密保答案！'
+            if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+            flash(msg, 'danger')
+            return redirect(url_for('admin_users'))
+
+    if q1 and a1:
+        user.set_security_answers(q1, a1, q2, a2)
+        FORGOT_SECURITY_FAIL_COUNTS.pop(user.username, None)
+        FORGOT_SECURITY_LOCK_UNTILS.pop(user.username, None)
+        db.session.commit()
+        log_action('重置密保问题', f'管理员重置了用户 [{user.username}] 的密保问题与答案')
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
+                f'{current_user.username} 重置用户密保',
+                f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username} | 操作：重置密保问题',
+                page_key='admin_users', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
+        msg = f'用户 [{user.username}] 的密保问题已设置成功（问题 1：{q1}' + (f'，问题 2：{q2}）' if q2 else '，密保 2 保持原样）')
+        if is_ajax: return jsonify({'code': 200, 'message': msg})
+        flash(msg, 'success')
+    else:
+        msg = '密保问题和密保答案均不能为空！'
+        if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+        flash(msg, 'warning')
+
+    return redirect(url_for('admin_users'))
     # 校验：两个新密保问题不能相同
     if q1 and q2 and q1 == q2:
         flash('两个新密保问题不能相同，请输入不同的问题！', 'warning')
@@ -2981,13 +3143,25 @@ def admin_toggle_user_status(user_id):
         )
     except Exception:
         pass
-    flash(f'用户 [{user.username}] 已成功{status_str}！', 'success')
+    msg = f'用户 [{user.username}] 已成功{status_str}！'
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return jsonify({
+            'code': 200,
+            'message': msg,
+            'user_id': user.id,
+            'username': user.username,
+            'is_active': user.is_active,
+            'status_str': status_str
+        })
+    flash(msg, 'success')
     return redirect(url_for('admin_users'))
 
 @app.route('/admin/user/reset_pass/<int:user_id>', methods=['POST'])
 @login_required
 def admin_reset_user_pass(user_id):
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax: return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
 
@@ -2996,48 +3170,10 @@ def admin_reset_user_pass(user_id):
     confirm_password = request.form.get('confirm_password', '').strip()
 
     if not new_password:
-        flash('新密码不能为空！', 'warning')
+        msg = '新密码不能为空！'
+        if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+        flash(msg, 'warning')
         return redirect(url_for('admin_users'))
-
-    if new_password != confirm_password:
-        flash('两次输入的密码不一致，重置失败！', 'danger')
-        return redirect(url_for('admin_users'))
-
-    if user.is_admin:
-        # 管理员账号重置密码必须先验证旧密码或者旧密保问题
-        old_pwd = request.form.get('old_password', '').strip()
-        old_ans1 = request.form.get('old_security_answer_1', '').strip() or request.form.get('old_security_answer', '').strip()
-        old_ans2 = request.form.get('old_security_answer_2', '').strip()
-
-        verified = False
-        if old_pwd and user.check_password(old_pwd):
-            verified = True
-        elif old_ans1 and user.check_security_answers(old_ans1, old_ans2):
-            verified = True
-
-        if not verified:
-            flash(f'重置管理员 [{user.username}] 密码失败：必须先验证原密码或原密保答案！', 'danger')
-            return redirect(url_for('admin_users'))
-
-    user.set_password(new_password)
-    # 管理员重置密码时清空登录风控计数
-    LOGIN_FAIL_COUNTS.pop(user.username, None)
-    LOGIN_LOCK_UNTILS.pop(user.username, None)
-    db.session.commit()
-    log_action('重置用户密码', f'管理员重置了用户 [{user.username}] 的密码')
-    try:
-        trigger_webhook_event(
-            WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
-            f'重置用户密码 [{user.username}]',
-            f'操作人：{current_user.username} | 页面：用户管理 | 用户：{user.username}',
-            page_key='admin_users', user_name=current_user.username,
-            operator_id=current_user.id
-        )
-    except Exception:
-        pass
-    flash(f'用户 [{user.username}] 的密码已重置成功！', 'success')
-
-    return redirect(url_for('admin_users'))
 
 @app.route('/admin/user/<int:user_id>/credentials', methods=['GET', 'POST'])
 @login_required
@@ -3103,82 +3239,35 @@ def admin_user_credentials(user_id):
 @app.route('/admin/user/delete/<int:user_id>', methods=['POST'])
 @login_required
 def admin_delete_user(user_id):
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax: return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
 
     user = User.query.get_or_404(user_id)
     if user.id == current_user.id:
-        flash('无法删除当前的管理员账号！', 'danger')
+        msg = '无法删除当前登录的管理员账号！'
+        if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+        flash(msg, 'danger')
         return redirect(url_for('admin_users'))
-
-    deleted_username = user.username
-    db.session.delete(user)
-    db.session.commit()
-    log_action('删除用户', f'管理员删除了用户账号 [{deleted_username}]')
-    try:
-        trigger_webhook_event(
-            WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
-            f'删除用户 [{deleted_username}]',
-            f'操作人：{current_user.username} | 页面：用户管理 | 用户：{deleted_username}',
-            page_key='admin_users', user_name=current_user.username,
-            operator_id=current_user.id
-        )
-    except Exception:
-        pass
-    flash(f'用户 [{deleted_username}] 及其关联数据已成功删除！', 'success')
-    return redirect(url_for('admin_users'))
 
 @app.route('/admin/users/batch_delete', methods=['POST'])
 @login_required
 def admin_batch_delete_users():
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax: return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
 
-    user_ids = request.form.getlist('user_ids')
+    user_ids = request.form.getlist('user_ids') or request.form.getlist('user_ids[]')
     if not user_ids:
-        flash('请先勾选需要批量删除的用户！', 'warning')
+        msg = '请先勾选需要批量删除的用户！'
+        if is_ajax: return jsonify({'code': 400, 'message': msg}), 400
+        flash(msg, 'warning')
         return redirect(url_for('admin_users'))
 
-    try:
-        user_ids_int = [int(i) for i in user_ids]
-        # 严格过滤：禁止删除当前登录用户，且禁止删除管理员账号
-        eligible_users = User.query.filter(
-            User.id.in_(user_ids_int),
-            User.id != current_user.id,
-            User.is_admin.is_(False)
-        ).all()
-
-        if not eligible_users:
-            flash('没有符合删除条件的普通用户（已保护管理员账号及当前登录账号）！', 'warning')
-            return redirect(url_for('admin_users'))
-
-        deleted_usernames = [u.username for u in eligible_users]
-        deleted_count = len(eligible_users)
-
-        for u in eligible_users:
-            db.session.delete(u)
-        db.session.commit()
-
-        log_action('批量删除用户', f'管理员批量删除了 {deleted_count} 个用户: {", ".join(deleted_usernames)}')
-        # V10.3: 补充批量删除用户推送
-        try:
-            trigger_webhook_event(
-                WebhookConfig.query.filter_by(is_enabled=True).all(), 'batch_delete',
-                f'{current_user.username} 批量删除 {deleted_count} 个用户',
-                f'操作人：{current_user.username} | 页面：用户管理 | 用户：{", ".join(deleted_usernames)} | 数量：{deleted_count}',
-                page_key='admin_users', user_name=current_user.username,
-                operator_id=current_user.id
-            )
-        except Exception:
-            pass
-        flash(f'成功批量删除 {deleted_count} 个用户及其关联数据：{", ".join(deleted_usernames)}', 'success')
-    except Exception as e:
-        db.session.rollback()
-        flash(f'批量删除用户失败: {str(e)}', 'danger')
-
-    return redirect(url_for('admin_users'))
 import csv
 import io
 from flask import Response

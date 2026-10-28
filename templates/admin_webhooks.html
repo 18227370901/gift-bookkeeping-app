@@ -153,7 +153,7 @@
                       data-id="{{ w.id }}" title="{% if w.is_enabled %}停用通道{% else %}启用通道{% endif %}">
                 <i class="fa-solid {% if w.is_enabled %}fa-pause{% else %}fa-play{% endif %}"></i>
               </button>
-              <form action="{{ url_for('admin_delete_webhook', webhook_id=w.id) }}" method="POST" class="d-inline" onsubmit="return confirm('确定要删除此 Webhook 通道配置吗？');">
+              <form action="{{ url_for('admin_delete_webhook', webhook_id=w.id) }}" method="POST" class="d-inline" onsubmit="handleDeleteWebhook(event, this, {{ w.id }})">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button type="submit" class="btn btn-sm btn-outline-danger" title="删除通道">
                   <i class="fa-solid fa-trash"></i>
@@ -1226,6 +1226,43 @@ function validateWebhookForm(form, prefix) {
 // V7 新增：
 //  - 保存按钮 loading 状态（禁用+转圈）防重复提交；
 //  - 保存成功后提示用户用「测试」按钮验证凭证（保存不再校验凭证）
+
+function refreshWebhooksTableAsync() {
+  fetch(window.location.href, { headers: { "X-Requested-With": "XMLHttpRequest" } })
+  .then(res => res.text())
+  .then(html => {
+    var parser = new DOMParser();
+    var doc = parser.parseFromString(html, "text/html");
+    var newTable = doc.querySelector('table[data-resizable="admin_webhooks_list"]');
+    var curTable = document.querySelector('table[data-resizable="admin_webhooks_list"]');
+    if (newTable && curTable) {
+      curTable.innerHTML = newTable.innerHTML;
+      bindWebhookEditButtons();
+    }
+  })
+  .catch(err => console.error("Refresh table error:", err));
+}
+
+function bindWebhookEditButtons() {
+  document.querySelectorAll(".btn-edit-webhook").forEach(btn => {
+    btn.onclick = function() {
+      const data = this.dataset;
+      const form = document.getElementById("editWebhookForm");
+      form.action = "/admin/webhooks/edit/" + data.id;
+      document.getElementById("editChannelName").value = data.name || "";
+      document.getElementById("editWebhookUrl").value = data.url || "";
+      document.getElementById("editSecretToken").value = data.token || "";
+      if (document.getElementById("editCustomHeaders")) {
+        document.getElementById("editCustomHeaders").value = data.headers || "";
+      }
+      try {
+        const pages = JSON.parse(data.notifyPages || "{}");
+        applyNotifyPagesToForm("edit", pages);
+      } catch(e) {}
+    };
+  });
+}
+
 function submitWebhookFormAjax(form, modalId, errorDivId, submitBtn, successTip) {
   const errorDiv = document.getElementById(errorDivId);
   if (errorDiv) errorDiv.innerHTML = '';
@@ -1252,9 +1289,12 @@ function submitWebhookFormAjax(form, modalId, errorDivId, submitBtn, successTip)
         const bsModal = bootstrap.Modal.getInstance(modalEl);
         if (bsModal) bsModal.hide();
       }
-      // V7: 保存只保存、不校验凭证，提示用「测试」按钮验证连通性
-      alert(successTip || data.message || '操作成功');
-      location.reload();
+      if (window.showAppToast) {
+        showAppToast(successTip || data.message || "Webhook配置已保存！", "success");
+      } else {
+        alert(successTip || data.message || "Webhook配置已保存！");
+      }
+      refreshWebhooksTableAsync();
     } else {
       showWebhookFormError(errorDivId, data.message || '操作失败');
     }
@@ -1267,6 +1307,46 @@ function submitWebhookFormAjax(form, modalId, errorDivId, submitBtn, successTip)
       submitBtn.disabled = false;
       submitBtn.innerHTML = origBtnHtml;
     }
+  });
+}
+
+function handleDeleteWebhook(e, formEl, hookId) {
+  e.preventDefault();
+  if (!confirm('确定要删除此 Webhook 通道配置吗？')) return;
+  var btn = formEl.querySelector("button[type='submit']");
+  if (btn) btn.disabled = true;
+
+  fetch(formEl.action, {
+    method: 'POST',
+    body: new FormData(formEl),
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      if (window.showAppToast) {
+        showAppToast(data.message || 'Webhook 通道已删除', 'success');
+      } else {
+        alert(data.message || 'Webhook 通道已删除');
+      }
+      refreshWebhooksTableAsync();
+    } else {
+      if (window.showAppToast) {
+        showAppToast(data.message || '删除失败', 'danger');
+      } else {
+        alert(data.message || '删除失败');
+      }
+    }
+  })
+  .catch(() => {
+    if (window.showAppToast) {
+      showAppToast('网络请求异常，请稍后重试', 'danger');
+    } else {
+      alert('网络请求异常，请稍后重试');
+    }
+  })
+  .finally(() => {
+    if (btn) btn.disabled = false;
   });
 }
 
@@ -1778,8 +1858,8 @@ function ensureToastContainer() {
   if (!container) {
     container = document.createElement('div');
     container.id = 'toastContainer';
-    container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
-    container.style.zIndex = '1080';
+    container.className = 'toast-container position-fixed top-0 start-50 translate-middle-x p-3';
+    container.style.zIndex = '2050';
     document.body.appendChild(container);
   }
   return container;

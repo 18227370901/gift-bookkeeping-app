@@ -3624,6 +3624,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 hasattr(current_user, 'can_access_menu') and (current_user.can_access_menu('webhooks') or current_user.can_access_menu('admin_webhooks'))
             )
         if not _can_manage():
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.is_json:
+                return jsonify({'success': False, 'message': '权限不足'}), 403
             flash('权限不足', 'danger')
             return redirect(url_for('index'))
         hook = db.session.get(WebhookConfig, webhook_id)
@@ -3635,14 +3637,20 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             try:
                 trigger_webhook_event(
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
-                f'删除Webhook通道 [{hook_name}]',
-                f'操作人：{current_user.username} | 页面：Webhook通知 | ID：{webhook_id} | 名称：{hook_name}',
-                page_key='admin_webhooks', user_name=current_user.username,
-                operator_id=current_user.id
+                    f'删除Webhook通道 [{hook_name}]',
+                    f'操作人：{current_user.username} | 页面：Webhook通知 | ID：{webhook_id} | 名称：{hook_name}',
+                    page_key='admin_webhooks', user_name=current_user.username,
+                    operator_id=current_user.id
                 )
             except Exception:
                 pass
-            flash('Webhook 配置已删除', 'success')
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.is_json:
+                return jsonify({'success': True, 'message': f'Webhook 通道 [{hook_name}] 配置已删除！', 'id': webhook_id})
+            flash(f'Webhook 通道 [{hook_name}] 配置已删除！', 'success')
+        else:
+            if request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.is_json:
+                return jsonify({'success': False, 'message': 'Webhook 配置不存在或已删除'}), 404
+            flash('Webhook 配置不存在或已删除', 'warning')
         return redirect(url_for('admin_webhooks'))
 
     @app.route('/admin/webhooks/test/<int:webhook_id>', methods=['POST'])
@@ -5387,6 +5395,26 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return jsonify({'code': 200, 'data': data})
         except Exception as e:
             return jsonify({'code': 500, 'message': f'获取看板数据失败: {str(e)}'}), 500
+
+    @app.route('/api/dashboard/reason_drilldown')
+    @login_required
+    def api_dashboard_reason_drilldown():
+        """事由二级深度钻取 API — 返回指定事由的收支汇总、亲友往来 TOP10 与时间走势"""
+        try:
+            from services.dashboard_service import calculate_reason_drilldown_stats
+            reason = request.args.get('reason', '').strip()
+            data = calculate_reason_drilldown_stats(
+                current_user,
+                reason=reason,
+                start_month=request.args.get('start_month', '').strip(),
+                end_month=request.args.get('end_month', '').strip(),
+                start_year=request.args.get('start_year', '').strip(),
+                end_year=request.args.get('end_year', '').strip()
+            )
+            return jsonify({'code': 200, 'data': data})
+        except Exception as e:
+            return jsonify({'code': 500, 'message': f'获取事由钻取数据失败: {str(e)}'}), 500
+
 
     # ==================== 功能二：家庭多成员协作记账 ====================
 

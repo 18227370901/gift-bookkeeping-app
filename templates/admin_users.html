@@ -7,6 +7,51 @@
   .modal { white-space: normal; }
   .modal-dialog-scrollable form { display: flex; flex-direction: column; max-height: 100%; overflow: hidden; }
   .modal-dialog-scrollable .modal-body { overflow-y: auto; }
+
+  /* 修复长表格横向滚动时，整行悬浮阴影与背景被截断未覆盖全行的问题 */
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+  .table-responsive > table {
+    min-width: 100%;
+    margin-bottom: 0;
+  }
+  .table-hover > tbody > tr {
+    transition: background-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .table-hover > tbody > tr:hover > * {
+    --bs-table-accent-bg: var(--bs-table-hover-bg, rgba(13, 110, 253, 0.05));
+    box-shadow: inset 0 0 0 9999px rgba(13, 110, 253, 0.04) !important;
+  }
+  [data-bs-theme="dark"] .table-hover > tbody > tr:hover > * {
+    --bs-table-accent-bg: rgba(255, 255, 255, 0.05);
+    box-shadow: inset 0 0 0 9999px rgba(255, 255, 255, 0.03) !important;
+  }
+
+  /* 权限模板微型网格卡片样式 */
+  .perm-group-card {
+    border-radius: 8px;
+    background: var(--bs-card-bg, #ffffff);
+    border: 1px solid var(--bs-border-color, #dee2e6);
+  }
+  .perm-item-box {
+    border-radius: 6px;
+    padding: 6px 10px;
+    background: var(--bs-tertiary-bg, #f8f9fa);
+    border: 1px solid var(--bs-border-color-translucent, rgba(0,0,0,0.06));
+    transition: all 0.15s ease;
+  }
+  .perm-item-box:hover {
+    background: var(--bs-secondary-bg, #f1f3f5);
+    border-color: var(--bs-primary-border-subtle, #9ec5fe);
+  }
+  .perm-quick-btn {
+    font-size: 0.76rem;
+    padding: 2px 8px;
+    border-radius: 20px;
+  }
 </style>
 {% endblock %}
 
@@ -31,7 +76,7 @@
     </span>
   </div>
   <div class="card-body">
-    <form action="{{ url_for('admin_set_registration_mode') }}" method="POST" class="row g-3 align-items-center">
+    <form action="{{ url_for('admin_set_registration_mode') }}" method="POST" class="row g-3 align-items-center" onsubmit="handleSetRegistrationMode(event, this)">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="col-md-8">
         <div class="d-flex flex-column flex-md-row gap-3 p-3 bg-light rounded-3 border">
@@ -66,7 +111,7 @@
     <h5 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-gear me-2 text-primary"></i>系统安全与登录设置</h5>
   </div>
   <div class="card-body">
-    <form action="{{ url_for('update_session_timeout') }}" method="POST" class="row g-3 align-items-center">
+    <form action="{{ url_for('update_session_timeout') }}" method="POST" class="row g-3 align-items-center" onsubmit="handleUpdateSessionTimeout(event, this)">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       
       <div class="col-md-3">
@@ -120,7 +165,7 @@
     <h5 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-link me-2 text-danger"></i>生成注册邀请链接</h5>
   </div>
   <div class="card-body">
-    <form action="{{ url_for('generate_invite_link') }}" method="POST" class="row g-3 align-items-center">
+    <form action="{{ url_for('generate_invite_link') }}" method="POST" class="row g-3 align-items-center" onsubmit="handleGenerateInviteLink(event, this)">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="col-auto">
         <label for="expire_hours" class="col-form-label fw-bold text-muted">链接有效时长：</label>
@@ -211,7 +256,7 @@
               {% endif %}
             </td>
             <td class="text-end">
-              <button type="button" class="btn btn-sm btn-outline-danger" title="删除链接" onclick="if(confirm('确定要删除此注册邀请链接吗？')) { var form = document.createElement('form'); form.method='POST'; form.action='{{ url_for('admin_delete_invite_link', token_id=t.id) }}'; var input = document.createElement('input'); input.type='hidden'; input.name='csrf_token'; input.value='{{ csrf_token }}'; form.appendChild(input); document.body.appendChild(form); form.submit(); }">
+              <button type="button" class="btn btn-sm btn-outline-danger" title="删除链接" onclick="handleDeleteInviteLink({{ t.id }})">
                 <i class="fa-solid fa-trash me-1"></i>删除
               </button>
             </td>
@@ -224,7 +269,145 @@
   </div>
 </div>
 
+<!-- 新用户全局默认权限模板 控制卡片 (参考 mengya 架构，动态统计实际子项与关联结构) -->
+{% set active_tpl_count = namespace(count=0) %}
+{% for k, v in system_default_permissions.items() %}
+  {% if v %}{% set active_tpl_count.count = active_tpl_count.count + 1 %}{% endif %}
+{% endfor %}
+<div class="card card-custom border-0 mb-4 shadow-sm">
+  <div class="card-header bg-white py-3 border-0 d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+      <div class="d-flex align-items-center gap-2 flex-wrap">
+        <h5 class="mb-0 fw-bold text-dark">
+          <i class="fa-solid fa-shield-halved me-2 text-primary"></i>新用户全局默认权限模板 (CRUD 细粒度)
+        </h5>
+        <span class="badge bg-primary-subtle text-primary border border-primary-subtle rounded-pill px-2.5 py-1 fs-xs">
+          当前共 {{ all_permission_definitions|length }} 项 / 默认已启用 <span id="tplActiveCountBadge">{{ active_tpl_count.count }}</span> 项
+        </span>
+      </div>
+      <p class="text-muted small mb-0 mt-1">
+        定制新注册用户的标准权限基准，支持一键全开、全关与重置。<strong>修改保存后仅对新注册用户生效，存量用户需在用户列表中手动点击【重置为系统默认】生效</strong>，避免误将所有存量用户权限强制同步为一致。
+      </p>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <button class="btn btn-sm btn-outline-primary rounded-pill px-3" type="button" data-bs-toggle="collapse" data-bs-target="#defaultPermTemplateCollapse" aria-expanded="false" aria-controls="defaultPermTemplateCollapse">
+        <i class="fa-solid fa-sliders me-1"></i>展开/折叠配置 (共{{ all_permission_definitions|length }}项)
+      </button>
+    </div>
+  </div>
+
+  <div class="collapse" id="defaultPermTemplateCollapse">
+    <div class="card-body pt-0">
+      <form action="{{ url_for('admin_save_default_permissions') }}" method="POST" id="defaultPermTemplateForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <!-- 模块权限层级继承与关联关系引导说明 -->
+        <div class="p-3 mb-3 bg-light rounded-3 border">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="fw-bold small text-dark"><i class="fa-solid fa-sitemap text-primary me-2"></i>模块层级架构与权限关联依赖关系说明：</span>
+            <span class="text-muted fs-xs">共 {{ permission_groups|length }} 大业务模块组 · {{ all_permission_definitions|length }} 项独立受控能力</span>
+          </div>
+          <div class="row g-2 fs-xs">
+            <div class="col-12 col-md-3">
+              <div class="p-2 border rounded bg-white h-100 shadow-2xs">
+                <div class="fw-bold text-primary mb-1"><i class="fa-solid fa-layer-group me-1"></i>第 1 层：菜单访问准入 (父)</div>
+                <div class="text-muted">控制用户能否进入该功能页面。如关闭某菜单（如未勾选“专属宴席”），则其下属所有增删改查子功能对该用户全封闭。</div>
+              </div>
+            </div>
+            <div class="col-12 col-md-3">
+              <div class="p-2 border rounded bg-white h-100 shadow-2xs">
+                <div class="fw-bold text-success mb-1"><i class="fa-solid fa-list-check me-1"></i>第 2 层：CRUD 细粒度 (子)</div>
+                <div class="text-muted">深度依附于菜单访问权限。细分查、增、改、删、导、批等动作。即便开通菜单，若关闭“改/删”权限则只允许只读查阅。</div>
+              </div>
+            </div>
+            <div class="col-12 col-md-3">
+              <div class="p-2 border rounded bg-white h-100 shadow-2xs">
+                <div class="fw-bold text-warning-emphasis mb-1"><i class="fa-solid fa-user-shield me-1"></i>第 3 层：跨用户数据等级</div>
+                <div class="text-muted">控制数据隔离边界（0=仅管理自身, 1=查阅他人, 2=改更他人, 3=完全权）。独立判定，普通用户默认设为 0 确保私密性。</div>
+              </div>
+            </div>
+            <div class="col-12 col-md-3">
+              <div class="p-2 border rounded bg-white h-100 shadow-2xs">
+                <div class="fw-bold text-danger mb-1"><i class="fa-solid fa-screwdriver-wrench me-1"></i>第 4 层：高级运维扩展</div>
+                <div class="text-muted">涵盖 WebDAV 备份、系统告警通知、定时备份调度及 AI 助手特权。高危扩展能力普通用户默认全关，按需单独授权。</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 顶部快捷操作栏 -->
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 p-2 mb-3 bg-light rounded-3 border">
+          <div class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="small fw-bold text-muted"><i class="fa-solid fa-bolt text-warning me-1"></i>快捷工具：</span>
+            <button type="button" class="btn btn-sm btn-outline-success perm-quick-btn" onclick="toggleAllTemplatePerms(true)">
+              <i class="fa-solid fa-check-double me-1"></i>一键全部开启
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary perm-quick-btn" onclick="toggleAllTemplatePerms(false)">
+              <i class="fa-solid fa-xmark me-1"></i>一键全部关闭
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-info perm-quick-btn" onclick="resetTemplatePermsToBuiltin()">
+              <i class="fa-solid fa-rotate-left me-1"></i>恢复系统出厂内置
+            </button>
+          </div>
+          <div>
+            <button type="submit" class="btn btn-primary btn-sm px-4 fw-bold shadow-sm">
+              <i class="fa-solid fa-floppy-disk me-1"></i>保存全局默认模板
+            </button>
+          </div>
+        </div>
+
+        <!-- 11 大权限分组 (共 74 项) -->
+        <div class="row g-3">
+          {% for grp in permission_groups %}
+          <div class="col-12 col-xl-6">
+            <div class="perm-group-card p-3 h-100">
+              <div class="d-flex justify-content-between align-items-center mb-2 pb-2 border-bottom">
+                <span class="badge {{ grp.badge }} px-2 py-1 fs-xs fw-bold">{{ grp.name }} ({{ grp.permissions|length }}项)</span>
+                <div class="d-flex align-items-center gap-2">
+                  <div class="d-flex gap-1">
+                    <button type="button" class="btn btn-link btn-sm text-decoration-none p-0 text-success fs-xs" onclick="toggleGroupTemplatePerms('{{ grp.key }}', true)">全开</button>
+                    <span class="text-muted fs-xs">/</span>
+                    <button type="button" class="btn btn-link btn-sm text-decoration-none p-0 text-secondary fs-xs" onclick="toggleGroupTemplatePerms('{{ grp.key }}', false)">全关</button>
+                  </div>
+                  <button type="button" class="btn btn-xs btn-outline-primary rounded-pill px-2 py-0 fs-xs" id="btnSaveGroup_{{ grp.key }}" onclick="saveSinglePermGroup('{{ grp.key }}', '{{ grp.name }}')">
+                    <i class="fa-solid fa-floppy-disk me-1"></i>保存本组
+                  </button>
+                </div>
+              </div>
+              <div class="row g-2" data-perm-group="{{ grp.key }}">
+                {% for p in grp.permissions %}
+                <div class="col-12 col-sm-6">
+                  <div class="perm-item-box d-flex align-items-center justify-content-between h-100">
+                    <div class="form-check mb-0 w-100">
+                      <input class="form-check-input default-perm-checkbox" type="checkbox" name="perm_{{ p.key }}" value="1" id="tpl_perm_{{ p.key }}" {% if system_default_permissions.get(p.key, p.default) %}checked{% endif %} data-group="{{ grp.key }}" data-builtin="{% if p.default %}1{% else %}0{% endif %}">
+                      <label class="form-check-label small fw-semibold text-dark d-block text-truncate" for="tpl_perm_{{ p.key }}" title="{{ p.name }}: {{ p.desc }}">
+                        {{ p.name }}
+                      </label>
+                      <small class="text-muted d-block text-truncate" style="font-size: 0.7rem;" title="{{ p.desc }}">{{ p.desc }}</small>
+                    </div>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="d-flex justify-content-end align-items-center mt-3 pt-2 border-top">
+          <button type="submit" class="btn btn-primary px-4 fw-bold shadow-sm">
+            <i class="fa-solid fa-floppy-disk me-1"></i>保存全局默认权限模板 (共{{ all_permission_definitions|length }}项)
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
 <div class="card card-custom border-0 mb-4">
+  <form id="batchResetPermForm" action="{{ url_for('admin_batch_reset_default_permissions') }}" method="POST" style="display: none;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  </form>
   <form id="batchDeleteUsersForm" action="{{ url_for('admin_batch_delete_users') }}" method="POST" style="display: none;">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   </form>
@@ -233,6 +416,9 @@
       <h5 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-users me-2 text-danger"></i>用户列表</h5>
       <button type="button" id="batchPermUsersBtn" class="btn btn-outline-primary btn-sm" onclick="openBatchPermModal()">
         <i class="fa-solid fa-user-gear me-1"></i>批量配置菜单与权限
+      </button>
+      <button type="button" id="batchResetPermBtn" class="btn btn-outline-info btn-sm" disabled onclick="submitBatchResetDefaultPermissions()">
+        <i class="fa-solid fa-rotate-left me-1"></i>批量重置为系统默认 (<span id="checkedResetUsersCount">0</span>)
       </button>
       <button type="button" id="batchDeleteUsersBtn" class="btn btn-outline-danger btn-sm" disabled onclick="submitBatchDeleteUsers()">
         <i class="fa-solid fa-trash-can me-1"></i>批量删除 (<span id="checkedUsersCount">0</span>)
@@ -291,15 +477,50 @@
               {% if u.is_admin %}
               <span class="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill"><i class="fa-solid fa-crown me-1"></i>全局完全权限</span>
               {% else %}
-              <div class="d-flex gap-1 flex-wrap align-items-center" style="max-width: 260px;">
-                {% set p_labels = {0: '仅自身', 1: '自身全权+查他人', 2: '查改他人', 3: '完全'} %}
-                {% set m_names = {'ledger': '账本', 'banquets': '宴席', 'reconciliation': '对账', 'reminders': '备忘', 'recycle_bin': '回收'} %}
-                {% for mk in ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin'] %}
-                  {% set pv = u.get_menu_perm(mk) %}
-                  <span class="badge {% if pv == 3 %}bg-danger text-white{% elif pv == 2 %}bg-warning text-dark{% elif pv == 1 %}bg-primary text-white{% else %}bg-light text-secondary border{% endif %}" style="font-size: 0.72rem;" title="{{ m_names[mk] }}: {{ p_labels[pv] }}">
-                    {{ m_names[mk] }}:{{ p_labels[pv] }}
-                  </span>
-                {% endfor %}
+              {% set p_labels = {0: "仅自身", 1: "查他人", 2: "查改他人", 3: "完全"} %}
+              {% set m_names = {"ledger": "账本", "banquets": "宴席", "reconciliation": "对账", "reminders": "备忘", "recycle_bin": "回收", "backups": "备份"} %}
+              {% set active_count = namespace(count=0, max_level=0) %}
+              {% for mk in ["ledger", "banquets", "reconciliation", "reminders", "recycle_bin", "backups"] %}
+                {% set pv = u.get_menu_perm(mk) %}
+                {% if pv > 0 %}
+                  {% set active_count.count = active_count.count + 1 %}
+                  {% if pv > active_count.max_level %}{% set active_count.max_level = pv %}{% endif %}
+                {% endif %}
+              {% endfor %}
+
+              <div class="d-inline-flex align-items-center gap-1">
+                {% if active_count.count == 0 %}
+                <span class="badge bg-light text-secondary border rounded-pill px-2 py-1" style="font-size: 0.74rem;" title="所有模块均无跨用户查看/修改权限">
+                  <i class="fa-solid fa-user-lock me-1"></i>仅限自身数据
+                </span>
+                {% elif active_count.count == 6 and active_count.max_level == 3 %}
+                <span class="badge bg-danger text-white rounded-pill px-2 py-1" style="font-size: 0.74rem;" title="所有业务模块均具备完全跨用户权限">
+                  <i class="fa-solid fa-crown me-1"></i>全模块完全权
+                </span>
+                {% else %}
+                <span class="badge {% if active_count.max_level == 3 %}bg-danger-subtle text-danger border border-danger-subtle{% elif active_count.max_level == 2 %}bg-warning-subtle text-warning-emphasis border border-warning-subtle{% else %}bg-primary-subtle text-primary border border-primary-subtle{% endif %} rounded-pill px-2 py-1" style="font-size: 0.74rem;">
+                  <i class="fa-solid fa-unlock-keyhole me-1"></i>{{ active_count.count }}项跨用户授权
+                </span>
+                {% endif %}
+
+                <!-- 点击展开明细 Popover (挂载至 body 防止表格溢出裁剪) -->
+                {% set pop_content %}
+                  <div class='p-1 fs-xs' style='min-width: 190px;'>
+                    <div class='fw-bold text-muted border-bottom pb-1 mb-1'>用户 [{{ u.username }}] 权限明细</div>
+                    {% for mk in ["ledger", "banquets", "reconciliation", "reminders", "recycle_bin", "backups"] %}
+                    {% set pv = u.get_menu_perm(mk) %}
+                    <div class='d-flex justify-content-between align-items-center py-1 border-bottom-dashed'>
+                      <span class='text-dark'>{{ m_names[mk] }}</span>
+                      <span class='badge {% if pv == 3 %}bg-danger text-white{% elif pv == 2 %}bg-warning text-dark{% elif pv == 1 %}bg-primary text-white{% else %}bg-light text-secondary border{% endif %}' style='font-size: 0.7rem;'>
+                        {{ p_labels[pv] }}
+                      </span>
+                    </div>
+                    {% endfor %}
+                  </div>
+                {% endset %}
+                <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-1 user-perm-popover-btn" data-bs-toggle="popover" data-bs-trigger="focus click" data-bs-container="body" data-bs-html="true" data-bs-placement="top" data-bs-content="{{ pop_content|e }}" title="跨用户权限细则">
+                  <i class="fa-regular fa-circle-question fs-xs"></i>
+                </button>
               </div>
               {% endif %}
             </td>
@@ -346,15 +567,15 @@
                 </button>
                 {% endif %}
                 {% if u.id != current_user.id %}
-                <form action="{{ url_for('admin_toggle_user_status', user_id=u.id) }}" method="POST" class="d-inline">
+                <form action="{{ url_for('admin_toggle_user_status', user_id=u.id) }}" method="POST" class="d-inline" onsubmit="handleToggleUserStatus(event, this, {{ u.id }})">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   {% if u.is_active %}
-                  <button type="submit" class="btn btn-outline-warning" onclick="return confirm('确定要禁用该用户吗？禁用后该用户将无法登录并强制下线。');">
-                    <i class="fa-solid fa-ban me-1"></i>禁用
+                  <button type="submit" class="btn btn-outline-success btn-sm rounded-pill px-2 py-1" title="账号状态：正常（点击快速切换为禁用）">
+                    <i class="fa-solid fa-toggle-on text-success me-1"></i>已启用
                   </button>
                   {% else %}
-                  <button type="submit" class="btn btn-outline-success" onclick="return confirm('确定要启用该用户吗？');">
-                    <i class="fa-solid fa-check me-1"></i>启用
+                  <button type="submit" class="btn btn-outline-danger btn-sm rounded-pill px-2 py-1" title="账号状态：已禁用（点击快速切换为启用）">
+                    <i class="fa-solid fa-toggle-off text-danger me-1"></i>已禁用
                   </button>
                   {% endif %}
                 </form>
@@ -369,7 +590,7 @@
                   <i class="fa-solid fa-user-shield me-1"></i>查看凭证
                 </button>
                 {% if (login_risks.get(u.username) and (login_risks[u.username].fail_count > 0 or login_risks[u.username].locked_until)) or (sec_risks.get(u.username) and (sec_risks[u.username].fail_count > 0 or sec_risks[u.username].locked_until)) %}
-                <form action="{{ url_for('admin_unlock_risk', user_id=u.id) }}" method="POST" class="d-inline">
+                <form action="{{ url_for('admin_unlock_risk', user_id=u.id) }}" method="POST" class="d-inline" onsubmit="handleUnlockRisk(event, this, {{ u.id }})">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                   <button type="submit" class="btn btn-outline-warning" onclick="return confirm('确定要解除该用户的风控锁定并重置失败次数吗？');" title="解锁登录/密保风控">
                     <i class="fa-solid fa-lock-open me-1"></i>解锁风控
@@ -387,7 +608,7 @@
               <div class="modal fade text-start" id="resetPassModal{{ u.id }}" tabindex="-1">
                 <div class="modal-dialog modal-dialog-centered modal-sm">
                   <div class="modal-content">
-                    <form action="{{ url_for('admin_reset_user_pass', user_id=u.id) }}" method="POST">
+                    <form action="{{ url_for('admin_reset_user_pass', user_id=u.id) }}" method="POST" onsubmit="handleResetUserPass(event, this, {{ u.id }})">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <div class="modal-header border-0 pb-0">
                         <h6 class="modal-title fw-bold text-danger"><i class="fa-solid fa-key me-1"></i>重置 [{{ u.username }}] 的密码</h6>
@@ -447,13 +668,27 @@
               <div class="modal fade text-start" id="permModal{{ u.id }}" tabindex="-1">
                 <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
                   <div class="modal-content" style="white-space: normal;">
-                    <form action="{{ url_for('admin_update_user_permissions', user_id=u.id) }}" method="POST" style="display: flex; flex-direction: column; max-height: 100%; overflow: hidden;">
+                    <form action="{{ url_for('admin_update_user_permissions', user_id=u.id) }}" method="POST" style="display: flex; flex-direction: column; max-height: 100%; overflow: hidden;" onsubmit="handleUpdateUserPermissions(event, this, {{ u.id }})">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <div class="modal-header border-0 pb-0">
                         <h6 class="modal-title fw-bold text-primary"><i class="fa-solid fa-user-gear me-1"></i>配置用户 [{{ u.username }}] 的跨用户数据权限</h6>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                       </div>
                       <div class="modal-body py-3">
+                        <!-- 快捷操作工具栏 -->
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 p-2 mb-3 bg-light rounded-3 border">
+                          <div class="d-flex align-items-center gap-1 flex-wrap">
+                            <span class="small fw-bold text-muted me-1" style="font-size: 0.75rem;"><i class="fa-solid fa-bolt text-warning me-1"></i>快捷：</span>
+                            <button type="button" class="btn btn-xs btn-outline-success rounded-pill px-2 py-0" style="font-size: 0.72rem;" onclick="quickSetModalPerms({{ u.id }}, 'all_open')">一键全部开启</button>
+                            <button type="button" class="btn btn-xs btn-outline-secondary rounded-pill px-2 py-0" style="font-size: 0.72rem;" onclick="quickSetModalPerms({{ u.id }}, 'all_self')">一键仅自身(0级)</button>
+                          </div>
+                          <div>
+                            <button type="button" class="btn btn-xs btn-outline-info rounded-pill px-2 py-0" style="font-size: 0.72rem;" onclick="submitSingleUserResetDefault({{ u.id }}, '{{ u.username }}')">
+                              <i class="fa-solid fa-rotate-left me-1"></i>重置为系统默认
+                            </button>
+                          </div>
+                        </div>
+
                         <!-- 菜单页面访问权限区域：每个菜单独立配置权限选项 -->
                         <div class="mb-3">
                           <div class="d-flex align-items-center justify-content-between mb-2">
@@ -604,8 +839,10 @@
                                 </label>
                               </div>
                               <div style="min-width: 210px;">
+                                {% set p_weather = u.get_menu_perm('weather') %}
                                 <select class="form-select form-select-sm" name="menu_perm_weather">
-                                  <option value="1" selected>可查看实时天气</option>
+                                  <option value="0" {% if p_weather == 0 %}selected{% endif %}>无天气访问权限 (0级)</option>
+                                  <option value="1" {% if p_weather >= 1 %}selected{% endif %}>可查看实时天气与万年历 (1级)</option>
                                 </select>
                               </div>
                             </div>
@@ -709,7 +946,12 @@
                       </div>
                     </form>
                   </div>
-                </div>
+                
+                <!-- 单用户重置为系统默认表单 -->
+                <form id="singleResetDefaultForm_{{ u.id }}" action="{{ url_for('admin_reset_user_default_permissions', user_id=u.id) }}" method="POST" style="display: none;">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                </form>
+</div>
               </div>
               {% endif %}
 
@@ -717,7 +959,7 @@
               <div class="modal fade text-start" id="resetSecModal{{ u.id }}" tabindex="-1">
                 <div class="modal-dialog modal-dialog-centered">
                   <div class="modal-content">
-                    <form action="{{ url_for('admin_reset_user_security', user_id=u.id) }}" method="POST">
+                    <form action="{{ url_for('admin_reset_user_security', user_id=u.id) }}" method="POST" onsubmit="handleResetUserSecurity(event, this, {{ u.id }})">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <div class="modal-header border-0 pb-0">
                         <h6 class="modal-title fw-bold text-warning">重置 [{{ u.username }}] 的密保问题</h6>
@@ -810,7 +1052,7 @@
               <div class="modal fade text-start" id="deleteUserModal{{ u.id }}" tabindex="-1">
                 <div class="modal-dialog modal-dialog-centered modal-sm">
                   <div class="modal-content">
-                    <form action="{{ url_for('admin_delete_user', user_id=u.id) }}" method="POST">
+                    <form action="{{ url_for('admin_delete_user', user_id=u.id) }}" method="POST" onsubmit="handleDeleteUser(event, this, {{ u.id }})">
                       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                       <div class="modal-header border-0 pb-0">
                         <h6 class="modal-title fw-bold text-danger">确认删除用户？</h6>
@@ -865,6 +1107,13 @@ function onSecurityQuestionSelectChange(selectEl) {
 
 // 页面加载时初始化所有密保问题下拉框的默认选中状态
 document.addEventListener('DOMContentLoaded', function() {
+
+  // 初始化所有权限明细 Popover
+  var popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
+  popoverTriggerList.map(function(popoverTriggerEl) {
+    return new bootstrap.Popover(popoverTriggerEl, { sanitize: false });
+  });
+
   document.querySelectorAll('.sq-select').forEach(function(sel) {
     var group = sel.closest('[data-sq-group]');
     if (!group) return;
@@ -921,42 +1170,91 @@ function togglePassVisibility(inputId, btn) {
 function submitBatchDeleteTokens() {
   const checked = document.querySelectorAll('.token-checkbox:checked');
   if (!checked.length) return;
-  if (confirm('确定要批量删除所选中的 ' + checked.length + ' 条邀请链接吗？')) {
-    const form = document.getElementById('batchDeleteTokensForm');
-    // 清除旧动态输入项（如果有）
-    form.querySelectorAll('input[name="token_ids"]').forEach(el => el.remove());
-    checked.forEach(cb => {
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = 'token_ids';
-      input.value = cb.value;
-      form.appendChild(input);
-    });
-    form.submit();
-  }
+  if (!confirm('确定要批量删除所选中的 ' + checked.length + ' 条邀请链接吗？')) return;
+  const form = document.getElementById('batchDeleteTokensForm');
+  const formData = new FormData(form);
+  checked.forEach(cb => { formData.append('token_ids', cb.value); });
+
+  fetch(form.action, {
+    method: 'POST',
+    body: formData,
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, 'success');
+      checked.forEach(cb => {
+        const row = cb.closest('tr');
+        if (row) row.remove();
+      });
+      const selectAll = document.getElementById('selectAllTokens');
+      if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+      const cntEl = document.getElementById('checkedTokensCount');
+      if (cntEl) cntEl.textContent = '0';
+      const btn = document.getElementById('batchDeleteTokensBtn');
+      if (btn) btn.disabled = true;
+    } else {
+      if (window.showAppToast) showAppToast(data.message || '批量删除失败', 'danger');
+    }
+  })
+  .catch(() => {
+    if (window.showAppToast) showAppToast('批量删除异常', 'danger');
+  });
 }
 
-// 批量提交用户删除
 function submitBatchDeleteUsers() {
   const checked = document.querySelectorAll('.user-checkbox:checked');
   if (!checked.length) return;
-  if (confirm('确定要批量删除选中的 ' + checked.length + ' 位用户吗？\n\n警告：删除用户将同时彻底删除其名下的所有礼金记录！管理员账号及当前账号受保护不会被删除。')) {
-    const form = document.getElementById('batchDeleteUsersForm');
-    // 清除旧动态输入项（如果有）
-    form.querySelectorAll('input[name="user_ids"]').forEach(el => el.remove());
-    checked.forEach(cb => {
-      const input = document.createElement('input');
-      input.type = 'hidden';
-      input.name = 'user_ids';
-      input.value = cb.value;
-      form.appendChild(input);
-    });
-    form.submit();
-  }
+  if (!confirm('确定要批量删除选中的 ' + checked.length + ' 位用户吗？\n\n警告：删除用户将同时级联删除其名下的所有礼金记录，管理员账号及当前账号受保护不会被删除！')) return;
+  const form = document.getElementById('batchDeleteUsersForm');
+  const formData = new FormData(form);
+  checked.forEach(cb => { formData.append('user_ids', cb.value); });
+
+  fetch(form.action, {
+    method: 'POST',
+    body: formData,
+    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, 'success');
+      const deletedIds = data.deleted_ids || [];
+      deletedIds.forEach(uid => {
+        const row = document.querySelector(`tr:has(input[value="${uid}"])`);
+        if (row) row.remove();
+      });
+      const selectAll = document.getElementById('selectAllUsers');
+      if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+      const cntEl = document.getElementById('checkedUsersCount');
+      if (cntEl) cntEl.textContent = '0';
+      const resetCnt = document.getElementById('checkedResetUsersCount');
+      if (resetCnt) resetCnt.textContent = '0';
+      const btn1 = document.getElementById('batchDeleteUsersBtn');
+      if (btn1) btn1.disabled = true;
+      const btn2 = document.getElementById('batchResetPermBtn');
+      if (btn2) btn2.disabled = true;
+      const btn3 = document.getElementById('batchPermUsersBtn');
+      if (btn3) btn3.disabled = true;
+    } else {
+      if (window.showAppToast) showAppToast(data.message || '批量删除失败', 'danger');
+    }
+  })
+  .catch(() => {
+    if (window.showAppToast) showAppToast('批量删除用户异常', 'danger');
+  });
 }
 
-// 批量操作相关脚本
+// 页面初始化相关脚本
 document.addEventListener('DOMContentLoaded', function() {
+
+  // 初始化所有权限明细 Popover
+  var popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'));
+  popoverTriggerList.map(function(popoverTriggerEl) {
+    return new bootstrap.Popover(popoverTriggerEl, { sanitize: false });
+  });
+
   // 1. 邀请链接批量勾选与全选
   const selectAllTokens = document.getElementById('selectAllTokens');
   const tokenCheckboxes = document.querySelectorAll('.token-checkbox');
@@ -998,6 +1296,10 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     const checked = document.querySelectorAll('.user-checkbox:checked');
     if (checkedUsersCount) checkedUsersCount.textContent = checked.length;
+    const checkedResetUsersCount = document.getElementById("checkedResetUsersCount");
+    if (checkedResetUsersCount) checkedResetUsersCount.textContent = checked.length;
+    const batchResetPermBtn = document.getElementById("batchResetPermBtn");
+    if (batchResetPermBtn) batchResetPermBtn.disabled = checked.length === 0;
     if (batchDeleteUsersBtn) batchDeleteUsersBtn.disabled = checked.length === 0;
     const batchPermUsersBtn = document.getElementById('batchPermUsersBtn');
     if (batchPermUsersBtn) batchPermUsersBtn.disabled = checked.length === 0;
@@ -1167,6 +1469,644 @@ function copyCredPassword() {
     alert('密码已复制！');
   });
 }
+
+// ===== 全局默认权限模板快捷设置 =====
+
+function updateTplActiveCountBadge() {
+  var checkedCount = document.querySelectorAll(".default-perm-checkbox:checked").length;
+  var badge = document.getElementById("tplActiveCountBadge");
+  if (badge) badge.textContent = checkedCount;
+}
+
+// 监听复选框变化实时更新已启用计数
+document.addEventListener("DOMContentLoaded", function() {
+  document.querySelectorAll(".default-perm-checkbox").forEach(function(cb) {
+    cb.addEventListener("change", updateTplActiveCountBadge);
+  });
+});
+
+function toggleAllTemplatePerms(checked) {
+  document.querySelectorAll(".default-perm-checkbox").forEach(function(cb) {
+    cb.checked = checked;
+  });
+  updateTplActiveCountBadge();
+}
+
+function toggleGroupTemplatePerms(groupKey, checked) {
+  document.querySelectorAll(`.default-perm-checkbox[data-group="${groupKey}"]`).forEach(function(cb) {
+    cb.checked = checked;
+  });
+  updateTplActiveCountBadge();
+}
+
+function resetTemplatePermsToBuiltin() {
+  if (!confirm("确定将全局模板恢复为系统出厂内置预设？（保存后生效）")) return;
+  document.querySelectorAll(".default-perm-checkbox").forEach(function(cb) {
+    cb.checked = (cb.getAttribute("data-builtin") === "1");
+  });
+  updateTplActiveCountBadge();
+}
+
+// ===== 单用户快捷重置为系统默认 =====
+function quickSetModalPerms(userId, mode) {
+  var modal = document.getElementById("permModal" + userId);
+  if (!modal) return;
+  var menuCheckboxes = modal.querySelectorAll("input[name='allowed_menus']");
+  var selects = modal.querySelectorAll("select[name^='menu_perm_']");
+  var authCheckboxes = modal.querySelectorAll("input[type='checkbox']:not([name='allowed_menus'])");
+
+  if (mode === "all_open") {
+    menuCheckboxes.forEach(function(cb) { cb.checked = true; });
+    selects.forEach(function(sel) {
+      if (sel.name === "menu_perm_weather" || sel.name === "menu_perm_dashboard") {
+        sel.value = "1";
+      } else {
+        sel.value = "3";
+      }
+    });
+    authCheckboxes.forEach(function(cb) { cb.checked = true; });
+  } else if (mode === "all_self") {
+    menuCheckboxes.forEach(function(cb) { cb.checked = true; });
+    selects.forEach(function(sel) { sel.value = "0"; });
+    authCheckboxes.forEach(function(cb) { cb.checked = false; });
+  }
+}
+
+// ===== 批量弹窗快捷预设 =====
+function quickSetBatchModalPerms(mode) {
+  var modal = document.getElementById("batchPermModal");
+  if (!modal) return;
+  var menuCheckboxes = modal.querySelectorAll("input[name='allowed_menus']");
+  var selects = modal.querySelectorAll("select[name^='menu_perm_']");
+  var authCheckboxes = modal.querySelectorAll("input[type='checkbox']:not([name='allowed_menus'])");
+
+  if (mode === "all_open") {
+    menuCheckboxes.forEach(function(cb) { cb.checked = true; });
+    selects.forEach(function(sel) {
+      if (sel.name === "menu_perm_weather" || sel.name === "menu_perm_dashboard") {
+        sel.value = "1";
+      } else {
+        sel.value = "3";
+      }
+    });
+    authCheckboxes.forEach(function(cb) { cb.checked = true; });
+  } else if (mode === "all_self") {
+    menuCheckboxes.forEach(function(cb) { cb.checked = true; });
+    selects.forEach(function(sel) { sel.value = "0"; });
+    authCheckboxes.forEach(function(cb) { cb.checked = false; });
+  }
+}
+
+
+// ===== 1. 单独保存某一个权限分组配置 (无刷新) =====
+function saveSinglePermGroup(groupKey, groupName) {
+  var btn = document.getElementById("btnSaveGroup_" + groupKey);
+  var origHtml = btn ? btn.innerHTML : "";
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>保存中...';
+  }
+
+  var formData = new FormData();
+  formData.append("csrf_token", "{{ csrf_token }}");
+  formData.append("group_key", groupKey);
+
+  var checkboxes = document.querySelectorAll(`.default-perm-checkbox[data-group="${groupKey}"]`);
+  checkboxes.forEach(function(cb) {
+    if (cb.checked) {
+      formData.append(cb.name, "1");
+    }
+  });
+
+  fetch("{{ url_for('admin_save_group_default_permissions') }}", {
+    method: "POST",
+    body: formData,
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+      var badge = document.getElementById("tplActiveCountBadge");
+      if (badge && data.total_active !== undefined) badge.textContent = data.total_active;
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "保存失败", "danger");
+    }
+  })
+  .catch(function(err) {
+    if (window.showAppToast) showAppToast("网络请求异常，请稍后重试", "danger");
+  })
+  .finally(function() {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = origHtml;
+    }
+  });
+}
+
+// ===== 2. 账号启停状态即时切换 (无刷新，带图标与Badge局部更新) =====
+function handleToggleUserStatus(e, formEl, userId) {
+  e.preventDefault();
+  var btn = formEl.querySelector("button[type='submit']");
+  if (btn) btn.disabled = true;
+
+  var formData = new FormData(formEl);
+  fetch(formEl.action, {
+    method: "POST",
+    body: formData,
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+      // 局部更新按钮图标与文案
+      if (btn) {
+        if (data.is_active) {
+          btn.className = "btn btn-outline-success btn-sm rounded-pill px-2 py-1";
+          btn.title = "账号状态：正常（点击快速切换为禁用）";
+          btn.innerHTML = '<i class="fa-solid fa-toggle-on text-success me-1"></i>已启用';
+        } else {
+          btn.className = "btn btn-outline-danger btn-sm rounded-pill px-2 py-1";
+          btn.title = "账号状态：已禁用（点击快速切换为启用）";
+          btn.innerHTML = '<i class="fa-solid fa-toggle-off text-danger me-1"></i>已禁用';
+        }
+      }
+      // 局部更新表格中的“账号状态”列 Badge
+      var row = formEl.closest("tr");
+      if (row) {
+        var statusCell = row.querySelector("td[data-col='status'], td:nth-child(6)");
+        if (statusCell) {
+          if (data.is_active) {
+            statusCell.innerHTML = '<span class="badge bg-success rounded-pill"><i class="fa-solid fa-check me-1"></i>正常</span>';
+          } else {
+            statusCell.innerHTML = '<span class="badge bg-danger rounded-pill"><i class="fa-solid fa-ban me-1"></i>已禁用</span>';
+          }
+        }
+      }
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "切换失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("请求失败，请稍后重试", "danger");
+  })
+  .finally(function() {
+    if (btn) btn.disabled = false;
+  });
+}
+
+// ===== 3. 生成注册邀请链接 (无刷新局部追加) =====
+function handleGenerateInviteLink(e, formEl) {
+  e.preventDefault();
+  var btn = formEl.querySelector("button[type='submit']");
+  if (btn) btn.disabled = true;
+
+  var formData = new FormData(formEl);
+  fetch(formEl.action, {
+    method: "POST",
+    body: formData,
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200 && data.data) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+      var t = data.data;
+      var tbody = document.querySelector("table[data-resizable='admin_invite_tokens'] tbody");
+      if (tbody) {
+        var tr = document.createElement("tr");
+        tr.id = "tokenRow_" + t.id;
+        tr.className = "table-success";
+        tr.innerHTML = `
+          <td class="text-center">
+            <input type="checkbox" name="token_ids" value="${t.id}" class="form-check-input token-checkbox" style="cursor: pointer;">
+          </td>
+          <td>
+            <div class="input-group input-group-sm" style="max-width: 450px;">
+              <input type="text" class="form-control" id="inviteLink${t.id}" value="${t.url}" readonly>
+              <button class="btn btn-outline-secondary" type="button" onclick="navigator.clipboard.writeText(document.getElementById('inviteLink${t.id}').value); showAppToast('链接已复制到剪贴板！', 'info');">
+                <i class="fa-regular fa-copy me-1"></i>复制
+              </button>
+            </div>
+          </td>
+          <td class="small text-muted">${t.created_at}</td>
+          <td class="small text-muted">${t.expires_at}</td>
+          <td class="small">${t.use_count} / ${t.max_uses} 次</td>
+          <td><span class="badge bg-success rounded-pill">${t.status}</span></td>
+          <td class="text-end">
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="handleDeleteInviteLink(${t.id})">
+              <i class="fa-solid fa-trash-can me-1"></i>删除
+            </button>
+          </td>
+        `;
+        tbody.insertBefore(tr, tbody.firstChild);
+        setTimeout(function() { tr.classList.remove("table-success"); }, 2000);
+      }
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "生成失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("生成失败，请重试", "danger");
+  })
+  .finally(function() {
+    if (btn) btn.disabled = false;
+  });
+}
+
+// ===== 4. 删除邀请链接 (无刷新局部移除) =====
+function handleDeleteInviteLink(tokenId) {
+  if (!confirm("确定删除该邀请注册链接？删除后访客将无法使用该链接注册。")) return;
+  var formData = new FormData();
+  formData.append("csrf_token", "{{ csrf_token }}");
+
+  fetch("/admin/invite_link/delete/" + tokenId, {
+    method: "POST",
+    body: formData,
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+      var row = document.getElementById("tokenRow_" + tokenId) || document.querySelector(`tr:has(input[value="${tokenId}"])`);
+      if (row) {
+        row.style.transition = "opacity 0.3s ease";
+        row.style.opacity = "0";
+        setTimeout(function() { row.remove(); }, 300);
+      }
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "删除失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("删除失败", "danger");
+  });
+}
+
+// ===== 5. 解锁用户风险锁定 (无刷新局部重置) =====
+function handleUnlockRisk(e, formEl, userId) {
+  e.preventDefault();
+  var formData = new FormData(formEl);
+  fetch(formEl.action, {
+    method: "POST",
+    body: formData,
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+      var row = formEl.closest("tr");
+      if (row) {
+        var riskCell = row.querySelector("td:nth-child(7)");
+        if (riskCell) {
+          riskCell.innerHTML = '<span class="badge bg-success rounded-pill"><i class="fa-solid fa-check me-1"></i>正常 (0次)</span>';
+        }
+      }
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "解锁失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("解锁请求异常", "danger");
+  });
+}
+
+// ===== 6. 异步更新单用户权限 (无刷新局部更新胶囊与气泡) =====
+function handleUpdateUserPermissions(e, formEl, userId) {
+  e.preventDefault();
+  var btn = formEl.querySelector("button[type='submit']");
+  if (btn) btn.disabled = true;
+
+  var formData = new FormData(formEl);
+  fetch(formEl.action, {
+    method: "POST",
+    body: formData,
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+      var modalEl = document.getElementById("permModal" + userId);
+      if (modalEl) {
+        var bsModal = bootstrap.Modal.getInstance(modalEl);
+        if (bsModal) bsModal.hide();
+      }
+      // 局部更新对应行跨用户数据权限胶囊
+      updateUserRowPermCapsule(userId, data);
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "更新权限失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("权限保存失败", "danger");
+  })
+  .finally(function() {
+    if (btn) btn.disabled = false;
+  });
+}
+
+function updateUserRowPermCapsule(userId, data) {
+  var row = document.querySelector(`tr:has(input[value="${userId}"])`);
+  if (!row) return;
+  var permCell = row.querySelector("td:nth-child(5)");
+  if (!permCell) return;
+
+  var cnt = data.active_count || 0;
+  var maxLvl = data.max_level || 0;
+  var badgeHtml = "";
+  if (cnt === 0) {
+    badgeHtml = '<span class="badge bg-light text-secondary border rounded-pill px-2 py-1" style="font-size: 0.74rem;"><i class="fa-solid fa-user-lock me-1"></i>仅限自身数据</span>';
+  } else if (cnt === 6 && maxLvl === 3) {
+    badgeHtml = '<span class="badge bg-danger text-white rounded-pill px-2 py-1" style="font-size: 0.74rem;"><i class="fa-solid fa-crown me-1"></i>全模块完全权</span>';
+  } else {
+    var cls = maxLvl === 3 ? "bg-danger-subtle text-danger border border-danger-subtle" : (maxLvl === 2 ? "bg-warning-subtle text-warning-emphasis border border-warning-subtle" : "bg-primary-subtle text-primary border border-primary-subtle");
+    badgeHtml = `<span class="badge ${cls} rounded-pill px-2 py-1" style="font-size: 0.74rem;"><i class="fa-solid fa-unlock-keyhole me-1"></i>${cnt}项跨用户授权</span>`;
+  }
+
+  var details = data.details || {};
+  var popContent = `<div class='p-1 fs-xs' style='min-width: 190px;'><div class='fw-bold text-muted border-bottom pb-1 mb-1'>用户 [${data.username}] 权限明细</div>`;
+  for (var k in details) {
+    var d = details[k];
+    var bCls = d.level === 3 ? "bg-danger text-white" : (d.level === 2 ? "bg-warning text-dark" : (d.level === 1 ? "bg-primary text-white" : "bg-light text-secondary border"));
+    popContent += `<div class='d-flex justify-content-between align-items-center py-1 border-bottom-dashed'><span class='text-dark'>${d.name}</span><span class='badge ${bCls}' style='font-size: 0.7rem;'>${d.label}</span></div>`;
+  }
+  popContent += `</div>`;
+
+  permCell.innerHTML = `
+    <div class="d-inline-flex align-items-center gap-1">
+      ${badgeHtml}
+      <button type="button" class="btn btn-sm btn-link text-muted p-0 ms-1 user-perm-popover-btn" data-bs-toggle="popover" data-bs-trigger="focus click" data-bs-container="body" data-bs-html="true" data-bs-placement="top" data-bs-content="${popContent.replace(/"/g, '&quot;')}" title="跨用户权限细则">
+        <i class="fa-regular fa-circle-question fs-xs"></i>
+      </button>
+    </div>
+  `;
+  // 重新绑定新生成的 Popover
+  var newBtn = permCell.querySelector(".user-perm-popover-btn");
+  if (newBtn) new bootstrap.Popover(newBtn, { sanitize: false });
+}
+
+// ===== 7. 单用户重置为系统默认 (无刷新) =====
+function submitSingleUserResetDefault(userId, username, quiet) {
+  if (!quiet) {
+    if (!confirm("确定将用户 [" + username + "] 的全部权限重置为系统最新的全局默认权限模板？\n此操作将覆盖该用户当前的个性化菜单及跨用户权限！")) return;
+  }
+  var form = document.getElementById("singleResetDefaultForm_" + userId);
+  if (!form) return;
+
+  var formData = new FormData(form);
+  return fetch(form.action, {
+    method: "POST",
+    body: formData,
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (!quiet && window.showAppToast) showAppToast(data.message, "success");
+      updateUserRowPermCapsule(userId, data);
+      return data;
+    } else {
+      if (!quiet && window.showAppToast) showAppToast(data.message || "重置失败", "danger");
+      return null;
+    }
+  })
+  .catch(function() {
+    if (!quiet && window.showAppToast) showAppToast("重置权限请求失败", "danger");
+    return null;
+  });
+}
+
+function submitBatchResetDefaultPermissions() {
+  var checked = document.querySelectorAll(".user-checkbox:checked");
+  if (checked.length === 0) {
+    alert("请先勾选需要重置权限的用户！");
+    return;
+  }
+  if (!confirm("确定将选中的 " + checked.length + " 位普通用户全部一键重置为系统最新的全局默认权限模板？\n重置后选中用户的权限将与系统模板保持一致。")) return;
+
+  var form = document.getElementById("batchResetPermForm");
+  var formData = new FormData(form);
+  checked.forEach(function(cb) { formData.append("user_ids", cb.value); });
+
+  fetch(form.action, {
+    method: "POST",
+    body: formData,
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+      checked.forEach(function(cb) {
+        submitSingleUserResetDefault(cb.value, '', true);
+      });
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "批量重置失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("批量重置权限请求异常", "danger");
+  });
+}
+
+// ===== 8. 异步更新注册模式 =====
+function handleSetRegistrationMode(e, formEl) {
+  e.preventDefault();
+  var btn = formEl.querySelector("button[type='submit']");
+  if (btn) btn.disabled = true;
+
+  fetch(formEl.action, {
+    method: "POST",
+    body: new FormData(formEl),
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "更新失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("网络请求异常", "danger");
+  })
+  .finally(function() {
+    if (btn) btn.disabled = false;
+  });
+}
+
+// ===== 9. 异步更新会话超时与风控安全参数 =====
+function handleUpdateSessionTimeout(e, formEl) {
+  e.preventDefault();
+  var btn = formEl.querySelector("button[type='submit']");
+  if (btn) btn.disabled = true;
+
+  fetch(formEl.action, {
+    method: "POST",
+    body: new FormData(formEl),
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "更新失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("网络请求异常", "danger");
+  })
+  .finally(function() {
+    if (btn) btn.disabled = false;
+  });
+}
+
+// ===== 10. 异步重置用户密码 =====
+function handleResetUserPass(e, formEl, userId) {
+  e.preventDefault();
+  var btn = formEl.querySelector("button[type='submit']");
+  if (btn) btn.disabled = true;
+
+  fetch(formEl.action, {
+    method: "POST",
+    body: new FormData(formEl),
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+      var modalEl = formEl.closest(".modal");
+      if (modalEl) {
+        var m = bootstrap.Modal.getInstance(modalEl);
+        if (m) m.hide();
+      }
+      formEl.reset();
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "重置密码失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("重置密码请求异常", "danger");
+  })
+  .finally(function() {
+    if (btn) btn.disabled = false;
+  });
+}
+
+// ===== 11. 异步重置密保问题 =====
+function handleResetUserSecurity(e, formEl, userId) {
+  e.preventDefault();
+  var btn = formEl.querySelector("button[type='submit']");
+  if (btn) btn.disabled = true;
+
+  fetch(formEl.action, {
+    method: "POST",
+    body: new FormData(formEl),
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+      var modalEl = formEl.closest(".modal");
+      if (modalEl) {
+        var m = bootstrap.Modal.getInstance(modalEl);
+        if (m) m.hide();
+      }
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "重置密保失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("重置密保请求异常", "danger");
+  })
+  .finally(function() {
+    if (btn) btn.disabled = false;
+  });
+}
+
+// ===== 12. 异步删除单用户 =====
+function handleDeleteUser(e, formEl, userId) {
+  e.preventDefault();
+  var btn = formEl.querySelector("button[type='submit']");
+  if (btn) btn.disabled = true;
+
+  fetch(formEl.action, {
+    method: "POST",
+    body: new FormData(formEl),
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+      var modalEl = formEl.closest(".modal");
+      if (modalEl) {
+        var m = bootstrap.Modal.getInstance(modalEl);
+        if (m) m.hide();
+      }
+      var row = document.querySelector(`tr:has(input[value="${userId}"])`);
+      if (row) {
+        row.style.transition = "opacity 0.3s ease";
+        row.style.opacity = "0";
+        setTimeout(function() { row.remove(); }, 300);
+      }
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "删除用户失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("删除用户请求异常", "danger");
+  })
+  .finally(function() {
+    if (btn) btn.disabled = false;
+  });
+}
+
+// ===== 13. 异步批量配置用户权限 =====
+function handleBatchUserPermissions(e, formEl) {
+  e.preventDefault();
+  var btn = formEl.querySelector("button[type='submit']");
+  if (btn) btn.disabled = true;
+
+  fetch(formEl.action, {
+    method: "POST",
+    body: new FormData(formEl),
+    headers: { "X-Requested-With": "XMLHttpRequest" }
+  })
+  .then(function(res) { return res.json(); })
+  .then(function(data) {
+    if (data.code === 200) {
+      if (window.showAppToast) showAppToast(data.message, "success");
+      var modalEl = document.getElementById("batchPermModal");
+      if (modalEl) {
+        var m = bootstrap.Modal.getInstance(modalEl);
+        if (m) m.hide();
+      }
+      // 局部异步刷新勾选用户的权限胶囊
+      var checked = document.querySelectorAll('.user-checkbox:checked');
+      checked.forEach(function(cb) {
+        submitSingleUserResetDefault(cb.value, '', true);
+      });
+    } else {
+      if (window.showAppToast) showAppToast(data.message || "批量配置权限失败", "danger");
+    }
+  })
+  .catch(function() {
+    if (window.showAppToast) showAppToast("批量配置权限异常", "danger");
+  })
+  .finally(function() {
+    if (btn) btn.disabled = false;
+  });
+}
+
 </script>
 
 <!-- 查看用户安全凭证 Modal -->
@@ -1273,7 +2213,7 @@ function copyCredPassword() {
 <div class="modal fade" id="batchPermModal" tabindex="-1">
   <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
     <div class="modal-content" style="white-space: normal;">
-      <form action="{{ url_for('admin_batch_user_permissions') }}" method="POST" id="batchPermForm" style="display: flex; flex-direction: column; max-height: 100%; overflow: hidden;">
+      <form action="{{ url_for('admin_batch_user_permissions') }}" method="POST" id="batchPermForm" style="display: flex; flex-direction: column; max-height: 100%; overflow: hidden;" onsubmit="handleBatchUserPermissions(event, this)">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div id="batchPermUserIdsContainer"></div>
         <div class="modal-header border-0 pb-0">
@@ -1281,6 +2221,15 @@ function copyCredPassword() {
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body py-3">
+          <!-- 批量弹窗快捷工具栏 -->
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 p-2 mb-3 bg-light rounded-3 border">
+            <span class="small fw-bold text-muted me-1" style="font-size: 0.75rem;"><i class="fa-solid fa-bolt text-warning me-1"></i>快捷预设：</span>
+            <div class="d-flex align-items-center gap-2">
+              <button type="button" class="btn btn-xs btn-outline-success rounded-pill px-2 py-0" style="font-size: 0.72rem;" onclick="quickSetBatchModalPerms('all_open')">一键全部开启</button>
+              <button type="button" class="btn btn-xs btn-outline-secondary rounded-pill px-2 py-0" style="font-size: 0.72rem;" onclick="quickSetBatchModalPerms('all_self')">一键仅自身(0级)</button>
+            </div>
+          </div>
+
           <p class="text-muted small mb-3">当前已选择 <strong id="batchPermUserCount" class="text-primary">0</strong> 位用户进行菜单访问与各菜单独立数据权限配置：</p>
           
           <div class="mb-3">
@@ -1426,7 +2375,8 @@ function copyCredPassword() {
                 </div>
                 <div style="min-width: 210px;">
                   <select class="form-select form-select-sm" name="menu_perm_weather">
-                    <option value="1" selected>可查看实时天气</option>
+                    <option value="0">无天气访问权限 (0级)</option>
+                    <option value="1" selected>可查看实时天气与万年历 (1级)</option>
                   </select>
                 </div>
               </div>
