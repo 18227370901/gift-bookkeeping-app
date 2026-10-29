@@ -62,6 +62,8 @@ UNATTENDED="${UNATTENDED:-}"
 # ===== 环境变量定义（全局有效） =====
 export PORT="${PORT:-11443}"
 export NGINX_PORT="${NGINX_PORT:-443}"
+# NGINX_BIND_IP: Nginx 监听绑定的 IP 地址（默认空或 0.0.0.0 为全网卡公网监听；127.0.0.1 为前置代理模式）
+export NGINX_BIND_IP="${NGINX_BIND_IP:-}"
 export ADMIN_USER="${ADMIN_USER:-admin}"
 export ADMIN_PASS="${ADMIN_PASS:-admin123}"
 

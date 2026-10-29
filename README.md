@@ -10,7 +10,7 @@
 
 > **简洁、安全、全能的人情往来与礼金财务管理系统**。支持自然语言智能记账、专属宴席独立台账、人情往来精准对账、权威万年历与节假日调休感知、AI 记账助手、多渠道 Webhook 告警与 WebDAV 加密云备份。
 >
-> 📌 **当前版本**：`V10.11.42` | 📖 **[查看全量版本发布历史与更新日志 (docs/CHANGELOG.md)](docs/CHANGELOG.md)**
+> 📌 **当前版本**：`V10.11.43` | 📖 **[查看全量版本发布历史与更新日志 (docs/CHANGELOG.md)](docs/CHANGELOG.md)**
 
 <!-- 
   【AI 协作与维护规范 - 严禁违背】
@@ -100,10 +100,11 @@ python app.py
 
 ```bash
 chmod +x run.sh
-./run.sh start      # 启动服务
-./run.sh status     # 查看运行状态与访问信息
-./run.sh restart    # 重启服务
-./run.sh stop       # 停止服务
+./run.sh start                            # 启动服务 (默认配置)
+./run.sh start --nginx-port 3443 --local  # 前置代理模式 (监听 127.0.0.1:3443)
+./run.sh status                           # 查看运行状态与访问信息
+./run.sh restart                          # 重启服务
+./run.sh stop                             # 停止服务
 ```
 
 ---

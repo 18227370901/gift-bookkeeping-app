@@ -3900,5 +3900,18 @@ else { window.addEventListener('load', function() { trySetupDiagramToggles(); })
   </div>
 </div>
 
+<div class="card mb-4" id="adr-73">
+  <div class="card-header bg-primary text-white fw-bold">
+    ADR-73：Nginx 反向代理前置模式自由切换与自定义监听端口架构治理（V10.11.43 落地）
+  </div>
+  <div class="card-body">
+    <table class="table table-bordered mb-0">
+      <tr><th style="width: 140px;">背景与痛点</th><td>① <strong>监听端口与绑定地址强耦合</strong>：旧版反代渲染模块直接将 <code>NGINX_PORT</code>（默认 443）写入 <code>listen __NGINX_PORT__ ssl;</code>，无法自由绑定特定 IP 地址；② <strong>IPv6 双栈网络下端口冲突隐患</strong>：Linux 内核默认 <code>bindv6only=0</code> 时 IPv6 套接字 <code>[::]</code> 会抢占 IPv4 通配流量；若同时书写 <code>listen 3443 ssl;</code> 与 <code>listen [::]:3443 ssl;</code> 会报 <code>98: Address already in use</code> 启动失败；且系统未启用 IPv6 时报协议不支持错误；③ <strong>前置代理安全隔离诉求</strong>：系统前置已有全局网关（主 Nginx/1Panel/Caddy/CDN/WAF）时，仅需监听 <code>127.0.0.1:3443</code> 回环接口，无需公网开放，收敛安全攻击面。</td></tr>
+      <tr><th>决策方案</th><td>① <strong>监听地址与端口解耦解绑（双模自由切换）</strong>：解耦为「监听绑定 IP (<code>NGINX_BIND_IP</code>)」与「对外监听端口 (<code>NGINX_PORT</code>)」；前置代理模式设置 <code>NGINX_BIND_IP="127.0.0.1"</code> 渲染输出 <code>listen 127.0.0.1:&lt;PORT&gt; ssl;</code>（安全隔离）；标准公网模式渲染输出 <code>listen &lt;PORT&gt; ssl;</code>（杜绝双栈冲突与缺网卡报错）；② <strong>命令行多参数全解析与运维闭环</strong>：<code>run.sh</code> 新增参数循环解析，支持 <code>--local</code> / <code>--front-proxy</code>、<code>--public</code>、<code>--nginx-port &lt;端口&gt;</code>、<code>--bind-ip &lt;IP&gt;</code>；支持三层优先级覆盖；与 <code>add_nginx</code>、<code>--renew-nginx</code>、<code>--cron</code> 等联动免重启热重载；③ <strong>运行状态智能提示</strong>：<code>bin/service.sh</code> 自动检测并在前置代理模式下追加指引说明；④ <strong>传统版与 Docker 版同构同步</strong>：两版同构升级、完全对齐。</td></tr>
+      <tr><th>验证与效果</th><td>传统版与 Docker 版脚本均通过 POSIX <code>sh -n</code> 语法校验；沙盒渲染测试验证公网模式输出 <code>listen 3443 default_server ssl;</code>、前置代理模式输出 <code>listen 127.0.0.1:3443 ssl;</code>，无残留占位符；热重载平稳顺畅。</td></tr>
+    </table>
+  </div>
+</div>
+
 </body>
 </html>

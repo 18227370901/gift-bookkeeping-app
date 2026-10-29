@@ -15,8 +15,13 @@
 print_access_info() {
     local domain_count
     domain_count=$(echo "$SNI_DOMAIN" | wc -w)
+    local proxy_tip=""
+    if [ -n "$NGINX_BIND_IP" ] && [ "$NGINX_BIND_IP" != "0.0.0.0" ]; then
+        proxy_tip=" (前置代理模式: 仅监听 ${NGINX_BIND_IP}:${NGINX_PORT}，请经由上层网关访问)"
+    fi
+
     if [ "$domain_count" -gt 1 ]; then
-        echo_e "   访问地址 (共 ${domain_count} 个域名):"
+        echo_e "   访问地址 (共 ${domain_count} 个域名)${proxy_tip}:"
         for domain in $SNI_DOMAIN; do
             if [ "$NGINX_PORT" = "443" ]; then
                 echo_e "     - https://$domain/"
@@ -30,7 +35,7 @@ print_access_info() {
         if [ "$NGINX_PORT" != "443" ]; then
             access_url="https://$primary_domain:$NGINX_PORT/"
         fi
-        echo_e "   访问地址: $access_url"
+        echo_e "   访问地址: $access_url$proxy_tip"
     fi
     echo_e "   后端本地直连: http://127.0.0.1:$PORT"
     echo_e "   日志文件: $LOG_FILE"

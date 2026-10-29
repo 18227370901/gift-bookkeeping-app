@@ -51,9 +51,31 @@ while [ $# -gt 0 ]; do
         --reconfig|--reconfig-db)
             DB_RESET=1
             ;;
+        --local|--front-proxy)
+            NGINX_BIND_IP="127.0.0.1"
+            ;;
+        --public)
+            NGINX_BIND_IP=""
+            ;;
+        --nginx-port)
+            shift
+            [ $# -gt 0 ] || { echo "错误: --nginx-port 缺少端口参数"; exit 1; }
+            NGINX_PORT="$1"
+            ;;
+        --nginx-port=*)
+            NGINX_PORT="${1#*=}"
+            ;;
+        --bind-ip)
+            shift
+            [ $# -gt 0 ] || { echo "错误: --bind-ip 缺少 IP 参数"; exit 1; }
+            NGINX_BIND_IP="$1"
+            ;;
+        --bind-ip=*)
+            NGINX_BIND_IP="${1#*=}"
+            ;;
         *)
             echo "错误: 未知参数 '$1'"
-            echo "可用参数: --cron, --unattended, --renew-ssl, --renew-nginx, --reconfig, --reconfig-db"
+            echo "可用参数: --cron, --unattended, --renew-ssl, --renew-nginx, --reconfig, --local, --public, --nginx-port <端口>, --bind-ip <IP>"
             echo "用法: ./$(basename "$0") {start|stop|status|restart|clean|add_nginx} [选项...]"
             exit 1
             ;;
