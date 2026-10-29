@@ -3886,5 +3886,19 @@ else { window.addEventListener('load', function() { trySetupDiagramToggles(); })
   </div>
 </div>
 
+
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-header bg-white fw-bold">
+    ADR-72：全局消息通知脱离文档流浮层化与审计日志全流程无感异步改造（V10.11.42 落地）
+  </div>
+  <div class="card-body">
+    <table class="table table-bordered mb-0">
+      <tr><th style="width: 140px;">背景与痛点</th><td>① <strong>常规文档流 Alert 挤压推跌页面视觉</strong>：基础模板中后端 flash 消息渲染为普通流内元素，置于 main-container 内部及页面主体上方。消息弹出时整体下压页面数十像素，自动消失后又向上弹跳，造成页面强烈抖动与自动刷新的错觉；② <strong>操作审计日志强依赖同步表单刷新</strong>：审计日志管理页面中的单条删除、批量删除、清空全部日志及记录模块配置保存均通过传统 HTML 表单同步提交重载页面，操作繁琐且易打断浏览。</td></tr>
+      <tr><th>决策方案</th><td>① <strong>全局通知脱离常规文档流悬浮化（Overlay Floating Notification）</strong>：重构 <code>templates/base.html</code> 消息渲染容器，将其改为固定悬浮层（<code>position-fixed top-0 start-50 translate-middle-x</code>，<code>z-index: 2060</code>，<code>pointer-events: none</code> 搭配消息卡片 <code>pointer-events: auto</code>）；彻底解耦通知提示与页面布局，弹窗出现与消失不占据任何文档空间高度，页面卡片与数据表格保持绝对平稳；全站 7 大依赖 flash 的模块（回收站、工单、广播、备份、记账等）统一受益；② <strong>审计日志后台全流程无感异步（SPA / Ajax / Toast）</strong>：后端接口双模自适应升级，自动识别 XMLHttpRequest / JSON 并返回标准 JSON 结构；前端单条与批量删除均通过 Fetch 执行，并在成功后为对应数据行施加右移淡出动效（<code>transition: all 0.35s ease; opacity: 0; transform: translateX(25px)</code>）平滑移出 DOM；清空日志原地替换空态占位并隐藏多余分页；模块配置就地保存并即时更新卡片头部的启用模块数量 Badge。</td></tr>
+      <tr><th>验证与效果</th><td>传统版本应用在 11443 端口平稳运行；单条删除、批量删除、清空日志、配置保存 4 项异步接口自动化端到端测试 100% 通过；全站操作与登录消息弹出时页面零位移、零抖动，操作审计日志运维体验顺畅丝滑。</td></tr>
+    </table>
+  </div>
+</div>
+
 </body>
 </html>

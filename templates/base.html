@@ -301,12 +301,26 @@
 
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
+        <!-- 全局悬浮通知浮层容器：脱离文档普通流，彻底根除顶部弹窗挤压推挤页面的抖动缺陷 -->
+        <div class="flash-alert-overlay position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 2060; min-width: 320px; max-width: 90vw; pointer-events: none;">
             {% for category, message in messages %}
-            <div class="alert alert-{{ category }} alert-dismissible fade show shadow-sm auto-dismiss-alert" role="alert">
-                {{ message }}
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            <div class="alert alert-{{ category }} alert-dismissible fade show shadow-lg border-0 py-2 px-3 mb-2 auto-dismiss-alert d-flex align-items-center justify-content-between" role="alert" style="pointer-events: auto;">
+                <div class="d-flex align-items-center gap-2">
+                    {% if category == 'success' %}
+                        <i class="fa-solid fa-circle-check text-success fs-5"></i>
+                    {% elif category in ['danger', 'error'] %}
+                        <i class="fa-solid fa-circle-xmark text-danger fs-5"></i>
+                    {% elif category == 'warning' %}
+                        <i class="fa-solid fa-triangle-exclamation text-warning fs-5"></i>
+                    {% else %}
+                        <i class="fa-solid fa-circle-info text-primary fs-5"></i>
+                    {% endif %}
+                    <span>{{ message }}</span>
+                </div>
+                <button type="button" class="btn-close ms-3" data-bs-dismiss="alert" aria-label="Close"></button>
             </div>
             {% endfor %}
+        </div>
         {% endif %}
         {% endwith %}
 

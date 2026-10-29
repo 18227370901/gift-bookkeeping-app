@@ -2478,13 +2478,22 @@ def admin_logs():
 @app.route('/admin/logs/batch_delete', methods=['POST'])
 @login_required
 def admin_batch_delete_logs():
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax:
+            return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
 
-    log_ids = request.form.getlist('log_ids')
+    log_ids = request.form.getlist('log_ids') or request.form.getlist('log_ids[]')
+    if not log_ids and request.is_json:
+        req_data = request.get_json(silent=True) or {}
+        log_ids = req_data.get('log_ids', [])
     if not log_ids:
-        flash('请先勾选需要删除的日志记录！', 'warning')
+        msg = '请先勾选需要删除的日志记录！'
+        if is_ajax:
+            return jsonify({'code': 400, 'message': msg}), 400
+        flash(msg, 'warning')
         return redirect(url_for('admin_logs'))
 
     try:
@@ -2501,10 +2510,16 @@ def admin_batch_delete_logs():
             )
         except Exception:
             pass
-        flash(f'成功批量删除 {deleted_count} 条审计日志！', 'success')
+        msg = f'成功批量删除 {deleted_count} 条审计日志！'
+        if is_ajax:
+            return jsonify({'code': 200, 'message': msg, 'deleted_count': deleted_count, 'log_ids': log_ids_int})
+        flash(msg, 'success')
     except Exception as e:
         db.session.rollback()
-        flash(f'批量删除操作失败: {str(e)}', 'danger')
+        msg = f'批量删除操作失败: {str(e)}'
+        if is_ajax:
+            return jsonify({'code': 500, 'message': msg}), 500
+        flash(msg, 'danger')
 
     return redirect(url_for('admin_logs'))
 
@@ -2618,7 +2633,10 @@ def admin_batch_delete_invite_links():
 @app.route('/admin/log/delete/<int:log_id>', methods=['POST'])
 @login_required
 def admin_delete_log(log_id):
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax:
+            return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
 
@@ -2637,13 +2655,19 @@ def admin_delete_log(log_id):
         )
     except Exception:
         pass
-    flash('日志记录已成功删除！', 'success')
+    msg = '日志记录已成功删除！'
+    if is_ajax:
+        return jsonify({'code': 200, 'message': msg, 'log_id': log_id})
+    flash(msg, 'success')
     return redirect(url_for('admin_logs'))
 
 @app.route('/admin/logs/clear', methods=['POST'])
 @login_required
 def admin_clear_logs():
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax:
+            return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
 
@@ -2660,17 +2684,26 @@ def admin_clear_logs():
         )
     except Exception:
         pass
-    flash(f'已成功清空所有审计日志（共 {deleted_count} 条）！', 'success')
+    msg = f'已成功清空所有审计日志（共 {deleted_count} 条）！'
+    if is_ajax:
+        return jsonify({'code': 200, 'message': msg, 'deleted_count': deleted_count})
+    flash(msg, 'success')
     return redirect(url_for('admin_logs'))
 
 # V10: 审计日志模块配置保存
 @app.route('/admin/audit-log-config', methods=['POST'])
 @login_required
 def admin_save_audit_log_config():
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax:
+            return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
     modules = request.form.getlist('audit_modules')
+    if not modules and request.is_json:
+        req_data = request.get_json(silent=True) or {}
+        modules = req_data.get('audit_modules', [])
     if not modules:
         SystemSetting.set_val('audit_log_modules', '[]')
     elif 'all' in modules:
@@ -2689,7 +2722,10 @@ def admin_save_audit_log_config():
         )
     except Exception:
         pass
-    flash('审计日志记录配置已保存成功！', 'success')
+    msg = '审计日志记录配置已保存成功！'
+    if is_ajax:
+        return jsonify({'code': 200, 'message': msg, 'enabled_count': len(modules)})
+    flash(msg, 'success')
     return redirect(url_for('admin_logs'))
 
 @app.route('/admin/settings/registration_mode', methods=['POST'])

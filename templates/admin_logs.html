@@ -9,9 +9,9 @@
         <small class="text-muted">记录全站用户的所有敏感操作与查询浏览记录（默认日志最大保存 3 个月，失效后自动清理）</small>
     </div>
     <div class="col-auto">
-        <form action="{{ url_for('admin_clear_logs') }}" method="POST" class="d-inline" onsubmit="return confirm('警告：确定要清空所有审计日志记录吗？此操作不可撤销！');">
+        <form id="clearLogsForm" action="{{ url_for('admin_clear_logs') }}" method="POST" class="d-inline" onsubmit="handleClearLogs(event)">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit" class="btn btn-outline-danger btn-sm me-2">
+            <button type="submit" id="clearLogsBtn" class="btn btn-outline-danger btn-sm me-2">
                 <i class="fa-solid fa-trash-can me-1"></i> 清空所有日志
             </button>
         </form>
@@ -33,7 +33,7 @@
   <div class="collapse" id="auditConfigPanel">
     <div class="card-body">
       <p class="small text-muted mb-2"><i class="fa-solid fa-circle-info me-1"></i>勾选需要记录审计日志的功能模块，未勾选的模块操作将不再写入日志，可减少磁盘占用。全不勾选则禁用所有日志记录。</p>
-      <form action="{{ url_for('admin_save_audit_log_config') }}" method="POST" id="auditConfigForm">
+      <form action="{{ url_for('admin_save_audit_log_config') }}" method="POST" id="auditConfigForm" onsubmit="handleSaveAuditConfig(event)">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="d-flex gap-2 mb-2">
           <button type="button" class="btn btn-sm btn-outline-success" onclick="auditSelectAll(true)"><i class="fa-solid fa-check-double me-1"></i>全选</button>
@@ -105,7 +105,7 @@
 </div>
 
 <!-- 批量操作与数据表格卡片 -->
-<form id="batchDeleteForm" action="{{ url_for('admin_batch_delete_logs') }}" method="POST" onsubmit="return confirm('确定要批量删除已勾选的 ' + getCheckedCount() + ' 条日志记录吗？');">
+<form id="batchDeleteForm" action="{{ url_for('admin_batch_delete_logs') }}" method="POST" onsubmit="handleBatchDeleteLogs(event)">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <div class="card shadow-sm border-0">
         <div class="card-header bg-white py-2 d-flex align-items-center justify-content-between">
@@ -114,7 +114,7 @@
                     <i class="fa-solid fa-trash me-1"></i>批量删除选中项 (<span id="checkedCount">0</span>)
                 </button>
             </div>
-            <small class="text-muted">共找到 {{ logs.total }} 条相关审计日志，当前显示第 {{ logs.page }} / {{ logs.pages or 1 }} 页</small>
+            <small class="text-muted" id="logsSummaryText">共找到 {{ logs.total }} 条相关审计日志，当前显示第 {{ logs.page }} / {{ logs.pages or 1 }} 页</small>
         </div>
         <div class="card-body p-0">
             <div class="table-responsive">
@@ -136,7 +136,7 @@
                 </thead>
                 <tbody>
                     {% for log in logs.items %}
-                    <tr>
+                    <tr id="logRow_{{ log.id }}">
                         <td class="ps-3">
                             <input type="checkbox" class="form-check-input log-checkbox" name="log_ids" value="{{ log.id }}">
                         </td>
@@ -178,7 +178,7 @@
         </div>
     </div>
     {% if logs.pages > 1 %}
-    <div class="card-footer bg-white py-3">
+    <div class="card-footer bg-white py-3" id="logsPaginationCard">
         <nav aria-label="Page navigation">
             <ul class="pagination pagination-sm justify-content-center mb-0">
                 {% if logs.has_prev %}
@@ -210,18 +210,20 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 </form>
 
+{% endblock %}
+
 {% block extra_js %}
 <script>
     const selectAllCheckbox = document.getElementById('selectAll');
-    const itemCheckboxes = document.querySelectorAll('.log-checkbox');
+    const itemCheckboxes = () => document.querySelectorAll('.log-checkbox');
     const batchDeleteBtn = document.getElementById('batchDeleteBtn');
     const checkedCountSpan = document.getElementById('checkedCount');
 
     function updateBatchButton() {
         const checked = document.querySelectorAll('.log-checkbox:checked');
         const count = checked.length;
-        checkedCountSpan.textContent = count;
-        batchDeleteBtn.disabled = (count === 0);
+        if (checkedCountSpan) checkedCountSpan.textContent = count;
+        if (batchDeleteBtn) batchDeleteBtn.disabled = (count === 0);
     }
 
     function getCheckedCount() {
@@ -230,31 +232,266 @@
 
     if (selectAllCheckbox) {
         selectAllCheckbox.addEventListener('change', function() {
-            itemCheckboxes.forEach(cb => {
+            itemCheckboxes().forEach(cb => {
                 cb.checked = selectAllCheckbox.checked;
             });
             updateBatchButton();
         });
     }
 
-    itemCheckboxes.forEach(cb => {
-        cb.addEventListener('change', function() {
-            if (!this.checked) {
+    function bindItemCheckboxEvents() {
+        itemCheckboxes().forEach(cb => {
+            cb.onchange = function() {
+                if (!this.checked) {
+                    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+                } else {
+                    const allCbs = Array.from(itemCheckboxes());
+                    const allChecked = allCbs.length > 0 && allCbs.every(c => c.checked);
+                    if (selectAllCheckbox) selectAllCheckbox.checked = allChecked;
+                }
+                updateBatchButton();
+            };
+        });
+    }
+    bindItemCheckboxEvents();
+
+    function checkEmptyState() {
+        const tbody = document.querySelector('table[data-resizable="admin_logs_list"] tbody');
+        if (tbody && tbody.querySelectorAll('tr[id^="logRow_"]').length === 0) {
+            tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted"><i class="fa-solid fa-clipboard-check fa-2x mb-2 text-secondary d-block"></i>暂无任何操作日志记录</td></tr>';
+            const pagi = document.getElementById('logsPaginationCard');
+            if (pagi) pagi.style.display = 'none';
+            if (selectAllCheckbox) {
                 selectAllCheckbox.checked = false;
-            } else {
-                const allChecked = Array.from(itemCheckboxes).every(c => c.checked);
-                selectAllCheckbox.checked = allChecked;
+                selectAllCheckbox.disabled = true;
             }
+            const summary = document.getElementById('logsSummaryText');
+            if (summary) summary.textContent = '共找到 0 条相关审计日志，当前显示第 1 / 1 页';
+        }
+    }
+
+    // 1. 异步单条删除日志
+    function deleteSingleLog(logId) {
+        if (!confirm('确定要删除 ID #' + logId + ' 的日志记录吗？')) {
+            return;
+        }
+
+        const formData = new FormData();
+        const csrfInput = document.querySelector('input[name="csrf_token"]');
+        if (csrfInput) formData.append('csrf_token', csrfInput.value);
+
+        fetch("{{ url_for('admin_delete_log', log_id=0) }}".replace('/0', '/' + logId), {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.code === 200) {
+                const row = document.getElementById('logRow_' + logId);
+                if (row) {
+                    row.style.transition = 'all 0.35s ease';
+                    row.style.opacity = '0';
+                    row.style.transform = 'translateX(25px)';
+                    setTimeout(() => {
+                        row.remove();
+                        updateBatchButton();
+                        checkEmptyState();
+                    }, 350);
+                }
+                if (window.showAppToast) {
+                    showAppToast(data.message || '日志记录已成功删除！', 'success');
+                }
+            } else {
+                if (window.showAppToast) {
+                    showAppToast(data.message || '删除日志失败', 'danger');
+                } else {
+                    alert(data.message || '删除日志失败');
+                }
+            }
+        })
+        .catch(err => {
+            if (window.showAppToast) {
+                showAppToast('网络请求异常，删除失败', 'danger');
+            } else {
+                alert('网络请求异常，删除失败');
+            }
+        });
+    }
+
+    // 2. 异步批量删除日志
+    function handleBatchDeleteLogs(e) {
+        e.preventDefault();
+        const checked = Array.from(document.querySelectorAll('.log-checkbox:checked'));
+        if (checked.length === 0) {
+            if (window.showAppToast) showAppToast('请先勾选需要删除的日志记录！', 'warning');
+            return;
+        }
+
+        if (!confirm('确定要批量删除已勾选的 ' + checked.length + ' 条日志记录吗？')) {
+            return;
+        }
+
+        const form = document.getElementById('batchDeleteForm');
+        const origBtnHtml = batchDeleteBtn.innerHTML;
+        batchDeleteBtn.disabled = true;
+        batchDeleteBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>正在删除...';
+
+        const formData = new FormData(form);
+
+        fetch(form.action, {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.code === 200) {
+                checked.forEach(cb => {
+                    const row = cb.closest('tr');
+                    if (row) {
+                        row.style.transition = 'all 0.35s ease';
+                        row.style.opacity = '0';
+                        row.style.transform = 'translateX(25px)';
+                        setTimeout(() => row.remove(), 350);
+                    }
+                });
+                setTimeout(() => {
+                    if (selectAllCheckbox) selectAllCheckbox.checked = false;
+                    updateBatchButton();
+                    checkEmptyState();
+                }, 400);
+
+                if (window.showAppToast) {
+                    showAppToast(data.message || '已成功批量删除选中的日志记录！', 'success');
+                }
+            } else {
+                if (window.showAppToast) {
+                    showAppToast(data.message || '批量删除失败', 'danger');
+                } else {
+                    alert(data.message || '批量删除失败');
+                }
+            }
+        })
+        .catch(err => {
+            if (window.showAppToast) {
+                showAppToast('网络请求异常，批量删除失败', 'danger');
+            } else {
+                alert('网络请求异常，批量删除失败');
+            }
+        })
+        .finally(() => {
+            batchDeleteBtn.innerHTML = origBtnHtml;
             updateBatchButton();
         });
-    });
+    }
 
-    function deleteSingleLog(logId) {
-        if (confirm('确定要删除 ID #' + logId + ' 的日志记录吗？')) {
-            const form = document.getElementById('singleDeleteForm');
-            form.action = "{{ url_for('admin_delete_log', log_id=0) }}".replace('/0', '/' + logId);
-            form.submit();
+    // 3. 异步清空所有日志
+    function handleClearLogs(e) {
+        e.preventDefault();
+        if (!confirm('警告：确定要清空所有审计日志记录吗？此操作不可撤销！')) {
+            return;
         }
+
+        const form = document.getElementById('clearLogsForm');
+        const clearBtn = document.getElementById('clearLogsBtn');
+        const origHtml = clearBtn.innerHTML;
+        clearBtn.disabled = true;
+        clearBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>正在清空...';
+
+        const formData = new FormData(form);
+
+        fetch(form.action, {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.code === 200) {
+                const tbody = document.querySelector('table[data-resizable="admin_logs_list"] tbody');
+                if (tbody) {
+                    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-4 text-muted"><i class="fa-solid fa-clipboard-check fa-2x mb-2 text-secondary d-block"></i>暂无任何操作日志记录</td></tr>';
+                }
+                const pagi = document.getElementById('logsPaginationCard');
+                if (pagi) pagi.style.display = 'none';
+                if (selectAllCheckbox) {
+                    selectAllCheckbox.checked = false;
+                    selectAllCheckbox.disabled = true;
+                }
+                const summary = document.getElementById('logsSummaryText');
+                if (summary) summary.textContent = '共找到 0 条相关审计日志，当前显示第 1 / 1 页';
+                updateBatchButton();
+
+                if (window.showAppToast) {
+                    showAppToast(data.message || '已成功清空所有审计日志！', 'success');
+                }
+            } else {
+                if (window.showAppToast) {
+                    showAppToast(data.message || '清空日志失败', 'danger');
+                } else {
+                    alert(data.message || '清空日志失败');
+                }
+            }
+        })
+        .catch(err => {
+            if (window.showAppToast) {
+                showAppToast('网络请求异常，清空失败', 'danger');
+            } else {
+                alert('网络请求异常，清空失败');
+            }
+        })
+        .finally(() => {
+            clearBtn.disabled = false;
+            clearBtn.innerHTML = origHtml;
+        });
+    }
+
+    // 4. 异步保存审计日志记录配置
+    function handleSaveAuditConfig(e) {
+        e.preventDefault();
+        const form = document.getElementById('auditConfigForm');
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const origHtml = submitBtn.innerHTML;
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>正在保存...';
+
+        const formData = new FormData(form);
+
+        fetch(form.action, {
+            method: 'POST',
+            body: formData,
+            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+        })
+        .then(res => res.json())
+        .then(data => {
+            if (data.code === 200) {
+                const badge = document.getElementById('auditConfigBadge');
+                if (badge && data.enabled_count !== undefined) {
+                    badge.textContent = data.enabled_count + ' 个模块已启用';
+                }
+                if (window.showAppToast) {
+                    showAppToast(data.message || '审计日志记录配置已保存成功！', 'success');
+                }
+            } else {
+                if (window.showAppToast) {
+                    showAppToast(data.message || '保存配置失败', 'danger');
+                } else {
+                    alert(data.message || '保存配置失败');
+                }
+            }
+        })
+        .catch(err => {
+            if (window.showAppToast) {
+                showAppToast('网络请求异常，保存配置失败', 'danger');
+            } else {
+                alert('网络请求异常，保存配置失败');
+            }
+        })
+        .finally(() => {
+            submitBtn.disabled = false;
+            submitBtn.innerHTML = origHtml;
+        });
     }
 
     // V10: 审计配置全选/清空
@@ -262,5 +499,4 @@
         document.querySelectorAll('input[name="audit_modules"]').forEach(cb => { cb.checked = check; });
     }
 </script>
-{% endblock %}
 {% endblock %}
