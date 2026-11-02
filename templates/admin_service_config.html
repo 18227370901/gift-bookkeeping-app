@@ -98,6 +98,66 @@
     </div>
 </div>
 
+{% set PLATFORM_GROUPS = ['forecast', 'holiday'] %}
+{# V10.11.47 平台支持组：仅「天气预报」「法定节假日」两组支持 UApiPro 平台端点双协议混排 #}
+
+<!-- ==================== V10.11.47 API 平台注册表（平台级 Key 集中管理） ==================== -->
+<div class="card shadow-sm rounded-4 mb-4" id="platformCard">
+    <div class="card-header d-flex justify-content-between align-items-center rounded-top-4">
+        <span><i class="fa-solid fa-plug me-2 text-primary"></i><b>API 平台</b>
+            <span class="badge bg-success-subtle text-success border ms-2">UApiPro 已内置</span>
+        </span>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-info btn-sm rounded-pill" onclick="testPlatform()"><i class="fa-solid fa-vial me-1"></i>测试平台连通</button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-light border small mb-3 rounded-3">
+            <i class="fa-solid fa-circle-info me-1 text-primary"></i>
+            平台级一份 <b>API Key</b> 集中管理：所有绑定该平台的端点与 API 调用自动附加认证头（<code>Authorization: Bearer &lt;key&gt;</code>），换 Key 只需改这里一处。<br>
+            <b>UApiPro 访客模式</b>：Key 留空即可直接调用（按出口 IP 每月 1500 积分 / 4 QPS，月初自动重置）；<b>配置 Key 后</b>：按账号每月 3500 积分 / 7 QPS，可在 <a href="https://uapis.cn/console/api-keys" target="_blank" rel="noopener">uapis.cn 控制台</a>管理。
+        </div>
+        {% for p in platforms %}
+        <div class="row g-2 align-items-end platform-row" data-pid="{{ p.id }}">
+            <div class="col-12 col-lg-3">
+                <label class="form-label small text-muted mb-1">平台</label>
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <b class="text-nowrap">{{ p.name }}</b>
+                    <span class="badge {{ 'bg-success-subtle text-success border' if p.enabled else 'bg-secondary-subtle text-secondary border' }}"
+                          id="platEnabledBadge_{{ p.id }}">{{ '已启用' if p.enabled else '已停用' }}</span>
+                    <span class="badge {{ 'bg-primary-subtle text-primary border' if p.key_set else 'bg-warning-subtle text-warning border' }}"
+                          id="platKeyBadge_{{ p.id }}" title="{{ 'Key 已配置（脱敏回显）' if p.key_set else '未配置 Key（访客模式）' }}">
+                        {{ ('Key ' ~ p.key_masked) if p.key_set else '访客模式' }}</span>
+                    <div class="form-check form-switch mb-0 ms-1">
+                        <input type="checkbox" class="form-check-input platform-enabled" role="switch" {% if p.enabled %}checked{% endif %}
+                               id="platEnabled_{{ p.id }}" onchange="savePlatform('{{ p.id }}', 'switch')">
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-6 col-lg-4">
+                <label class="form-label small text-muted mb-1">平台地址 Base URL</label>
+                <input type="text" class="form-control form-control-sm platform-baseurl" value="{{ p.base_url }}"
+                       placeholder="https://uapis.cn/api/v1" aria-label="平台地址">
+            </div>
+            <div class="col-12 col-md-6 col-lg-5">
+                <label class="form-label small text-muted mb-1">API Key（留空 = 保持不变；输入新值 = 更新）</label>
+                <div class="input-group input-group-sm">
+                    <input type="password" class="form-control platform-apikey" autocomplete="new-password"
+                           placeholder="{{ ('已配置：' ~ p.key_masked ~ '（留空保持不变）') if p.key_set else '未配置（访客模式可用，可选填 Key）' }}"
+                           aria-label="API Key">
+                    <button class="btn btn-outline-danger" type="button" title="清除已保存的 Key（切回访客模式）"
+                            onclick="clearPlatformKey('{{ p.id }}')"><i class="fa-solid fa-eraser"></i></button>
+                    <button class="btn btn-primary" type="button" onclick="savePlatform('{{ p.id }}')">
+                        <i class="fa-solid fa-floppy-disk me-1"></i>保存平台
+                    </button>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+        <div class="small text-muted mt-2" id="platformTestResult"></div>
+    </div>
+</div>
+
 {% for gname, gcfg in cfg.groups.items() %}
 <div class="card shadow-sm rounded-4 mb-4" data-group="{{ gname }}">
     <div class="card-header d-flex justify-content-between align-items-center rounded-top-4">
@@ -131,11 +191,24 @@
             {% for ep in gcfg.urls %}
             {# V10.11.23 行默认只读锁定：点「编辑」解锁地址输入框；启用开关可直接操作不受限 #}
             {# V10.11.24 首列新增选择框（单选/多选）；启用开关升级为滑动开关图标（form-switch） #}
-            <div class="input-group input-group-sm mb-2 endpoint-row">
+            <div class="input-group input-group-sm mb-2 endpoint-row" data-platform="{{ ep.platform or '' }}">
                 <span class="input-group-text" title="勾选参与批量操作（可单选/多选）">
                     <input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)">
                 </span>
                 <input type="text" class="form-control endpoint-url" value="{{ ep.url }}" placeholder="{{ gcfg.defaults[0].url if gcfg.defaults else '如：https://...' }}" readonly aria-label="端点地址" title="默认只读锁定，点击「编辑」解锁">
+                {# V10.11.47 平台端点徽章（只读态）：UApiPro 平台端点自动附加平台认证 #}
+                {% if gname in PLATFORM_GROUPS %}
+                <span class="input-group-text platform-badge {{ '' if ep.platform else 'd-none' }}" title="UApiPro 平台端点（调用时自动附加平台级 Bearer 认证，按平台协议解析）">
+                    <i class="fa-solid fa-cloud me-1 text-primary"></i><span class="small">UApiPro</span>
+                </span>
+                {# 编辑态协议选择（与编辑按钮联动显隐）#}
+                <span class="input-group-text p-0 platform-edit d-none" title="端点协议类型">
+                    <select class="form-select form-select-sm border-0 endpoint-platform" style="min-width:118px" aria-label="端点协议">
+                        <option value="" {% if not ep.platform %}selected{% endif %}>直连·无认证</option>
+                        <option value="uapis" {% if ep.platform == 'uapis' %}selected{% endif %}>UApiPro 平台</option>
+                    </select>
+                </span>
+                {% endif %}
                 <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；V10.11.25 切换后即时保存生效）">
                     <div class="form-check form-switch mb-0">
                         <input type="checkbox" class="form-check-input endpoint-enabled" role="switch" {% if ep.enabled %}checked{% endif %}>
@@ -171,6 +244,9 @@
         <div class="small text-muted mt-2"><i class="fa-solid fa-circle-exclamation me-1"></i>{{ GROUP_HINTS[gname] }}</div>
         {% endif %}
 
+        {% if gname in PLATFORM_GROUPS %}
+        <div class="small text-primary mt-2"><i class="fa-solid fa-cloud me-1"></i>V10.11.47 双协议混排：本组支持 <b>UApiPro 平台端点</b>（{{ '如 https://uapis.cn/api/v1/misc/weather' if gname == 'forecast' else '如 https://uapis.cn/api/v1/misc/holiday-calendar' }}）——端点行点「编辑」可切换协议；平台端点调用时自动附加平台级认证并按平台协议解析，<b>组内端点顺序即协议优先级</b>（平台端点排首位时优先走平台通路，失败自动回落直连端点）。</div>
+        {% endif %}
         {% if gname == 'holiday' %}
         <div class="small text-success mt-2"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>地址末尾的 <b>{年份}</b> 变量由系统自动补全（如输入到 <code>.../year/</code> 即可），无需手工填写年份。</div>
         {% endif %}
@@ -186,10 +262,127 @@
 </div>
 {% endfor %}
 
+<!-- ==================== V10.11.47 uapis.cn 全量 API 目录（110 个，分类折叠） ==================== -->
+<div class="card shadow-sm rounded-4 mb-4" id="uapiCatalogCard">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 rounded-top-4">
+        <span>
+            <i class="fa-solid fa-bars-staggered me-2 text-primary"></i><b>uapis.cn API 目录</b>
+            <span class="badge bg-primary-subtle text-primary border ms-1">共 {{ uapi_summary.total }} 个</span>
+            <span class="badge bg-success-subtle text-success border ms-1">{{ uapi_summary.free }} 个永久免费</span>
+            <span class="badge bg-info-subtle text-info border ms-1">{{ uapi_summary.testable }} 个可一键测试</span>
+        </span>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="toggleAllCatalog(true)"><i class="fa-solid fa-angles-down me-1"></i>展开全部</button>
+            <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="toggleAllCatalog(false)"><i class="fa-solid fa-angles-up me-1"></i>折叠全部</button>
+            <button class="btn btn-primary btn-sm rounded-pill" onclick="openPlayground('')"><i class="fa-solid fa-flask me-1"></i>API 试验台</button>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-light border small mb-3 rounded-3">
+            <i class="fa-solid fa-circle-info me-1 text-primary"></i>
+            全平台 {{ uapi_summary.total }} 个 API 已收录（{{ uapi_summary.categories }} 大分类）：点行内「<b>测试</b>」按预置参数真实调用（需消耗对应积分，<b class="text-danger">高积分接口会二次确认</b>）；点「<b>试验台</b>」动态填参调用并查看原始响应。文件上传型与流式接口仅收录目录，暂不支持在线调用。
+        </div>
+        <div class="accordion" id="uapiCatalogAcc">
+            {% for cat in uapi_catalog %}
+            <div class="accordion-item">
+                <h2 class="accordion-header">
+                    <button class="accordion-button {{ 'collapsed' if not loop.first }}" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#ucat_{{ cat.key }}">
+                        <i class="fa-solid {{ cat.icon }} me-2 text-primary"></i><b>{{ cat.name }}</b>
+                        <span class="badge bg-secondary-subtle text-secondary border ms-2">{{ cat.apis|length }} 个</span>
+                        {% if cat.free_count %}<span class="badge bg-success-subtle text-success border ms-1">{{ cat.free_count }} 免费</span>{% endif %}
+                    </button>
+                </h2>
+                <div id="ucat_{{ cat.key }}" class="accordion-collapse collapse {{ 'show' if loop.first }}">
+                    <div class="accordion-body py-2 px-2">
+                        {% for api in cat.apis %}
+                        <div class="d-flex align-items-center flex-wrap gap-2 border-bottom py-2 uapi-item" data-api-id="{{ api.id }}">
+                            <span class="badge {{ 'bg-dark' if api.method == 'POST' else 'bg-primary' }} text-white method-badge">{{ api.method }}</span>
+                            <span class="fw-semibold text-nowrap" style="min-width:150px">{{ api.name }}</span>
+                            <code class="small text-muted text-truncate" style="max-width:280px" title="{{ api.path }}">{{ api.path }}</code>
+                            {% if api.credits == 0 %}
+                            <span class="badge bg-success-subtle text-success border" title="永久免费，不消耗积分">免费</span>
+                            {% elif api.credits %}
+                            <span class="badge bg-warning-subtle text-warning-emphasis border" title="每次调用消耗的积分">{{ api.credits }} 积分</span>
+                            {% else %}
+                            <span class="badge bg-secondary-subtle text-secondary border" title="官方未公示价格">未公示</span>
+                            {% endif %}
+                            {% if api.file_type %}<span class="badge bg-secondary-subtle text-secondary border" title="文件上传型接口，暂不支持在线调用">文件型</span>{% endif %}
+                            {% if api.stream %}<span class="badge bg-secondary-subtle text-secondary border" title="流式响应，暂不支持在线调用">流式</span>{% endif %}
+                            {% if api.sensitive %}<span class="badge bg-danger-subtle text-danger border" title="安全敏感接口，谨慎调用">敏感</span>{% endif %}
+                            <span class="ms-auto d-flex gap-1">
+                                <button class="btn btn-outline-success btn-sm rounded-pill px-2" type="button"
+                                        title="按预置参数真实调用测试" onclick="testUapiApi('{{ api.id }}', this)">
+                                    <i class="fa-solid fa-vial"></i> 测试</button>
+                                <button class="btn btn-outline-primary btn-sm rounded-pill px-2" type="button"
+                                        title="试验台动态填参调用" onclick="openPlayground('{{ api.id }}')">
+                                    <i class="fa-solid fa-flask"></i> 试验台</button>
+                                <a class="btn btn-outline-secondary btn-sm rounded-pill px-2" href="{{ api.doc }}" target="_blank" rel="noopener"
+                                   title="查看官方文档"><i class="fa-solid fa-book"></i></a>
+                            </span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+
+<!-- V10.11.47 高积分接口测试二次确认（模态） -->
+<div class="modal fade" id="uapiConfirmModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fa-solid fa-triangle-exclamation me-2 text-warning"></i>高积分接口调用确认</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body" id="uapiConfirmBody">确定调用该接口吗？</div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-warning rounded-pill px-3" id="uapiConfirmBtn">确定调用</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- V10.11.47 API 试验台（动态参数表单 + 原始响应展示） -->
+<div class="modal fade" id="uapiPlaygroundModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fa-solid fa-flask me-2 text-primary"></i>API 试验台</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2 mb-3">
+                    <div class="col-md-5">
+                        <label class="form-label small text-muted mb-1">选择 API（{{ uapi_summary.total }} 个全目录）</label>
+                        <select class="form-select form-select-sm" id="pgApiSelect" onchange="onPlaygroundApiChange()"></select>
+                    </div>
+                    <div class="col-md-7 d-flex align-items-end">
+                        <div class="small text-muted" id="pgApiDesc"></div>
+                    </div>
+                </div>
+                <div id="pgParamsBox" class="row g-2 mb-3"></div>
+                <button class="btn btn-primary rounded-pill px-4 mb-3" type="button" onclick="runPlayground()">
+                    <i class="fa-solid fa-play me-1"></i>发起调用
+                </button>
+                <div id="pgResultBox" class="small"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     // ===== 前端状态与工具 =====
     const GROUP_DEFAULTS = {{ cfg.groups|tojson }};
     let AI_SEARCH_ENABLED = {{ 'true' if cfg.ai_search_enabled else 'false' }};
+    // V10.11.47：支持平台端点的组（天气/节假日双协议混排）与平台注册表数据
+    const PLATFORM_GROUPS = {{ PLATFORM_GROUPS|tojson }};
+    const PLATFORMS_DATA = {{ platforms|tojson }};
+    const clearKeyFlags = {};   // pid → true：用户已点击「清除 Key」，下次保存提交空串
 
     function getCsrfToken() {
         const m = document.querySelector('meta[name="csrf-token"]');
@@ -231,7 +424,7 @@
         }
     }
 
-    // 收集一组表单值
+    // 收集一组表单值（V10.11.47：urls 项携带 platform 字段——编辑态取下拉值，只读态取 dataset）
     function collectGroup(gname) {
         const card = document.querySelector(`.card[data-group="${gname}"]`);
         if (!card) return null;
@@ -239,7 +432,9 @@
         card.querySelectorAll('.endpoint-row').forEach(row => {
             const url = row.querySelector('.endpoint-url').value.trim();
             const enabled = row.querySelector('.endpoint-enabled').checked;
-            if (url) urls.push({ url, enabled });
+            const sel = row.querySelector('.endpoint-platform');
+            const platform = sel ? sel.value : (row.dataset.platform || '');
+            if (url) urls.push({ url, enabled, platform });
         });
         const timeout = parseInt(card.querySelector('.timeout-input').value) || 8;
         const retries = parseInt(card.querySelector('.retries-input').value) || 0;
@@ -275,7 +470,7 @@
         }).join('');
     }
 
-    // 单行测试（用当前表单值）
+    // 单行测试（用当前表单值；V10.11.47 平台端点按平台协议测试）
     function testEndpointRow(btn) {
         const card = btn.closest('.card');
         const gname = card.dataset.group;
@@ -285,7 +480,9 @@
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
         const timeout = parseInt(card.querySelector('.timeout-input')?.value) || 8;
         const retries = parseInt(card.querySelector('.retries-input').value) || 0;
-        const urls = [{ url, enabled: true }];
+        const sel = row.querySelector('.endpoint-platform');
+        const platform = sel ? sel.value : (row.dataset.platform || '');
+        const urls = [{ url, enabled: true, platform }];
         postJSON('/admin/service-config/test', { group: gname, urls, timeout, retries })
             .then(data => {
                 if (data && data.results && data.results.length > 0) {
@@ -334,12 +531,20 @@
     // 点「编辑」进入可编辑态（编辑/删除隐藏，保存/取消显示）；保存成功后经 renderSavedRows
     // 重渲染回只读态；启用开关为高频快捷操作，不受编辑按钮限制（任何时候可直接切换）
     // V10.11.24：首列新增选择框（单选/多选参与批量）；启用开关升级为滑动开关图标（form-switch）
-    function makeEndpointRow(url, enabled, placeholder, isNew) {
+    // V10.11.47：新增 platform 参数——支持平台端点的组（天气/节假日）渲染 UApiPro 徽章（只读态）
+    // 与协议下拉（编辑态），其余组不渲染平台控件（后端同样白名单拦截）
+    function makeEndpointRow(url, enabled, placeholder, isNew, platform, gname) {
+        platform = platform || '';
+        const supportPlatform = PLATFORM_GROUPS.indexOf(gname) >= 0;
         const row = document.createElement('div');
         row.className = 'input-group input-group-sm mb-2 endpoint-row' + (isNew ? ' is-new-row' : '');
+        row.dataset.platform = platform;
+        const platformHtml = supportPlatform ? `
+            <span class="input-group-text platform-badge ${platform ? '' : 'd-none'}" title="UApiPro 平台端点（调用时自动附加平台级 Bearer 认证，按平台协议解析）"><i class="fa-solid fa-cloud me-1 text-primary"></i><span class="small">UApiPro</span></span>
+            <span class="input-group-text p-0 platform-edit d-none" title="端点协议类型"><select class="form-select form-select-sm border-0 endpoint-platform" style="min-width:118px" aria-label="端点协议"><option value="" ${platform ? '' : 'selected'}>直连·无认证</option><option value="uapis" ${platform === 'uapis' ? 'selected' : ''}>UApiPro 平台</option></select></span>` : '';
         row.innerHTML = `
             <span class="input-group-text" title="勾选参与批量操作（可单选/多选）"><input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)"></span>
-            <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}" readonly aria-label="端点地址" title="默认只读锁定，点击「编辑」解锁">
+            <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}" readonly aria-label="端点地址" title="默认只读锁定，点击「编辑」解锁">${platformHtml}
             <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；V10.11.25 切换后即时保存生效）"><div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input endpoint-enabled" role="switch" ${enabled !== false ? 'checked' : ''}></div></span>
             <button class="btn btn-outline-success btn-icon" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial"></i></button>
             <button class="btn btn-outline-secondary btn-icon btn-up" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
@@ -495,6 +700,7 @@
     });
 
     // 进入/退出编辑态：编辑 = 地址输入框解锁 + 编辑/删除隐藏 + 保存/取消显示
+    // V10.11.47：平台控件同步切换——编辑态显示协议下拉，退出后按原值恢复 UApiPro 徽章
     function setRowEditMode(row, editing) {
         const urlInput = row.querySelector('.endpoint-url');
         if (editing) urlInput.removeAttribute('readonly');
@@ -505,15 +711,32 @@
             const b = row.querySelector(sel);
             if (b) b.classList.toggle('d-none', btnMap[sel]);
         });
+        const badge = row.querySelector('.platform-badge');
+        const editWrap = row.querySelector('.platform-edit');
+        if (badge && editWrap) {
+            if (editing) {
+                badge.classList.add('d-none');
+                editWrap.classList.remove('d-none');
+            } else {
+                // 退出编辑态：下拉还原为原值，徽章按原值显隐
+                const pv = row.dataset.origPlatform || row.dataset.platform || '';
+                const sel = row.querySelector('.endpoint-platform');
+                if (sel) sel.value = pv;
+                badge.classList.toggle('d-none', !pv);
+                editWrap.classList.add('d-none');
+            }
+        }
     }
 
     // 编辑：记录进入编辑时的原地址（取消时还原）；V10.11.25 不再记录开关状态——
     // 开关即时保存生效后，取消编辑只回滚地址，不得撤销已入库的启停状态
+    // V10.11.47：同步记录原平台标识（取消时还原；开关即时保存不受影响）
     function editEndpointRow(btn) {
         const row = btn.closest('.endpoint-row');
         if (!row) return;
         if (row.dataset.origUrl === undefined) {
             row.dataset.origUrl = row.querySelector('.endpoint-url').value;
+            row.dataset.origPlatform = row.dataset.platform || '';
         }
         setRowEditMode(row, true);
         row.querySelector('.endpoint-url').focus();
@@ -537,7 +760,7 @@
         const card = document.querySelector(`.card[data-group="${gname}"]`);
         const list = card.querySelector('.endpoint-list');
         const def = (GROUP_DEFAULTS[gname] && GROUP_DEFAULTS[gname].defaults && GROUP_DEFAULTS[gname].defaults[0]) ? GROUP_DEFAULTS[gname].defaults[0].url : '';
-        const row = makeEndpointRow('', true, def, true);
+        const row = makeEndpointRow('', true, def, true, '', gname);
         list.appendChild(row);
         refreshMoveButtons(gname);
         updateGroupBatchState(gname);
@@ -553,7 +776,7 @@
         const list = card.querySelector('.endpoint-list');
         list.innerHTML = '';
         (saved.urls || []).forEach(ep => {
-            list.appendChild(makeEndpointRow(ep.url, ep.enabled, def, false));
+            list.appendChild(makeEndpointRow(ep.url, ep.enabled, def, false, ep.platform || '', gname));
         });
         card.querySelector('.timeout-input').value = saved.timeout != null ? saved.timeout : 8;
         card.querySelector('.retries-input').value = saved.retries != null ? saved.retries : 0;
@@ -587,8 +810,9 @@
         }
         row.querySelector('.endpoint-url').value = row.dataset.origUrl || '';
         // V10.11.25: 仅还原地址，不回滚开关（开关已即时入库，取消编辑不得撤销启停状态）
+        // V10.11.47: 平台标识由 setRowEditMode(false) 按原值还原（含协议下拉与徽章）
         delete row.dataset.origUrl;
-        delete row.dataset.origEnabled;
+        delete row.dataset.origPlatform;
         setRowEditMode(row, false);
         showToast('已取消编辑并还原该行地址');
     }
@@ -625,8 +849,12 @@
                 const url = row.classList.contains('is-editing')
                     ? (row.dataset.origUrl || '').trim()
                     : row.querySelector('.endpoint-url').value.trim();
+                // V10.11.47：编辑中的行平台标识也取原值（与地址同规则，不保存半成品）
+                const platform = row.classList.contains('is-editing')
+                    ? (row.dataset.origPlatform || '')
+                    : (row.querySelector('.endpoint-platform') ? row.querySelector('.endpoint-platform').value : (row.dataset.platform || ''));
                 const enabled = row.querySelector('.endpoint-enabled').checked;
-                if (url) urls.push({ url, enabled });
+                if (url) urls.push({ url, enabled, platform });
             });
             const snap = GROUP_DEFAULTS[gname] || {};
             g = { urls, timeout: snap.timeout != null ? snap.timeout : 8, retries: snap.retries != null ? snap.retries : 0 };
@@ -812,7 +1040,7 @@
             const list = card.querySelector('.endpoint-list');
             list.innerHTML = '';
             (def.defaults || [{ url: '' }]).forEach((ep, i) => {
-                list.appendChild(makeEndpointRow(ep.url, ep.enabled));
+                list.appendChild(makeEndpointRow(ep.url, ep.enabled, '', false, '', gname));
             });
             card.querySelector('.timeout-input').value = def.timeout != null ? def.timeout : 8;
             card.querySelector('.retries-input').value = def.retries != null ? def.retries : 0;
@@ -846,10 +1074,11 @@
     }
     // 全部组表单值与已保存快照一致？
     function isAllClean() {
-        // 规范化比较：① 统一对象键序（url/enabled）；② 剥离节假日 {年份} 占位符（展示态与库态差异）
+        // 规范化比较：① 统一对象键序（url/enabled/platform）；② 剥离节假日 {年份} 占位符（展示态与库态差异）
         const normU = (list) => (list || []).map(u => ({
             url: String((u && u.url) || '').replace(/\/?\{年份\}\/?$/, ''),
-            enabled: !!(u && u.enabled)
+            enabled: !!(u && u.enabled),
+            platform: String((u && u.platform) || '')
         }));
         for (const gname of Object.keys(GROUP_DEFAULTS)) {
             const g = collectGroup(gname);
@@ -874,6 +1103,277 @@
         markDirty();
         if (isAllClean()) clearDirty();
     });
+
+    // ===================== V10.11.47 API 平台注册表（平台级 Key 集中管理） =====================
+
+    function getPlatformRow(pid) {
+        return document.querySelector(`.platform-row[data-pid="${pid}"]`);
+    }
+
+    // 保存平台配置：base_url + Key（留空保持不变 / 点清除后保存=清空）+ 启用开关
+    // mode='switch' 为启用开关即时保存（toast 文案区分）
+    function savePlatform(pid, mode) {
+        const row = getPlatformRow(pid);
+        if (!row) return;
+        const baseUrl = row.querySelector('.platform-baseurl').value.trim();
+        const keyInput = row.querySelector('.platform-apikey');
+        const apiKey = keyInput.value.trim();
+        const enabledCb = row.querySelector('.platform-enabled');
+        const body = { id: pid, base_url: baseUrl, enabled: enabledCb ? enabledCb.checked : null };
+        if (apiKey) body.api_key = apiKey;
+        else if (clearKeyFlags[pid]) body.api_key = '';   // 用户点了「清除 Key」：提交空串切回访客模式
+        postJSON('/admin/service-config/platform/save', body)
+            .then(data => {
+                if (data && data.success) {
+                    showToast(mode === 'switch'
+                        ? `平台「${pid}」启停状态已保存生效`
+                        : `平台「${pid}」配置已保存（${data.platform && data.platform.key_set ? 'Key 已配置' : '访客模式'}）`);
+                    clearKeyFlags[pid] = false;
+                    keyInput.value = '';
+                    refreshPlatformBadges(pid, data.platform);
+                    if (mode !== 'switch') markCleanAfterPlatformSave();
+                } else {
+                    showToast(data.message || '平台保存失败', false);
+                    if (mode === 'switch') rollbackPlatformSwitch(pid);
+                }
+            })
+            .catch(() => {
+                showToast('网络错误，平台保存失败', false);
+                if (mode === 'switch') rollbackPlatformSwitch(pid);
+            });
+    }
+
+    // 启用开关保存失败回滚
+    function rollbackPlatformSwitch(pid) {
+        const row = getPlatformRow(pid);
+        if (!row) return;
+        const cb = row.querySelector('.platform-enabled');
+        const badge = document.getElementById('platEnabledBadge_' + pid);
+        // 回滚到徽章记录的旧状态
+        const wasEnabled = badge && badge.textContent.indexOf('已停用') < 0;
+        if (cb) cb.checked = wasEnabled;
+    }
+
+    // 刷新平台 Key 徽章与输入框占位符（保存成功后按服务端脱敏回显刷新）
+    function refreshPlatformBadges(pid, plat) {
+        if (!plat) return;
+        const kb = document.getElementById('platKeyBadge_' + pid);
+        if (kb) {
+            kb.textContent = plat.key_set ? ('Key ' + plat.key_masked) : '访客模式';
+            kb.className = 'badge ' + (plat.key_set ? 'bg-primary-subtle text-primary border' : 'bg-warning-subtle text-warning border');
+            kb.title = plat.key_set ? 'Key 已配置（脱敏回显，仅末 4 位）' : '未配置 Key（访客模式）';
+        }
+        const eb = document.getElementById('platEnabledBadge_' + pid);
+        if (eb) {
+            eb.textContent = plat.enabled ? '已启用' : '已停用';
+            eb.className = 'badge ' + (plat.enabled ? 'bg-success-subtle text-success border' : 'bg-secondary-subtle text-secondary border');
+        }
+        const row = getPlatformRow(pid);
+        if (row) {
+            const keyInput = row.querySelector('.platform-apikey');
+            if (keyInput) keyInput.placeholder = plat.key_set
+                ? ('已配置：' + plat.key_masked + '（留空保持不变）')
+                : '未配置（访客模式可用，可选填 Key）';
+        }
+    }
+
+    // 点击「清除 Key」：标记待清空（下次点「保存平台」提交空串生效）
+    function clearPlatformKey(pid) {
+        clearKeyFlags[pid] = true;
+        const row = getPlatformRow(pid);
+        if (!row) return;
+        const keyInput = row.querySelector('.platform-apikey');
+        keyInput.value = '';
+        keyInput.placeholder = '将清除已保存的 Key（点击「保存平台」后切回访客模式）';
+        showToast('已标记清除 Key：点击「保存平台」后生效（切回访客模式）', true, true);
+    }
+
+    // 平台连通性测试：调用永久免费接口（一言）验证地址可达与认证模式
+    function testPlatform() {
+        const box = document.getElementById('platformTestResult');
+        box.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在调用平台免费接口（一言 /saying）测试连通性...</span>';
+        postJSON('/admin/service-config/platform/test', {})
+            .then(data => {
+                box.innerHTML = (data && data.success)
+                    ? `<span class="text-success"><i class="fa-solid fa-circle-check me-1"></i>${esc(data.message)}${data.sample ? ' —— "' + esc(data.sample) + '"' : ''}</span>`
+                    : `<span class="text-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>${esc((data && data.message) || '测试失败')}</span>`;
+            })
+            .catch(() => { box.innerHTML = '<span class="text-danger">测试请求失败（网络错误）</span>'; });
+    }
+
+    // 平台保存成功后清除未保存标记（平台区独立保存，不计入组配置 dirty 状态）
+    function markCleanAfterPlatformSave() { /* 平台区即时保存，无需联动组配置 dirty 状态 */ }
+
+    // ===================== V10.11.47 uapis.cn API 目录 =====================
+
+    const UAPI_CATALOG = {{ uapi_catalog|tojson }};
+    const UAPI_SUMMARY = {{ uapi_summary|tojson }};
+
+    function toggleAllCatalog(expand) {
+        document.querySelectorAll('#uapiCatalogAcc .accordion-collapse').forEach(el => {
+            if (window.bootstrap && bootstrap.Collapse) {
+                bootstrap.Collapse.getOrCreateInstance(el, { toggle: false })[expand ? 'show' : 'hide']();
+            }
+        });
+    }
+
+    function findApiById(id) {
+        for (const cat of UAPI_CATALOG) {
+            for (const a of cat.apis) {
+                if (a.id === id) return a;
+            }
+        }
+        return null;
+    }
+
+    // 目录一键测试：高积分（>4）或敏感接口先二次确认
+    let uapiTestPending = null;
+    function testUapiApi(apiId, btn) {
+        const api = findApiById(apiId);
+        if (!api) return;
+        if (api.file_type || api.stream) { showToast('该接口为文件型/流式，暂不支持在线测试', false); return; }
+        if (api.test_params === null) { showToast('该接口无预置测试参数，请用「试验台」手动填参调用', true, true); return; }
+        const doTest = function () {
+            const oldHtml = btn.innerHTML;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 测试中';
+            postJSON('/admin/service-config/uapi/test', { api_id: apiId })
+                .then(data => {
+                    btn.disabled = false; btn.innerHTML = oldHtml;
+                    let msg = (data && data.message) || ((data && data.success) ? '成功' : '失败');
+                    if (data && data.success && data.data_keys && data.data_keys.length) {
+                        msg += '，响应字段：' + data.data_keys.join('、');
+                    }
+                    showToast(`【${api.name}】${msg}`, !!(data && data.success));
+                })
+                .catch(() => { btn.disabled = false; btn.innerHTML = oldHtml; showToast('测试请求失败（网络错误）', false); });
+        };
+        if ((api.credits && api.credits > 4) || api.sensitive) {
+            const creditTxt = (api.credits != null) ? `${api.credits} 积分` : '? 积分';
+            document.getElementById('uapiConfirmBody').innerHTML =
+                `确定真实调用 <b>【${esc(api.name)}】</b> 吗？<br>` +
+                `<span class="text-muted small">该接口每次调用消耗 <b class="text-warning">${creditTxt}</b>` +
+                (api.sensitive ? '，且属<b class="text-danger">安全敏感</b>接口（请确认用途正当）' : '') +
+                `；访客模式月免费额度有限（1500 积分/月），请谨慎操作。</span>`;
+            uapiTestPending = doTest;
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('uapiConfirmModal')).show();
+            return;
+        }
+        doTest();
+    }
+
+    document.getElementById('uapiConfirmBtn').addEventListener('click', function () {
+        const fn = uapiTestPending;
+        uapiTestPending = null;
+        const modalEl = document.getElementById('uapiConfirmModal');
+        const inst = bootstrap.Modal.getInstance(modalEl);
+        if (inst) inst.hide();
+        if (fn) fn();
+    });
+
+    // ===================== V10.11.47 API 试验台 =====================
+
+    function fillPgApiSelect(selectedId) {
+        const sel = document.getElementById('pgApiSelect');
+        sel.innerHTML = '';
+        UAPI_CATALOG.forEach(cat => {
+            const og = document.createElement('optgroup');
+            og.label = cat.name;
+            cat.apis.forEach(a => {
+                if (a.file_type || a.stream) return;   // 不支持在线调用的接口不入试验台下拉
+                const op = document.createElement('option');
+                op.value = a.id;
+                op.textContent = `${a.name}（${a.method} ${a.path}）`;
+                og.appendChild(op);
+            });
+            if (og.children.length) sel.appendChild(og);
+        });
+        if (selectedId) sel.value = selectedId;
+        onPlaygroundApiChange();
+    }
+
+    function openPlayground(apiId) {
+        fillPgApiSelect(apiId || '');
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('uapiPlaygroundModal')).show();
+    }
+
+    // 切换 API：刷新说明与动态参数表单（预置 test_params 预填）
+    function onPlaygroundApiChange() {
+        const sel = document.getElementById('pgApiSelect');
+        const api = findApiById(sel.value);
+        const desc = document.getElementById('pgApiDesc');
+        const box = document.getElementById('pgParamsBox');
+        document.getElementById('pgResultBox').innerHTML = '';
+        if (!api) { desc.innerHTML = ''; box.innerHTML = ''; return; }
+        const creditTxt = api.credits === 0 ? '永久免费' : ((api.credits != null) ? `${api.credits} 积分/次` : '价格未公示');
+        desc.innerHTML = `<b>${esc(api.name)}</b> · ${api.method} <code>${esc(api.path)}</code> · ` +
+            `<span class="badge bg-warning-subtle text-warning-emphasis border">${creditTxt}</span>` +
+            (api.desc ? `<br><span class="text-muted">${esc(api.desc)}</span>` : '');
+        box.innerHTML = '';
+        (api.params || []).forEach(p => {
+            const col = document.createElement('div');
+            col.className = 'col-6 col-md-3';
+            const prefill = (api.test_params || {})[p.name];
+            let input;
+            if (p.type === 'select' && p.options && p.options.length) {
+                input = `<select class="form-select form-select-sm pg-param" data-pname="${esc(p.name)}">` +
+                    `<option value="">（${p.required ? '必填' : '可选'}）</option>` +
+                    p.options.map(o => `<option value="${esc(String(o))}"${String(prefill) === String(o) ? ' selected' : ''}>${esc(String(o))}</option>`).join('') +
+                    '</select>';
+            } else if (p.type === 'bool') {
+                input = `<select class="form-select form-select-sm pg-param" data-pname="${esc(p.name)}">` +
+                    `<option value="">不传</option><option value="true"${prefill === 'true' ? ' selected' : ''}>true</option>` +
+                    `<option value="false"${prefill === 'false' ? ' selected' : ''}>false</option></select>`;
+            } else {
+                input = `<input type="${p.type === 'number' ? 'number' : 'text'}" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}"` +
+                    ` value="${esc(prefill != null ? String(prefill) : '')}" placeholder="${esc(p.label)}${p.required ? '（必填）' : ''}">`;
+            }
+            col.innerHTML = `<label class="form-label small text-muted mb-1 text-truncate" title="${esc(p.label)}">${esc(p.name)}${p.required ? ' <span class="text-danger">*</span>' : ''}</label>` + input;
+            box.appendChild(col);
+        });
+        if (!(api.params || []).length) {
+            box.innerHTML = '<div class="col-12 small text-muted"><i class="fa-solid fa-circle-info me-1"></i>该接口无参数，直接点击「发起调用」即可。</div>';
+        }
+    }
+
+    function runPlayground() {
+        const sel = document.getElementById('pgApiSelect');
+        const api = findApiById(sel.value);
+        if (!api) { showToast('请先选择 API', false); return; }
+        const params = {};
+        document.querySelectorAll('#pgParamsBox .pg-param').forEach(el => {
+            const v = (el.value || '').trim();
+            if (v !== '') params[el.dataset.pname] = v;
+        });
+        for (const p of (api.params || [])) {
+            if (p.required && !params[p.name]) { showToast(`参数 ${p.name} 为必填项`, false); return; }
+        }
+        const resultBox = document.getElementById('pgResultBox');
+        resultBox.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在调用，请稍候...</span>';
+        postJSON('/admin/service-config/uapi/playground', { api_id: api.id, params })
+            .then(data => { renderPlaygroundResult(data); })
+            .catch(() => { resultBox.innerHTML = '<span class="text-danger">调用失败（网络错误）</span>'; });
+    }
+
+    function renderPlaygroundResult(data) {
+        const box = document.getElementById('pgResultBox');
+        if (!data || !data.result) { box.innerHTML = '<span class="text-danger">调用失败</span>'; return; }
+        const r = data.result;
+        const okStatus = 200 <= (r.status || 0) && (r.status || 0) < 300;
+        const head = `<div class="${okStatus ? 'text-success' : 'text-danger'} fw-semibold mb-1">` +
+            `<i class="fa-solid fa-${okStatus ? 'circle-check' : 'triangle-exclamation'} me-1"></i>` +
+            `HTTP ${r.status}${r.content_type ? ' · ' + esc(r.content_type) : ''}` +
+            (!okStatus ? ' — ' + esc(r.message || '调用失败') : '') + '</div>';
+        let body = '';
+        if (r.is_image) {
+            body = `<img src="data:${esc(r.content_type)};base64,${r.image_b64}" class="img-fluid rounded-3 border" style="max-height:340px" alt="响应图片">`;
+        } else if (r.is_json) {
+            body = `<pre class="bg-light border rounded-3 p-2 mb-0" style="max-height:340px;overflow:auto;font-size:.72rem">${esc(JSON.stringify(r.json, null, 2))}</pre>`;
+        } else {
+            body = `<pre class="bg-light border rounded-3 p-2 mb-0" style="max-height:200px;overflow:auto;font-size:.72rem">${esc(r.body_text || '（空响应体）')}</pre>`;
+        }
+        box.innerHTML = head + body;
+    }
 
     // V10.11.26 页面加载：初始化各组状态徽标、停用行样式与批量按钮态
     (function initGroupViews() {

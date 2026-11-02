@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-天气查询服务模块（数据源：Open-Meteo）
+天气查询服务模块（双数据源：Open-Meteo + UApiPro uapis.cn）
 负责：
   1. 城市名 → 经纬度/时区（Geocoding API）
   2. 实时天气 + 每日预报（Forecast API，V10.11.7 起默认 15 天）
@@ -8,6 +8,9 @@
   4. 统一错误处理（网络失败 / API 返回 error / 城市未找到）
   5. V10.11.7 级联选择支持：省/市/区县 → 候选城市智能匹配
   6. V10.11.8 新增：空气质量（Air Quality API，失败降级不影响主查询）
+  7. V10.11.47 新增：UApiPro 平台天气适配器（「天气预报」组可混排两种协议端点，
+     按端点顺序分发：UApiPro 端点直接城市名查询（免地理编码，extended 附带 PM2.5/PM10/AQI），
+     响应转换为 Open-Meteo 原始 JSON 结构，缓存/降级/前端渲染链路全部复用零改动）
 
 API 参考：
   - 地理编码: GET https://geocoding-api.open-meteo.com/v1/search?name={城市}&count=10&language=zh&format=json
@@ -15,10 +18,13 @@ API 参考：
               ?latitude=&longitude=&current=...&daily=...&timezone=auto&forecast_days=15
   - 空气质量: GET https://air-quality-api.open-meteo.com/v1/air-quality
               ?latitude=&longitude=&current=pm10,pm2_5,us_aqi&timezone=auto
+  - UApiPro 天气: GET https://uapis.cn/api/v1/misc/weather?city={城市}&extended=true&forecast=true
   Open-Meteo 错误返回格式: {"error": true, "reason": "..."}
+  UApiPro 错误返回格式: {"code": "NOT_FOUND", "message": "..."}
 """
 import os
 import json
+import re
 import time
 import datetime
 import threading
@@ -694,11 +700,18 @@ def _http_get_endpoint(group, params):
     返回第一个 HTTP 200 的 Response；全部失败返回 None（调用方走现有降级路径）。
     超时：连接 5s + 读取 = 该组配置的 timeout（默认 8s）。
     V10.11.26：组内无任何启用端点时抛 ServiceDisabled（管理员明确停用），
-    与「端点启用但网络不可达」（返回 None）严格区分——前者按业务语义报错，后者走缓存/离线合成兜底。
+    与「端点启用但网络不可达」（返回 None）严格区分——前者按业务语义报错，后者走缓存/离线合成兑底。
+    V10.11.47：平台端点（platform='uapis'）不参与本遍历（它们按 UApiPro 协议由
+    _fetch_uapi_forecast 单独消费）；排除后组内仅剩平台端点时返回 None
+    （不抛 ServiceDisabled——平台通路可用，由调用方分发）。
     """
-    urls = service_config.get_enabled_urls(group)
-    if not urls:
+    endpoints = service_config.get_enabled_endpoints(group)
+    if not endpoints:
         raise ServiceDisabled(group)
+    urls = service_config.get_enabled_urls(group)  # 无认证直连端点（已排除平台端点）
+    if not urls:
+        # 组内仅有平台端点：不属于「停用」，返回 None 由调用方走平台适配器/缓存兑底
+        return None
     timeout = (5, service_config.get_timeout(group))
     retries = service_config.get_retries(group)
     for _round in range(retries + 1):
@@ -710,6 +723,181 @@ def _http_get_endpoint(group, params):
             except Exception:
                 continue
     return None
+
+
+# ===================== V10.11.47 UApiPro（uapis.cn）天气适配器 =====================
+# 「天气预报」组可混排两种协议端点：无认证直连端点走 Open-Meteo 协议（原有链路），
+# platform='uapis' 端点走本适配器——UApiPro 查询天气一步到位（城市名直查免地理编码），
+# 响应统一转换为 Open-Meteo 原始 JSON 结构，_build_result/缓存/降级/前端渲染链路全部复用。
+
+# 和风天气图标码（weather_icon，如 "100"）→ WMO weather_code
+_QWEATHER_ICON_TO_WMO = {
+    '100': 0, '101': 2, '102': 1, '103': 3, '104': 3,
+    '150': 0, '151': 0, '152': 1, '153': 2,         # 夜间系列
+    '300': 95, '301': 80, '302': 95, '303': 95, '304': 95,  # 阵雨/雷阵雨
+    '305': 61, '306': 63, '307': 65, '308': 65, '309': 61,  # 雨
+    '310': 65, '311': 65, '312': 65, '313': 65, '314': 65,
+    '315': 65, '316': 65, '317': 65, '318': 65, '350': 95, '351': 95, '399': 80,
+    '400': 71, '401': 73, '402': 75, '403': 75, '404': 85, '405': 85,  # 雪
+    '406': 85, '407': 85, '408': 85, '409': 85, '410': 85, '456': 85, '457': 85, '499': 71,
+    '500': 45, '501': 45, '502': 45, '503': 45, '507': 45, '508': 45,  # 雾/霾
+    '509': 45, '510': 45, '511': 45, '512': 45, '513': 45, '514': 30, '515': 30,  # 沙尘
+}
+
+# UApiPro 预报项的 weather_day 为自由文本（非图标码），按常见中文天气词映射 WMO
+_QWEATHER_TEXT_TO_WMO = {
+    '晴': 0, '多云': 2, '少云': 1, '阴': 3, '雾': 45, '霾': 45,
+    '小雨': 61, '中雨': 63, '大雨': 65, '暴雨': 65, '大暴雨': 65, '特大暴雨': 65,
+    '阵雨': 80, '雷阵雨': 95, '冻雨': 66, '雨夹雪': 85,
+    '小雪': 71, '中雪': 73, '大雪': 75, '暴雪': 75, '阵雪': 85,
+    '沙尘': 30, '浮尘': 30, '扬沙': 30, '强沙尘暴': 30,
+}
+
+
+def _uapi_to_wmo(icon, text=''):
+    """UApiPro 天气标识 → WMO weather_code：优先图标码映射，缺失时按文本词映射，兜底阴天(3)"""
+    code = _QWEATHER_ICON_TO_WMO.get(str(icon or '').strip())
+    if code is not None:
+        return code
+    t = str(text or '').strip()
+    if t in _QWEATHER_TEXT_TO_WMO:
+        return _QWEATHER_TEXT_TO_WMO[t]
+    for kw, wmo in _QWEATHER_TEXT_TO_WMO.items():
+        if len(kw) >= 2 and kw in t:
+            return wmo
+    return 3
+
+
+def _extract_city_from_label(label):
+    """从级联标签提取末级地名作 UApiPro 城市名：「四川省成都市双流区」→「双流区」；
+    「成都市」→「成都市」；「北京」→「北京」。UApiPro 支持省/市/区县级城市名直查"""
+    s = re.sub(r'\s+', '', str(label or '').strip())
+    if not s:
+        return ''
+    m = re.search(r'(?:省|自治区)', s)
+    rest = s[m.end():] if m else s
+    m2 = re.search(r'市', rest)
+    if m2:
+        tail = rest[m2.end():]
+        if tail:
+            return tail
+    return rest
+
+
+def _uapi_payload_to_open_meteo(payload, days):
+    """UApiPro 查询天气响应 → Open-Meteo forecast 原始 JSON 结构（前端/缓存/降级链路零改动）
+    请求时已带 extended=true + forecast=true：实况扩展字段与 7 天预报一并转换"""
+    cur = {
+        'temperature_2m': payload.get('temperature'),
+        'relative_humidity_2m': payload.get('humidity'),
+        'apparent_temperature': payload.get('feels_like'),
+        'weather_code': _uapi_to_wmo(payload.get('weather_icon'), payload.get('weather')),
+        'wind_speed_10m': None,
+        'surface_pressure': payload.get('pressure'),
+        'cloud_cover': payload.get('cloud'),
+        'wind_direction_10m': None,
+        'wind_gusts_10m': None,
+        'time': payload.get('report_time'),
+    }
+    daily = {'time': [], 'weather_code': [], 'temperature_2m_max': [], 'temperature_2m_min': [],
+             'precipitation_probability_max': [], 'sunrise': [], 'sunset': [],
+             'uv_index_max': [], 'precipitation_sum': []}
+    for f in (payload.get('forecast') or [])[:max(1, int(days))]:
+        daily['time'].append(f.get('date'))
+        daily['weather_code'].append(_uapi_to_wmo(f.get('weather_icon'), f.get('weather_day')))
+        daily['temperature_2m_max'].append(f.get('temp_max'))
+        daily['temperature_2m_min'].append(f.get('temp_min'))
+        daily['precipitation_probability_max'].append(f.get('pop'))
+        daily['sunrise'].append(f.get('sunrise'))
+        daily['sunset'].append(f.get('sunset'))
+        daily['uv_index_max'].append(f.get('uv_index'))
+        daily['precipitation_sum'].append(f.get('precip'))
+    # 无预报模块时用当天高低温度补一天（保证前端 daily 列表非空可用）
+    if not daily['time']:
+        if payload.get('temp_max') is not None or payload.get('temp_min') is not None:
+            today = str(payload.get('report_time') or datetime.date.today().isoformat())[:10]
+            daily['time'].append(today)
+            daily['weather_code'].append(cur['weather_code'])
+            daily['temperature_2m_max'].append(payload.get('temp_max'))
+            daily['temperature_2m_min'].append(payload.get('temp_min'))
+            for k in ('precipitation_probability_max', 'sunrise', 'sunset', 'uv_index_max', 'precipitation_sum'):
+                daily[k].append(None)
+        else:
+            return None
+    return {
+        'current': cur,
+        'daily': daily,
+        'uapi_timezone': payload.get('timezone') or 'Asia/Shanghai',
+        # 城市与空气质量随结构一并缓存（_query_via_uapi 直接消费，零二次请求）
+        '_uapi_city': {
+            'province': payload.get('province') or '',
+            'city': payload.get('city') or '',
+            'district': payload.get('district') or '',
+        },
+        '_uapi_air': ({'pm25': (payload.get('air_pollutants') or {}).get('pm25'),
+                       'pm10': (payload.get('air_pollutants') or {}).get('pm10'),
+                       'us_aqi': None}
+                      if isinstance(payload.get('air_pollutants'), dict) else None),
+        '_uapi_source': True,   # 数据源标记（调试/审计用；前端不消费）
+    }
+
+
+def _fetch_uapi_forecast(city_name, days, urls):
+    """UApiPro 天气数据拉取：按端点顺序遍历（故障转移语义与 Open-Meteo 通路一致），
+    成功后写内存/磁盘缓存并返回 Open-Meteo 结构；全部失败返回 None（调用方走原降级链路）。
+    二级缓存与 fetch_forecast 同款：内存 30 分钟 + 磁盘永久留存（key 前缀 uapi: 区分）"""
+    from services import uapi_client  # 延迟导入：uapi_client 依赖 service_config，避免任何初始化顺序问题
+
+    cache_key = f"uapi:{city_name},{days}"
+    now = time.time()
+    with _weather_cache_lock:
+        hit = _mem_forecast_cache.get(cache_key)
+        if hit and now - hit[0] < FORECAST_CACHE_TTL:
+            return hit[1]
+
+    params = {'city': city_name, 'extended': 'true', 'forecast': 'true'}
+    for url in urls:
+        ok, payload, status, message = uapi_client.call_uapi(
+            'misc_weather', params=params,
+            timeout=(5, max(service_config.get_timeout('forecast'), 8)), full_url=url or None)
+        if not ok or not isinstance(payload, dict):
+            continue
+        converted = _uapi_payload_to_open_meteo(payload, days)
+        if not converted:
+            continue
+        with _weather_cache_lock:
+            _safe_put_mem_cache(_mem_forecast_cache, cache_key, (now, converted))
+        try:
+            d = _load_json_disk_cache(FORECAST_CACHE_FILE)
+            d[cache_key] = {'ts': now, 'data': converted, 'uapi': True}
+            _save_json_disk_cache(FORECAST_CACHE_FILE, d)
+        except Exception:
+            pass
+        return converted
+    return None
+
+
+def _query_via_uapi(city_name, days, urls):
+    """UApiPro 完整查询通路：拉取 + 城市信息组装 + extended 空气质量提取 + _build_result。
+    城市信息与 PM2.5/PM10 随首次响应一并转换缓存，零二次请求（不重复消耗积分）。
+    返回与 query_weather 完全同构的结果 dict；失败返回 None（调用方回落原链路）"""
+    converted = _fetch_uapi_forecast(city_name, days, urls)
+    if not converted:
+        return None
+    uapi_city = converted.get('_uapi_city') or {}
+    city = {
+        'name': uapi_city.get('city') or city_name,
+        'latitude': None,
+        'longitude': None,
+        'timezone': converted.get('uapi_timezone') or 'Asia/Shanghai',
+        'country': '中国',
+        'admin1': uapi_city.get('province') or '',
+        'admin2': uapi_city.get('district') or '',
+    }
+    air = converted.get('_uapi_air') or None
+    result = _build_result(city, converted, air_quality=air)
+    result['data_source'] = 'uapis'
+    return result
 
 
 def geocode_city(city_name, province=None, district_city=None):
@@ -1033,15 +1221,35 @@ def query_weather(city_name, province=None, district_city=None, days=DEFAULT_FOR
     """
     对外主入口 1：根据城市名查询天气（自由文本输入）
     （V10.11.7：15 天预报 + 级联匹配消歧 + 扩充指标）
+    V10.11.47 双协议分发：组内第一个启用端点为 UApiPro 平台端点时优先走平台通路
+    （城市名直查免地理编码，extended 附 PM2.5/PM10）；失败或首端点为直连端点时走
+    Open-Meteo 主路；主路离线合成兑底时若组内有平台端点再做抢救尝试。
     失败: 抛出 WeatherError（message 为中文提示，status_code 为建议 HTTP 状态码）
     """
+    # V10.11.47 协议优先级分发：UApiPro 端点排首位 → 平台通路优先
+    uapi_eps = service_config.get_enabled_uapi_endpoints('forecast')
+    first_platform = service_config.get_first_enabled_platform('forecast')
+    if uapi_eps and first_platform == 'uapis':
+        result = _query_via_uapi(city_name, days, uapi_eps)
+        if result:
+            return result
+        # UApiPro 平台通路失败 → 回落 Open-Meteo 主路（含缓存/离线合成兑底）
+
     # 1. 城市名 → 经纬度/时区（级联模式下按省/市智能匹配候选）
     city = geocode_city(city_name, province=province, district_city=district_city)
     # 2. 查询实时 + 每日预报（必须传 timezone）
     data = fetch_forecast(city['latitude'], city['longitude'], city['timezone'], days=days)
     # 3. 空气质量（失败降级 None，不阻断主查询）
     air = fetch_air_quality(city['latitude'], city['longitude'])
-    return _build_result(city, data, air_quality=air)
+    result = _build_result(city, data, air_quality=air)
+
+    # V10.11.47 平台通路抢救：Open-Meteo 不可达走了离线合成兑底，且组内配置了
+    # UApiPro 端点（排位靠后）→ 用平台真实数据替换合成数据
+    if result.get('offline_fallback') and uapi_eps:
+        rescued = _query_via_uapi(city_name, days, uapi_eps)
+        if rescued:
+            return rescued
+    return result
 
 
 def query_weather_by_coords(latitude, longitude, days=DEFAULT_FORECAST_DAYS, label=''):
@@ -1063,6 +1271,16 @@ def query_weather_by_coords(latitude, longitude, days=DEFAULT_FORECAST_DAYS, lab
     if not (3 <= lat <= 54 and 73 <= lon <= 136):
         raise WeatherError('坐标超出中国行政区划范围', 400)
 
+    # V10.11.47 协议优先级分发：UApiPro 端点排首位时，从级联标签提取末级地名走平台通路
+    uapi_eps = service_config.get_enabled_uapi_endpoints('forecast')
+    first_platform = service_config.get_first_enabled_platform('forecast')
+    uapi_city = _extract_city_from_label(label) if (uapi_eps and first_platform == 'uapis') else ''
+    if uapi_eps and first_platform == 'uapis' and uapi_city:
+        result = _query_via_uapi(uapi_city, days, uapi_eps)
+        if result:
+            return result
+        # 平台通路失败 → 回落坐标主路
+
     city = {
         'name': label or '选定区域',
         'latitude': lat,
@@ -1075,4 +1293,13 @@ def query_weather_by_coords(latitude, longitude, days=DEFAULT_FORECAST_DAYS, lab
     data = fetch_forecast(lat, lon, 'auto', days=days)
     # V10.11.8 空气质量（失败降级 None，不阻断主查询）
     air = fetch_air_quality(lat, lon)
-    return _build_result(city, data, air_quality=air)
+    result = _build_result(city, data, air_quality=air)
+
+    # V10.11.47 平台通路抢救：离线合成兑底时用平台真实数据替换（能提取出城市名才可用）
+    if result.get('offline_fallback') and uapi_eps:
+        rescue_city = uapi_city or _extract_city_from_label(label)
+        if rescue_city:
+            rescued = _query_via_uapi(rescue_city, days, uapi_eps)
+            if rescued:
+                return rescued
+    return result

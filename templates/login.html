@@ -55,11 +55,32 @@
                 <span class="text-muted">还没有账号？</span>
                 <a href="{{ url_for('register') }}" class="fw-bold text-danger text-decoration-none">立即注册</a>
             </div>
+            {# V10.11.47 每日一言装饰（UApiPro 免费接口，服务端缓存 1 小时；平台不可达时静默隐藏） #}
+            <div class="text-center text-muted small px-3 pt-2 pb-0 d-none" id="loginSaying">
+                <i class="fa-solid fa-feather-pointed me-1 opacity-75"></i><span id="loginSayingText"></span>
+            </div>
         </div>
     </div>
 </div>
 
 <script>
+// V10.11.47 每日一言装饰：加载成功才显示（d-none 移除），失败静默隐藏
+(function () {
+    fetch('/api/daily/saying', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            var text = (j && j.code === 200 && j.data && j.data.text) ? String(j.data.text || '').trim() : '';
+            if (!text) return;
+            var box = document.getElementById('loginSaying');
+            var span = document.getElementById('loginSayingText');
+            if (box && span) {
+                span.textContent = text;
+                box.classList.remove('d-none');
+            }
+        })
+        .catch(function () { /* 平台不可达：装饰位不显示 */ });
+})();
+
 function refreshCaptcha() {
     var exprSpan = document.getElementById("captchaExpr");
     if (exprSpan) {

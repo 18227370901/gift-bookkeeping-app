@@ -1,0 +1,199 @@
+{% extends 'base.html' %}
+{% block title %}实用工具 - 人情礼金记账系统{% endblock %}
+
+{% block content %}
+<style>
+    /* 快递轨迹时间线 */
+    .track-item { position: relative; padding-left: 26px; padding-bottom: 18px; border-left: 2px solid var(--bs-border-color, #dee2e6); margin-left: 8px; }
+    .track-item:last-child { border-left-color: transparent; padding-bottom: 0; }
+    .track-item::before { content: ''; position: absolute; left: -7px; top: 2px; width: 12px; height: 12px; border-radius: 50%; background: var(--bs-secondary-bg, #e9ecef); border: 2px solid var(--bs-secondary-color, #adb5bd); }
+    .track-item.first::before { background: #fd7e14; border-color: #fd7e14; box-shadow: 0 0 0 4px rgba(253, 126, 20, .18); }
+    .track-time { font-size: .78rem; color: var(--bs-secondary-color, #6c757d); font-variant-numeric: tabular-nums; }
+    .track-text { font-size: .88rem; }
+    /* 归属地结果卡 */
+    .phone-stat { border-radius: .75rem; padding: .9rem 1rem; background: var(--bs-tertiary-bg, #f8f9fa); border: 1px solid var(--bs-border-color, #dee2e6); }
+    .phone-stat .label { font-size: .75rem; color: var(--bs-secondary-color, #6c757d); }
+    .phone-stat .value { font-size: 1.05rem; font-weight: 600; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="fa-solid fa-toolbox me-2 text-primary"></i>实用工具</h4>
+</div>
+
+<div class="alert alert-light border small rounded-3 d-flex align-items-start gap-2">
+    <i class="fa-solid fa-circle-info mt-1 text-primary"></i>
+    <div>
+        礼物寄出后跟踪物流、亲友手机号归属地查询。数据源：<b>UApiPro 平台</b>（uapis.cn）。
+        <span class="text-muted">快递查询消耗平台积分较高（40 积分/次，结果缓存 10 分钟内共享）；手机归属地 2 积分/次（缓存 24 小时）。
+        平台不可达时接口将提示稍后重试，不影响系统其他功能。</span>
+    </div>
+</div>
+
+<ul class="nav nav-pills mb-3" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#tabExpress" type="button">
+            <i class="fa-solid fa-truck-fast me-1"></i>快递跟踪
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link" data-bs-toggle="pill" data-bs-target="#tabPhone" type="button">
+            <i class="fa-solid fa-phone me-1"></i>手机归属地
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+    <!-- ============ 快递跟踪 ============ -->
+    <div class="tab-pane fade show active" id="tabExpress">
+        <div class="card shadow-sm rounded-4">
+            <div class="card-body">
+                <div class="row g-2 align-items-end">
+                    <div class="col-12 col-md-5">
+                        <label class="form-label small text-muted mb-1">快递单号（8~32 位字母或数字，自动识别快递公司）</label>
+                        <input type="text" class="form-control" id="expNo" placeholder="如 YT1234567890123" maxlength="32" autocomplete="off">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small text-muted mb-1">收件人手机后 4 位（顺丰等必填）</label>
+                        <input type="text" class="form-control" id="expPhone" placeholder="可选" maxlength="11" inputmode="numeric" autocomplete="off">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button class="btn btn-primary rounded-pill px-4 w-100" id="expBtn" onclick="queryExpress()">
+                            <i class="fa-solid fa-magnifying-glass me-1"></i>查询物流
+                        </button>
+                    </div>
+                </div>
+                <div class="small text-muted mt-2"><i class="fa-solid fa-lightbulb me-1"></i>送礼寄出快递后，把单号记在这里随时跟踪签收进度；查询结果 10 分钟内直接复用，不重复消耗额度。</div>
+                <div id="expResult" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 手机归属地 ============ -->
+    <div class="tab-pane fade" id="tabPhone">
+        <div class="card shadow-sm rounded-4">
+            <div class="card-body">
+                <div class="row g-2 align-items-end">
+                    <div class="col-12 col-md-5">
+                        <label class="form-label small text-muted mb-1">11 位大陆手机号</label>
+                        <input type="text" class="form-control" id="phoneNo" placeholder="如 13800138000" maxlength="11" inputmode="numeric" autocomplete="off">
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <button class="btn btn-primary rounded-pill px-4 w-100" id="phoneBtn" onclick="queryPhone()">
+                            <i class="fa-solid fa-magnifying-glass me-1"></i>查询归属地
+                        </button>
+                    </div>
+                </div>
+                <div class="small text-muted mt-2"><i class="fa-solid fa-lightbulb me-1"></i>判断亲友手机号归属省市与运营商（移动/联通/电信），随礼习俗、登门拜访行程心里更有数。</div>
+                <div id="phoneResult" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function getCsrfToken() {
+        const m = document.querySelector('meta[name="csrf-token"]');
+        return m ? m.getAttribute('content') : '';
+    }
+
+    function postJSON(url, body) {
+        return fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken(),
+                'X-CSRF-Token': getCsrfToken(),
+                'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify(body)
+        }).then(r => r.json());
+    }
+
+    function esc(s) {
+        const div = document.createElement('div');
+        div.textContent = s == null ? '' : String(s);
+        return div.innerHTML;
+    }
+
+    function showToast(msg, ok = true) {
+        if (window.showAppToast) { showAppToast(msg, ok ? 'success' : 'danger'); return; }
+        alert(msg);
+    }
+
+    // ===== 快递跟踪 =====
+    function queryExpress() {
+        const no = document.getElementById('expNo').value.trim();
+        const phone = document.getElementById('expPhone').value.trim();
+        const box = document.getElementById('expResult');
+        const btn = document.getElementById('expBtn');
+        if (!no) { showToast('请输入快递单号', false); return; }
+        if (!/^[A-Za-z0-9]{8,32}$/.test(no)) { showToast('快递单号格式不正确（8~32 位字母或数字）', false); return; }
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>查询中...';
+        box.innerHTML = '<div class="text-muted small py-3"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在查询物流轨迹，请稍候（实时查询约需 1~2 秒）...</div>';
+        postJSON('/api/tools/express', { tracking_number: no, phone: phone })
+            .then(j => {
+                if (j.code === 200 && j.data) {
+                    renderExpress(j.data);
+                } else {
+                    box.innerHTML = `<div class="alert alert-warning py-2 px-3 small mb-0"><i class="fa-solid fa-triangle-exclamation me-1"></i>${esc(j.message || '查询失败，请稍后重试')}</div>`;
+                }
+            })
+            .catch(() => { box.innerHTML = '<div class="alert alert-danger py-2 px-3 small mb-0">网络错误，请稍后重试</div>'; })
+            .finally(() => { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-magnifying-glass me-1"></i>查询物流'; });
+    }
+
+    function renderExpress(d) {
+        const box = document.getElementById('expResult');
+        const tracks = (d.tracks || []);
+        const carrier = esc(d.carrier_name || '未知快递');
+        const signed = tracks.length && /签收|签收成功|已签收|delivered|signed/i.test(String(tracks[0].context || ''));
+        box.innerHTML = `
+            <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+                <span class="badge bg-primary-subtle text-primary border fs-6"><i class="fa-solid fa-truck me-1"></i>${carrier}</span>
+                <span class="small text-muted">单号 ${esc(d.tracking_number || '')}</span>
+                <span class="badge ${signed ? 'bg-success' : 'bg-warning-subtle text-warning-emphasis border'}">
+                    <i class="fa-solid fa-${signed ? 'circle-check' : 'clock'} me-1"></i>${signed ? '已签收' : '运输中'}（共 ${tracks.length} 条轨迹）</span>
+            </div>
+            ${tracks.length ? tracks.map((t, i) => `
+                <div class="track-item ${i === 0 ? 'first' : ''}">
+                    <div class="track-time">${esc(t.time || '')}</div>
+                    <div class="track-text">${esc(t.context || '')}</div>
+                </div>`).join('') : '<div class="text-muted small">暂无轨迹信息：订单可能尚未揽收，请稍后再查（顺丰等需补填收件人手机后 4 位）。</div>'}
+        `;
+    }
+
+    // ===== 手机归属地 =====
+    function queryPhone() {
+        const phone = document.getElementById('phoneNo').value.trim();
+        const box = document.getElementById('phoneResult');
+        if (!/^1[3-9]\d{9}$/.test(phone)) { showToast('请输入正确的 11 位大陆手机号', false); return; }
+        const btn = document.getElementById('phoneBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>查询中...';
+        box.innerHTML = '<div class="text-muted small py-3"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在查询归属地...</div>';
+        postJSON('/api/tools/phone-lookup', { phone: phone })
+            .then(j => {
+                if (j.code === 200 && j.data) {
+                    const d = j.data;
+                    box.innerHTML = `
+                        <div class="row g-2">
+                            <div class="col-6 col-md-3"><div class="phone-stat"><div class="label">省份</div><div class="value">${esc(d.province || '--')}</div></div></div>
+                            <div class="col-6 col-md-3"><div class="phone-stat"><div class="label">城市</div><div class="value">${esc(d.city || '--')}</div></div></div>
+                            <div class="col-6 col-md-3"><div class="phone-stat"><div class="label">运营商</div><div class="value">${esc(d.sp || '--')}</div></div></div>
+                            <div class="col-6 col-md-3"><div class="phone-stat"><div class="label">固话区号</div><div class="value">${esc(d.area_code || '--')}</div></div></div>
+                        </div>`;
+                } else {
+                    box.innerHTML = `<div class="alert alert-warning py-2 px-3 small mb-0"><i class="fa-solid fa-triangle-exclamation me-1"></i>${esc(j.message || '查询失败，请稍后重试')}</div>`;
+                }
+            })
+            .catch(() => { box.innerHTML = '<div class="alert alert-danger py-2 px-3 small mb-0">网络错误，请稍后重试</div>'; })
+            .finally(() => { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-magnifying-glass me-1"></i>查询归属地'; });
+    }
+
+    // 回车快捷查询
+    document.getElementById('expNo').addEventListener('keydown', e => { if (e.key === 'Enter') queryExpress(); });
+    document.getElementById('expPhone').addEventListener('keydown', e => { if (e.key === 'Enter') queryExpress(); });
+    document.getElementById('phoneNo').addEventListener('keydown', e => { if (e.key === 'Enter') queryPhone(); });
+</script>
+{% endblock %}

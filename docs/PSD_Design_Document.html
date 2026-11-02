@@ -1825,6 +1825,18 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== ADR-77 ==================== -->
+<div class="section">
+<h1>第 11 部分补充二十：ADR-77 外部接口服务多平台 API 接入——UApiPro 平台注册表、全量 110 API 目录、双协议混排与 API 试验台（V10.11.47 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与痛点</td><td>① <strong>仅支持免 Key 裸 URL</strong>：外部接口配置页端点模型为 [{url, enabled}]，无任何认证概念，只能接「免 API Key 直连」服务（Open-Meteo/timor.tech 等），无法接入需要认证的聚合 API 平台（如 uapis.cn/UApiPro）；② <strong>能力封闭</strong>：系统未提供外部 API 的探索/调试入口，管理员想接入新数据源（快递跟踪/手机归属地/热榜/一言等）缺乏统一框架，需各自硬编码；③ <strong>协议单绑定</strong>：天气/节假日服务分别锁死 Open-Meteo/timor.tech 协议，上游故障时缺乏独立的备用数据通路。</td></tr>
+<tr><td>决策方案</td><td>① <strong>平台注册表（平台级一份 Key）</strong>：system_settings.api_platforms 存平台档案 [{id, base_url, auth_type, auth_key_name, api_key, enabled}]，认证四型白名单 none/bearer/header/query；内置 UApiPro 档案（访客模式免 Key，按 IP 月 1500 积分/4QPS）；Key 明文仅存 DB（.gitignore 保护不入库），页面脱敏回显末 4 位，「保存/清除/保持不变」三态语义由前端 clearKeyFlags + 后端 None 判定实现。② <strong>端点 platform 字段（零迁移双协议）</strong>：端点记录升级 [{url, enabled, platform?}]，老数据自动补空串行为不变；get_enabled_urls 排除平台端点（不参与直连协议遍历），组内仅有平台端点时 _http_get_endpoint 返回 None 而非误抛 ServiceDisabled；平台端点仅限 forecast/holiday 两组（前后端双重白名单）。③ <strong>全量静态目录 + 统一调用引擎</strong>：services/uapi_catalog.py 收录官网 110 API（21 分类/27 免费/含参数 schema 与预置测试参数/文件型与流式与敏感标记）；services/uapi_client.py 统一调用（认证注入/禁代理直连优先+系统代理兜底双路径/429 尊重 Retry-After 指数退避/错误双格式标准化/进程级缓存控积分：一言 1h、快递 10min、手机归属地 24h、热榜 5min、每日单词 6h）；预置参数经 57 个 0/1 积分接口真实调用批量校验，修正 17 处参数名与路径（/text/base64/decode、/text/aes/encrypt、/text/md5/verify（参数 hash）、/misc/weather/history、/convert/json（参数 content）、MC 系列 server/username/query/appid、时间戳系列 ts、history/programmer 的 month+day 必填、worldtime 的 city 必填等）。④ <strong>双协议混排与协议适配器</strong>：组内端点顺序即协议优先级（get_first_enabled_platform）；UApiPro 天气响应转换为 Open-Meteo 原始 JSON 结构（含和风天气图标码→WMO 映射表、_uapi_city/_uapi_air 随结构一并缓存零二次请求、级联标签末级地名提取「四川省成都市双流区」→「双流区」），缓存/降级/前端渲染链路全复用零改动；Open-Meteo 离线合成兜底时平台端点可抢救替换合成数据；节假日 holidays 事件表（legal_rest/legal_workday_adjust）转 timor 同构 {MM-DD: {holiday, name}}；_test_platform_endpoint 按组绑定 API 做平台协议结构校验。⑤ <strong>试验台与安全边界</strong>：/admin/service-config/uapi/playground 固定平台 base_url+目录 path 拒绝任意 URL（无 SSRF 面），参数值限长 2000 字符；高积分（&gt;4）与敏感接口前端二次确认；文件上传型/流式接口仅收录目录不支持在线调用。⑥ <strong>业务落地</strong>：实用工具页 /tools（快递跟踪 40 积分/次轨迹 10 分钟缓存+签收判定、手机归属地 2 积分/次 24 小时缓存，登录即可用不挂 menu_map）；AI 助手 ai_chat 入口前置意图识别（快递单号/手机归属地直接调平台 API 零 Token 秒回，未命中走原流程）；登录页页脚+首页横幅徽章每日一言（免费接口服务端缓存 1 小时全站共享）。</td></tr>
+<tr><td>验证</td><td>py_compile 7 文件 + Jinja 编译校验 5 模板全过（连带修复 base.html 导航 if/endif 配对缺陷）；冒烟断言（目录 110/分类 21/免费 27/城市名提取/图标映射/Key 脱敏）全过；真实调用验证：平台连通（访客 HTTP 200 742ms）、试验台（13900139000→广东·东莞·移动·0769）、/tools 手机归属地（13800138000→北京·移动·010）、天气组平台端点协议测试（北京：晴 16°C，697ms）、节假日组平台端点协议测试（HTTP 200，668ms）、登录页与首页横幅一言；兼容性实测：未保存测试行刷新即丢弃，6 组端点与用户原值逐字节一致（零污染），老配置无 platform 字段自动补空，全部既有链路行为不变。</td></tr>
+<tr><td>连带影响</td><td>涉及 services/uapi_catalog.py（新建）、services/uapi_client.py（新建）、services/service_config.py、services/weather_service.py、services/holiday_service.py、services/ai_service.py、routes/routes_ext.py、templates/admin_service_config.html、templates/tools.html（新建）、templates/base.html、templates/_home_banner.html、templates/login.html、docs/CHANGELOG.md 与本文档双格式。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>

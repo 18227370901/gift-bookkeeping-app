@@ -2452,3 +2452,19 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   - `py_compile` 通过；服务重启平稳；
   - 下拉菜单几何检测：输入框/应用按钮完整位于菜单矩形内且可交互，AI 视觉审读确认无裁剪、光斑仍被圆角裁剪无外溢；自定义档全链路可用（3 个月 → 标题/区间/回显/自动关闭全部正确）；
   - Toast 实测：24 字单行 45px、约 3 秒自动消失无需手动点击；测试数据已恢复。
+
+### ADR-77：外部接口服务多平台 API 接入——UApiPro 平台注册表、全量 110 API 目录、双协议混排与 API 试验台（V10.11.47 落地）
+- **背景与痛点**：
+  1. **仅支持免 Key 裸 URL**：外部接口配置页端点模型为 `[{url, enabled}]`，无任何认证概念，只能接「免 API Key 直连」服务（Open-Meteo/timor.tech 等），无法接入需要认证的聚合 API 平台（如 uapis.cn/UApiPro）；
+  2. **能力封闭**：系统未提供外部 API 的探索/调试入口，管理员想接入新数据源（快递跟踪/手机归属地/热榜/一言等）缺乏统一框架，需各自硬编码；
+  3. **协议单绑定**：天气/节假日服务分别锁死 Open-Meteo/timor.tech 协议，上游故障时缺乏独立的备用数据通路。
+- **决策方案**：
+  1. **平台注册表（平台级一份 Key）**：`system_settings.api_platforms` 存平台档案 `[{id, base_url, auth_type, auth_key_name, api_key, enabled}]`，认证四型白名单 `none/bearer/header/query`；内置 UApiPro 档案（访客模式免 Key）；Key 明文仅存 DB（.gitignore 保护不入库），页面脱敏回显末 4 位，「保存/清除/保持不变」三态语义由前端 `clearKeyFlags` + 后端 None 判定实现；
+  2. **端点 platform 字段（零迁移双协议）**：端点记录升级 `[{url, enabled, platform?}]`，老数据自动补空串行为不变；`get_enabled_urls` 排除平台端点（不参与直连协议遍历），组内仅有平台端点时 `_http_get_endpoint` 返回 None 而非误抛 ServiceDisabled；平台端点仅限 forecast/holiday 两组（前后端双重白名单）；
+  3. **全量静态目录 + 统一调用引擎**：`uapi_catalog.py` 收录官网 110 API（21 分类/27 免费/含参数 schema 与预置测试参数/文件型与流式与敏感标记）；`uapi_client.py` 统一调用（认证注入/双路径网络/Retry-After 指数退避/错误双格式标准化/进程级缓存控积分）；预置参数经 57 个 0/1 积分接口真实调用批量校验，修正 17 处参数名与路径；
+  4. **双协议混排与协议适配器**：组内端点顺序即协议优先级（`get_first_enabled_platform`）；UApiPro 天气响应转换为 Open-Meteo 原始 JSON 结构（含和风图标码→WMO 映射、`_uapi_city`/`_uapi_air` 随结构一并缓存零二次请求、级联标签末级地名提取），缓存/降级/前端链路全复用；节假日 `holidays` 事件表转 timor 同构 `{MM-DD: {holiday, name}}`；`_test_platform_endpoint` 按组绑定 API 做平台协议结构校验；
+  5. **试验台与安全边界**：`/admin/service-config/uapi/playground` 固定平台 base_url+目录 path 拒绝任意 URL（无 SSRF 面），参数值限长 2000 字符；高积分（>4）与敏感接口前端二次确认；文件上传型/流式接口仅收录目录不支持在线调用。
+- **验证与效果**：
+  - `py_compile` 7 文件 + Jinja 编译校验 5 模板全过（连带修复 base.html 导航 if/endif 配对缺陷）；冒烟断言（目录 110/分类 21/免费 27/城市名提取/图标映射/Key 脱敏）全过；
+  - 真实调用验证：平台连通（访客 HTTP 200 742ms）、57 个接口预置参数批量校验、试验台（13900139000→广东·东莞·移动·0769）、/tools 手机归属地（13800138000→北京·移动·010）、天气组平台端点协议测试（北京：晴 16°C，697ms）、节假日组平台端点协议测试（HTTP 200，668ms）；
+  - 兼容性实测：未保存测试行刷新即丢弃，6 组端点与用户原值逐字节一致（零污染）；老配置无 platform 字段自动补空，全部既有链路行为不变。

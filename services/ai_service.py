@@ -506,6 +506,57 @@ def _local_question(query):
 
 # ==================== 核心 AI 聊天函数 ====================
 
+def _try_uapi_tool_answer(query):
+    """V10.11.47 UApiPro 工具直答：识别快递单号 / 手机归属地意图 → 直接调平台 API
+    返回结构化中文答案（不经大模型，零 Token 消耗秒回）；未命中意图返回 None
+    走原 AI 流程（联网搜索 → 大模型 → 本地兑底）。失败时也返回答案文案（带失败提示）。
+    意图识别：
+      1) 快递：含 快递/物流/单号/包裹/运单/发货 关键词且带 8~32 位字母数字单号
+      2) 归属地：含 11 位大陆手机号且带 归属/哪里/地区/运营商/城市 等疑问词"""
+    import re
+    from services import uapi_client
+
+    q = str(query or '').strip()
+    if not q:
+        return None
+
+    # ---- 意图 1：快递跟踪 ----
+    m = (re.search(r'(?:快递|物流|单号|包裹|运单|发货)[^\w]{0,8}?([A-Za-z0-9]{8,32})', q)
+         or re.search(r'([A-Za-z0-9]{8,32})[^\w]{0,6}?(?:的)?(?:快递|物流|单号|包裹|运单)', q))
+    if m:
+        tracking_no = m.group(1).upper()
+        ok, payload, message = uapi_client.query_express(tracking_no)
+        if ok and isinstance(payload, dict):
+            tracks = payload.get('tracks') or []
+            lines = ['已为您查询快递【%s】单号 %s，共 %s 条轨迹：' % (
+                payload.get('carrier_name') or '未知快递', payload.get('tracking_number') or tracking_no,
+                payload.get('track_count') if payload.get('track_count') is not None else len(tracks))]
+            for t in tracks[:5]:
+                lines.append('· %s  %s' % (t.get('time') or '', t.get('context') or ''))
+            if len(tracks) > 5:
+                lines.append('…… 其余 %d 条轨迹请到「实用工具 → 快递跟踪」查看完整时间线' % (len(tracks) - 5))
+            if tracks and re.search(r'签收', str(tracks[0].get('context') or '')):
+                lines.append('包裹已签收 ✓')
+            elif not tracks:
+                lines.append('暂无轨迹：订单可能尚未揽收（顺丰等需补收件人手机后 4 位，请到工具页查询）')
+            return '\n'.join(lines)
+        return '快递查询失败：%s\n（也可到「实用工具 → 快递跟踪」页查询；单号需为 8~32 位字母数字）' % (
+            message or '请稍后重试')
+
+    # ---- 意图 2：手机归属地 ----
+    if re.search(r'1[3-9]\d{9}', q) and re.search(r'归属|哪里|地区|运营商|城市|什么地方|哪里人|什么地方', q):
+        phone = re.search(r'(1[3-9]\d{9})', q).group(1)
+        ok, payload, message = uapi_client.lookup_phone(phone)
+        if ok and isinstance(payload, dict):
+            city = payload.get('city') or ''
+            loc = (payload.get('province') or '') + (('·' + city) if city else '')
+            return '手机号 %s 归属地：%s，运营商：%s（固话区号 %s）' % (
+                phone, loc or '未知', payload.get('sp') or '未知', payload.get('area_code') or '--')
+        return '归属地查询失败：%s' % (message or '请稍后重试')
+
+    return None
+
+
 def ai_chat(query, user, session=None):
     """
     AI 聊天核心函数
@@ -513,53 +564,63 @@ def ai_chat(query, user, session=None):
         response, used_openai, used_config_name, used_search,
         latency_ms, suggestions, error_hint, session_id, session_title
     }
+    V10.11.47：入口新增 UApiPro 工具直答——快递单号/手机归属地意图直接调平台 API
+    结构化秒回（零 Token），未命中走原流程（联网搜索 → 大模型 → 本地兑底）。
     """
     start_time = time.time()
 
-    # 1. 判断是否需要联网搜索
+    # V10.11.47 UApiPro 工具直答：命中意图直接生成 response，跳过搜索/大模型/兑底
+    tool_answer = _try_uapi_tool_answer(query)
+
     search_context = "（无网络搜索结果）"
     used_search = False
-    if needs_search(query):
-        search_context = search_and_summarize(query)
-        used_search = "无网络搜索结果" not in search_context
-
-    # 2. 构建 prompt
-    today = datetime.now().strftime('%Y年%m月%d日')
-    weekday_cn = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'][datetime.now().weekday()]
-    prompt = GENERAL_CHAT_PROMPT.format(
-        today=today,
-        weekday=weekday_cn,
-        search_context=search_context,
-        user_query=query
-    )
-
-    # 3. 构建配置列表并逐个尝试
-    configs = _build_config_list(user)
     response = ''
     used_openai = False
     used_config_name = ''
     error_hint = ''
 
-    for cfg in configs:
-        success, resp, err = _call_openai(
-            prompt, cfg['api_key'], cfg['base_url'], cfg['model']
-        )
-        if success:
-            response = resp
-            used_openai = True
-            used_config_name = cfg['name']
-            break
-        else:
-            error_hint = f"配置[{cfg['name']}]调用失败: {err}"
+    if tool_answer is None:
+        # 1. 判断是否需要联网搜索
+        if needs_search(query):
+            search_context = search_and_summarize(query)
+            used_search = "无网络搜索结果" not in search_context
 
-    # 4. 全部失败 → 本地兜底
-    if not response:
-        response = _local_question(query)
-        used_config_name = ''
-        if configs:
-            error_hint = f"所有 AI 配置均调用失败，已使用本地知识引擎回复。最后错误: {error_hint}"
-        else:
-            error_hint = '当前未配置 AI API Key，已使用本地知识引擎回复。请联系管理员配置 AI 以获得更智能的回答。'
+        # 2. 构建 prompt
+        today = datetime.now().strftime('%Y年%m月%d日')
+        weekday_cn = ['星期一', '星期二', '星期三', '星期四', '星期五', '星期六', '星期日'][datetime.now().weekday()]
+        prompt = GENERAL_CHAT_PROMPT.format(
+            today=today,
+            weekday=weekday_cn,
+            search_context=search_context,
+            user_query=query
+        )
+
+        # 3. 构建配置列表并逐个尝试
+        configs = _build_config_list(user)
+
+        for cfg in configs:
+            success, resp, err = _call_openai(
+                prompt, cfg['api_key'], cfg['base_url'], cfg['model']
+            )
+            if success:
+                response = resp
+                used_openai = True
+                used_config_name = cfg['name']
+                break
+            else:
+                error_hint = f"配置[{cfg['name']}]调用失败: {err}"
+
+        # 4. 全部失败 → 本地兑底
+        if not response:
+            response = _local_question(query)
+            used_config_name = ''
+            if configs:
+                error_hint = f"所有 AI 配置均调用失败，已使用本地知识引擎回复。最后错误: {error_hint}"
+            else:
+                error_hint = '当前未配置 AI API Key，已使用本地知识引擎回复。请联系管理员配置 AI 以获得更智能的回答。'
+    else:
+        # 工具直答：直接作为回复（后续会话保存/推送链路复用）
+        response = tool_answer
 
     latency_ms = int((time.time() - start_time) * 1000)
 

@@ -99,18 +99,32 @@ def _fetch_from_timor(year):
     """从 timor.tech 拉取某年班/休数据
     V10.11.20 多端点故障转移：按配置顺序依次尝试「启用」的端点（默认 timor.tech），
     每端点双路径（禁代理直连优先 + 系统代理兜底），全部失败按配置重试轮数整轮重试；
-    {年份} 占位符由系统自动注入最新年份，管理员无需维护。"""
-    urls = service_config.get_enabled_urls('holiday')
-    if not urls:
+    {年份} 占位符由系统自动注入最新年份，管理员无需维护。
+    V10.11.47 双协议混排：端点 platform='uapis' 的按 UApiPro 万年历协议拉取
+    （GET ?year=YYYY → holidays 事件表转 timor 同构 {MM-DD: {holiday, name}}），
+    与 timor 兼容端点按组内顺序混排分发，任一成功即返回。"""
+    from services import service_config as _sc
+    endpoints = _sc.get_enabled_endpoints('holiday')
+    if not endpoints:
         return {}
-    timeout = service_config.get_timeout('holiday')
-    retries = service_config.get_retries('holiday')
+    timeout = _sc.get_timeout('holiday')
+    retries = _sc.get_retries('holiday')
     last_err = None
     for _round in range(retries + 1):
-        for url_tpl in urls:
+        for ep in endpoints:
+            # ---- V10.11.47 UApiPro 平台端点：万年历协议分发 ----
+            if ep.get('platform'):
+                try:
+                    result = _fetch_from_uapi(year, ep['url'])
+                    if result:
+                        return result
+                except Exception as e:
+                    last_err = e
+                continue
+            # ---- timor.tech 兼容端点（原有链路） ----
             # 变量自动适配：统一规范化后注入最新年份
-            url = service_config.normalize_holiday_url(url_tpl).replace(
-                service_config.HOLIDAY_PLACEHOLDER, str(year))
+            url = _sc.normalize_holiday_url(ep['url']).replace(
+                _sc.HOLIDAY_PLACEHOLDER, str(year))
             # 路径①：禁代理直连（国内环境 timor.tech 直连可达，系统代理故障时不被拖死）
             try:
                 resp = requests.get(
@@ -133,6 +147,37 @@ def _fetch_from_timor(year):
     # 全部端点均失败：降级空字典（不抛异常，万年历主体不受影响）
     print('[Holiday] 拉取 %d 年班/休数据失败（全部端点均超时或异常）: %s' % (year, last_err))
     return {}
+
+
+def _fetch_from_uapi(year, url):
+    """V10.11.47 UApiPro 万年历端点拉取：GET {端点}?year=YYYY（认证头由 uapi_client 注入）
+    响应 holidays 事件表 → timor 同构精简结构 {MM-DD: {holiday: bool, name: str}}：
+    - legal_rest（法定休假日）→ holiday=True
+    - legal_workday_adjust（调休补班日）→ holiday=False
+    其余事件类型（公历节日/农历节日/节气）与 timor 语义无关，不纳入。失败返回空字典。"""
+    from services import uapi_client
+    ok, payload, status, message = uapi_client.call_uapi(
+        'misc_holiday_calendar', params={'year': str(year)},
+        timeout=(5, 10), full_url=url or None)
+    if not ok or not isinstance(payload, dict):
+        print('[Holiday] UApiPro 万年历拉取 %d 年失败: HTTP %s %s' % (year, status, (message or '')[:120]))
+        return {}
+    result = {}
+    for item in (payload.get('holidays') or []):
+        if not isinstance(item, dict):
+            continue
+        date = str(item.get('date') or '').strip()
+        # YYYY-MM-DD → MM-DD（与 timor 精简结构键格式一致）
+        if len(date) == 10 and date[4] == '-':
+            mm_dd = date[5:]
+        else:
+            continue
+        etype = str(item.get('type') or '')
+        if etype == 'legal_rest':
+            result[mm_dd] = {'holiday': True, 'name': str(item.get('name') or '')}
+        elif etype == 'legal_workday_adjust':
+            result[mm_dd] = {'holiday': False, 'name': str(item.get('name') or '')}
+    return result
 
 
 def _parse_timor(resp):

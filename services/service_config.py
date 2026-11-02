@@ -1,22 +1,29 @@
 # -*- coding: utf-8 -*-
 """
-service_config.py — 外部接口服务配置管理（V10.11.20 新增）
+service_config.py — 外部接口服务配置管理（V10.11.20 新增，V10.11.47 平台化升级）
 
 集中管理各模块「内置默认调用地址但页面无配置入口」的外部服务：
   1. 天气·地理编码（Open-Meteo Geocoding）
-  2. 天气·天气预报（Open-Meteo Forecast）
+  2. 天气·天气预报（Open-Meteo Forecast / UApiPro 查询天气 双协议）
   3. 天气·空气质量（Open-Meteo Air Quality）
-  4. 法定节假日班/休数据（timor.tech，地址变量自动补全）
+  4. 法定节假日班/休数据（timor.tech / UApiPro 节假日万年历 双协议）
   5. 企微长连接（wss://openws.work.weixin.qq.com）
   6. AI 联网搜索（DuckDuckGo，多端点 + 总开关）
 
-统一模型：每组 = 有序端点列表 [{url, enabled}] + 重试参数（timeout 秒 / retries 轮）。
+统一模型：每组 = 有序端点列表 [{url, enabled, platform}] + 重试参数（timeout 秒 / retries 轮）。
   - 故障转移：按序遍历启用端点，任一成功即返回；全败按 retries 整轮重试
   - 存储：复用 system_settings 表（key 见 _url_key/_timeout_key/_retries_key），
-    实时读库（后台巡检线程每轮独立 app_context，安全），异常兜底返回默认值
+    实时读库（后台巡检线程每轮独立 app_context，安全），异常兑底返回默认值
   - 节假日地址：管理员只填到 .../year/ 即可，保存时自动补全 {年份} 占位符，
     调用时由业务方 replace 注入最新年份
   - 测试：test_endpoint / test_group 按各组真实协议做结构校验，供「一键测试」使用
+
+V10.11.47 平台化升级（多平台 API 接入，首接 UApiPro uapis.cn）：
+  - 端点记录新增可选 platform 字段：空 = 无认证直连（与旧版行为完全一致）；
+    'uapis' = UApiPro 平台端点，调用时自动附加平台级认证头（Bearer Key）
+  - 新增「API 平台」注册表（api_platforms）：平台级一份 API Key 集中管理，
+    支持四种认证方式 none/bearer/header/query；内置 UApiPro 默认档案（访客模式可免 Key）
+  - 天气/节假日组内可混排两种协议端点，按端点顺序自动分发对应适配器
 """
 import json
 import time
@@ -66,6 +73,32 @@ DEFAULT_GROUPS = {
 HOLIDAY_PLACEHOLDER = '{年份}'
 
 AI_SEARCH_ENABLED_KEY = 'ai_search_enabled'
+
+# ===================== V10.11.47 API 平台注册表 =====================
+# 平台级一份 API Key 集中管理：端点只引用平台 ID，换 Key 改一处即可
+# 存储：system_settings 表 'api_platforms' 键，JSON 列表 [{id, name, base_url, auth_type, auth_key_name, api_key, enabled}]
+# 认证方式 auth_type：none=无认证 | bearer=Authorization: Bearer <key>（UApiPro）| header=自定义头（auth_key_name 为头名）| query=URL 参数（auth_key_name 为参数名）
+
+PLATFORMS_KEY = 'api_platforms'
+
+# 内置默认平台档案（库中无配置时自动生效；UApiPro 支持「访客模式」：Key 可空，按 IP 月 1500 积分/4QPS）
+DEFAULT_PLATFORMS = [
+    {
+        'id': 'uapis',
+        'name': 'UApiPro 聚合 API 平台 (uapis.cn)',
+        'base_url': 'https://uapis.cn/api/v1',
+        'auth_type': 'bearer',
+        'auth_key_name': '',
+        'api_key': '',          # 空 = 访客模式（无需 Key 直连）
+        'enabled': True,
+        'builtin': True,        # 内置平台不可删除
+    },
+]
+
+# 支持的认证方式（前端下拉 + 后端白名单校验）
+AUTH_TYPES = ('none', 'bearer', 'header', 'query')
+# 端点可绑定的平台 ID 白名单（当前内置平台）
+KNOWN_PLATFORM_IDS = ('uapis',)
 
 
 # ===================== 存储 key =====================
@@ -122,7 +155,10 @@ def display_holiday_url(url):
 
 
 def get_urls(group):
-    """返回 [{url, enabled}]；库中无有效配置时回落该组默认列表"""
+    """返回 [{url, enabled, platform}]；库中无有效配置时回落该组默认列表
+    V10.11.47：端点记录新增可选 platform 字段——空 = 无认证直连（与旧版完全一致），
+    'uapis' = UApiPro 平台端点（调用时自动附加平台认证头，按平台协议解析）。
+    老数据无 platform 字段自动补空串，零迁移。"""
     default = [dict(x) for x in DEFAULT_GROUPS[group]['defaults']]
     raw = _get_setting(_url_key(group), None)
     if raw:
@@ -135,6 +171,7 @@ def get_urls(group):
                         out.append({
                             'url': str(item['url']).strip(),
                             'enabled': bool(item.get('enabled', True)),
+                            'platform': str(item.get('platform', '') or '').strip(),
                         })
                 if out:
                     return out
@@ -164,8 +201,30 @@ def get_retries(group):
 
 
 def get_enabled_urls(group):
-    """按配置顺序返回启用的端点 URL 列表（故障转移遍历用）"""
-    return [u['url'] for u in get_urls(group) if u.get('enabled')]
+    """按配置顺序返回启用的「无认证直连」端点 URL 列表（传统协议故障转移遍历用）
+    V10.11.47：排除 platform 非空的平台端点——平台端点按各自协议由业务适配器
+    单独消费（如 weather_service 的 UApiPro 适配器），不参与传统协议遍历。"""
+    return [u['url'] for u in get_urls(group) if u.get('enabled') and not u.get('platform')]
+
+
+def get_enabled_endpoints(group):
+    """V10.11.47 新增：返回该组全部启用端点 [{url, enabled, platform}]（含平台端点）
+    业务适配器按端点顺序混排分发协议时使用"""
+    return [u for u in get_urls(group) if u.get('enabled')]
+
+
+def get_enabled_uapi_endpoints(group):
+    """V10.11.47 新增：返回该组启用的 UApiPro 平台端点 URL 列表（故障转移遍历用）"""
+    return [u['url'] for u in get_urls(group) if u.get('enabled') and u.get('platform') == 'uapis']
+
+
+def get_first_enabled_platform(group):
+    """V10.11.47 新增：返回该组第一个启用端点的 platform（空串 = 传统直连优先；
+    'uapis' = UApiPro 平台协议优先）。组内无任何启用端点返回 None。"""
+    for u in get_urls(group):
+        if u.get('enabled'):
+            return u.get('platform', '') or ''
+    return None
 
 
 def get_ai_search_enabled():
@@ -216,7 +275,8 @@ def get_all_config():
         urls = get_urls(group)
         if group == 'holiday':
             # 页面展示隐藏 {年份} 占位符（管理员只需编辑 year/ 部分）
-            urls = [{'url': display_holiday_url(u['url']), 'enabled': u['enabled']} for u in urls]
+            urls = [{'url': display_holiday_url(u['url']), 'enabled': u['enabled'],
+                     'platform': u.get('platform', '')} for u in urls]
         result[group] = {
             'label': meta['label'],
             'urls': urls,
@@ -246,13 +306,18 @@ def _http_get_dual(url, params=None, timeout=8, headers=None):
         return s.get(url, params=params, timeout=timeout, headers=headers)
 
 
-def test_endpoint(group, url, timeout=None):
+def test_endpoint(group, url, timeout=None, platform=''):
     """测试单个端点地址是否有效，返回 {url, ok, message, latency_ms}
-    按各组真实协议做结构校验（非仅 HTTP 200）"""
+    按各组真实协议做结构校验（非仅 HTTP 200）
+    V10.11.47：platform 非空时按对应平台协议测试（组绑定的目录 API 真实调用）"""
     if timeout is None:
         timeout = get_timeout(group)
     url = (url or '').strip()
     start = time.time()
+
+    # V10.11.47 平台端点：按组绑定的 UApiPro 目录 API 真实调用并校验响应结构
+    if platform:
+        return _test_platform_endpoint(group, url, timeout, platform, start)
 
     # 企微长连接：WebSocket 握手连通测试（不做机器人鉴权）
     if group == 'wecom_ws':
@@ -310,6 +375,45 @@ def test_endpoint(group, url, timeout=None):
         return {'url': url, 'ok': False, 'message': '请求失败: %s' % str(e)[:200], 'latency_ms': latency_ms}
 
 
+def _test_platform_endpoint(group, url, timeout, platform, start):
+    """V10.11.47 平台端点测试：按组绑定的目录 API 真实调用 + 响应结构校验
+    - forecast 组 → UApiPro 查询天气（city=北京）：校验 weather/temperature 字段
+    - holiday 组 → UApiPro 节假日万年历（year=当前年）：校验 days/holidays 字段
+    - 未绑定平台 API 的组（geocoding/air_quality/wecom_ws/ai_search）：明确不支持"""
+    def _res(ok, message):
+        return {'url': url, 'ok': ok, 'message': message,
+                'latency_ms': int((time.time() - start) * 1000)}
+
+    # 延迟导入避免循环依赖（uapi_client 依赖 service_config 平台认证）
+    from services import uapi_catalog
+    api = uapi_catalog.get_group_api(group)
+    if not api:
+        return _res(False, '该组未绑定平台 API（%s 组不支持平台端点，请使用无认证直连端点）' % group)
+
+    from services import uapi_client
+    params = dict(api.get('test_params') or {})
+    if group == 'forecast':
+        params.update({'city': '北京', 'extended': 'true'})
+    elif group == 'holiday':
+        params = {'year': str(time.localtime().tm_year)}
+
+    ok, payload, status, message = uapi_client.call_uapi(
+        api['id'], params=params, timeout=max(timeout, 8), full_url=url or None)
+    if not ok or not isinstance(payload, dict):
+        return _res(False, 'HTTP %s：%s' % (status, message or '平台接口调用失败')[:200])
+    if group == 'forecast':
+        if 'weather' in payload and 'temperature' in payload:
+            city = payload.get('city') or ''
+            return _res(True, 'UApiPro 天气协议正常（%s：%s %s°C，HTTP %s）' % (
+                city, payload.get('weather', ''), payload.get('temperature'), status))
+        return _res(False, '响应缺少 weather/temperature 字段（非 UApiPro 天气兼容端点）')
+    if group == 'holiday':
+        if isinstance(payload.get('days'), list) or isinstance(payload.get('holidays'), list):
+            return _res(True, 'UApiPro 万年历协议正常（HTTP %s）' % status)
+        return _res(False, '响应缺少 days/holidays 字段（非 UApiPro 万年历兼容端点）')
+    return _res(True, '平台接口调用成功（HTTP %s）' % status)
+
+
 def _test_ws_endpoint(url, timeout, start):
     """WebSocket 握手连通测试"""
     if not (url.startswith('wss://') or url.startswith('ws://')):
@@ -351,7 +455,8 @@ def _test_search_endpoint(url, timeout, start):
 
 
 def test_group(group, urls, timeout=None, retries=None):
-    """按当前配置顺序与启用状态测试整组端点（模拟故障转移顺序），返回逐条结果"""
+    """按当前配置顺序与启用状态测试整组端点（模拟故障转移顺序），返回逐条结果
+    V10.11.47：urls 项可携带 platform 字段，平台端点按对应平台协议测试"""
     if timeout is None:
         timeout = get_timeout(group)
     if retries is None:
@@ -362,5 +467,140 @@ def test_group(group, urls, timeout=None, retries=None):
             continue
         if not item.get('enabled'):
             continue
-        results.append(test_endpoint(group, item.get('url', ''), timeout=timeout))
+        results.append(test_endpoint(group, item.get('url', ''),
+                                     timeout=timeout, platform=str(item.get('platform', '') or '')))
     return results
+
+
+# ===================== V10.11.47 API 平台注册表 =====================
+
+def get_platforms():
+    """读取全部平台档案：库中记录与内置默认档案合并（内置平台缺失项由默认档案补全）
+    返回 [{id, name, base_url, auth_type, auth_key_name, api_key, enabled, builtin}]"""
+    raw = _get_setting(PLATFORMS_KEY, None)
+    stored = {}
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                for item in parsed:
+                    if isinstance(item, dict) and str(item.get('id', '')).strip():
+                        stored[str(item['id']).strip()] = item
+        except Exception:
+            pass
+    result = []
+    for d in DEFAULT_PLATFORMS:
+        rec = dict(d)
+        s = stored.pop(d['id'], None)
+        if isinstance(s, dict):
+            # 库中配置覆盖默认档案（builtin 标记保持不变）
+            for k in ('name', 'base_url', 'auth_type', 'auth_key_name', 'api_key', 'enabled'):
+                if k in s:
+                    rec[k] = s[k]
+        rec['enabled'] = bool(rec.get('enabled', True))
+        result.append(rec)
+    # 其余自定义平台（非内置）按库中记录原样加入
+    for pid, s in stored.items():
+        result.append({
+            'id': pid,
+            'name': str(s.get('name') or pid),
+            'base_url': str(s.get('base_url') or ''),
+            'auth_type': str(s.get('auth_type') or 'none'),
+            'auth_key_name': str(s.get('auth_key_name') or ''),
+            'api_key': str(s.get('api_key') or ''),
+            'enabled': bool(s.get('enabled', True)),
+            'builtin': False,
+        })
+    return result
+
+
+def get_platform(pid):
+    """按平台 ID 获取单条档案（未配置返回 None）"""
+    for p in get_platforms():
+        if p['id'] == pid:
+            return p
+    return None
+
+
+def mask_platform_key(key):
+    """API Key 脱敏展示：仅显示末 4 位（页面回显用，避免整串泄露）"""
+    k = str(key or '')
+    if not k:
+        return ''
+    if len(k) <= 8:
+        return '****' + k[-2:]
+    return '****' + k[-4:]
+
+
+def save_platform(pid, name=None, base_url=None, auth_type=None,
+                  auth_key_name=None, api_key=None, enabled=None):
+    """保存平台档案（增量合并：仅更新传入的非 None 字段）。
+    api_key 语义：None = 保持不变（前端未改动）；'' = 清空 Key（切回访客/无认证模式）。
+    内置平台（uapis）不允许改 id/删除，只允许改连接参数。"""
+    pid = str(pid or '').strip()
+    if not pid:
+        return False
+    platforms = get_platforms()
+    # 定位目标平台记录（不存在则新建，仅允许已知平台 ID 白名单内的新建）
+    target = None
+    for p in platforms:
+        if p['id'] == pid:
+            target = p
+            break
+    if target is None:
+        if pid not in KNOWN_PLATFORM_IDS:
+            return False
+        target = {'id': pid, 'name': pid, 'base_url': '', 'auth_type': 'none',
+                  'auth_key_name': '', 'api_key': '', 'enabled': True, 'builtin': True}
+        platforms.append(target)
+    if name is not None:
+        target['name'] = str(name).strip() or target['name']
+    if base_url is not None:
+        target['base_url'] = str(base_url).strip()
+    if auth_type is not None:
+        v = str(auth_type).strip()
+        if v in AUTH_TYPES:
+            target['auth_type'] = v
+    if auth_key_name is not None:
+        target['auth_key_name'] = str(auth_key_name).strip()
+    if api_key is not None:
+        target['api_key'] = str(api_key).strip()
+    if enabled is not None:
+        target['enabled'] = bool(enabled)
+    # 持久化（builtin 标记不入库，读取时由默认档案补全）
+    stored = [{k: p[k] for k in ('id', 'name', 'base_url', 'auth_type', 'auth_key_name', 'api_key', 'enabled')}
+              for p in platforms]
+    _set_setting(PLATFORMS_KEY, json.dumps(stored, ensure_ascii=False))
+    return True
+
+
+def get_auth_headers(pid):
+    """构造平台认证请求头：按平台 auth_type + api_key 生成
+    - bearer：{'Authorization': 'Bearer <key>'}
+    - header：{<auth_key_name>: <key>}
+    - none/query 或 Key 为空：返回 {}（无认证/访客模式；query 型认证由调用方拼 URL 参数）"""
+    p = get_platform(pid)
+    if not p or not p.get('enabled') or not p.get('api_key'):
+        return {}
+    at = p.get('auth_type') or 'none'
+    key = p['api_key']
+    if at == 'bearer':
+        return {'Authorization': 'Bearer ' + key}
+    if at == 'header':
+        hname = p.get('auth_key_name') or 'X-API-Key'
+        return {hname: key}
+    return {}
+
+
+def get_platforms_for_display():
+    """供配置页面渲染：平台列表（Key 脱敏回显 + 是否已配置标记）"""
+    out = []
+    for p in get_platforms():
+        out.append({
+            'id': p['id'], 'name': p['name'], 'base_url': p['base_url'],
+            'auth_type': p['auth_type'], 'auth_key_name': p['auth_key_name'],
+            'key_masked': mask_platform_key(p['api_key']),
+            'key_set': bool(p['api_key']),
+            'enabled': p['enabled'], 'builtin': p.get('builtin', False),
+        })
+    return out

@@ -3236,20 +3236,28 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @app.route('/admin/service-config', methods=['GET'])
     @login_required
     def admin_service_config():
-        """管理员「外部接口服务配置」页面：天气/节假日/企微长连接/AI搜索 多端点 + 一键测试"""
+        """管理员「外部接口服务配置」页面：天气/节假日/企微长连接/AI搜索 多端点 + 一键测试
+        V10.11.47 新增：API 平台注册表（UApiPro 平台级 Key 管理）+ uapis.cn 全量 API
+        目录（110 个分类展示/一键测试）+ API 试验台（任意目录 API 动态填参实时调用）"""
         if not getattr(current_user, 'is_admin', False):
             flash('权限不足', 'danger')
             return redirect(url_for('index'))
-        from services.service_config import get_all_config
-        return render_template('admin_service_config.html', cfg=get_all_config())
+        from services.service_config import get_all_config, get_platforms_for_display
+        from services.uapi_catalog import get_catalog_for_frontend, summary as uapi_summary
+        return render_template('admin_service_config.html', cfg=get_all_config(),
+                               platforms=get_platforms_for_display(),
+                               uapi_catalog=get_catalog_for_frontend(),
+                               uapi_summary=uapi_summary())
 
     @app.route('/admin/service-config/save', methods=['POST'])
     @login_required
     def admin_service_config_save():
-        """保存外部接口配置（白名单分组 + URL 格式校验 + 节假日变量自动补全）"""
+        """保存外部接口配置（白名单分组 + URL 格式校验 + 节假日变量自动补全）
+        V10.11.47：端点记录新增可选 platform 字段（空=无认证直连，'uapis'=UApiPro
+        平台端点，调用时自动附加平台级 Bearer 认证；老配置无此字段行为不变）"""
         if not getattr(current_user, 'is_admin', False):
             return jsonify({'success': False, 'message': '权限不足'}), 403
-        from services.service_config import DEFAULT_GROUPS, save_group_config, normalize_holiday_url
+        from services.service_config import DEFAULT_GROUPS, save_group_config, normalize_holiday_url, KNOWN_PLATFORM_IDS
         try:
             payload = request.get_json(silent=True) or {}
         except Exception:
@@ -3274,12 +3282,18 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     continue
                 if not (u.startswith('http://') or u.startswith('https://') or u.startswith('wss://') or u.startswith('ws://')):
                     return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」地址必须以 http/https/wss 开头：{u}'}), 400
+                # V10.11.47 平台字段白名单校验（空串=无认证直连）
+                platform = str(item.get('platform', '') or '').strip()
+                if platform and platform not in KNOWN_PLATFORM_IDS:
+                    return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」端点平台标识非法：{platform}'}), 400
+                if platform and gname in ('wecom_ws', 'ai_search', 'geocoding', 'air_quality'):
+                    return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」组暂不支持平台端点（仅天气/节假日支持双协议混排）'}), 400
                 if gname == 'holiday':
                     # 管理员只需填到 .../year/，系统自动补全 {年份} 变量
                     u = normalize_holiday_url(u)
-                cleaned.append({'url': u, 'enabled': bool(item.get('enabled', True))})
+                cleaned.append({'url': u, 'enabled': bool(item.get('enabled', True)), 'platform': platform})
             # V10.11.25: 放开「至少 1 条启用端点」强制校验——允许全部停用，运行时各业务模块
-            # （天气/节假日/AI搜索/企微长连接均为即用即读 get_enabled_urls）按设计走降级兜底；
+            # （天气/节假日/AI搜索/企微长连接均为即用即读 get_enabled_urls）按设计走降级兑底；
             # 端点为空行导致的空列表仍拒绝（端点记录不能整组丢失）。前端对全停用给出降级提示。
             if not cleaned:
                 return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」端点列表不能为空'}), 400
@@ -3297,6 +3311,24 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         ai_enabled = payload.get('ai_search_enabled')
         if ai_enabled is not None:
             save_group_config('ai_search', None, ai_search_enabled=bool(ai_enabled))
+        # V10.11.47 平台配置同步保存（同一表单一并提交）
+        platforms_payload = payload.get('platforms')
+        if isinstance(platforms_payload, dict):
+            for pid, pdata in platforms_payload.items():
+                if not isinstance(pdata, dict):
+                    continue
+                from services.service_config import save_platform
+                save_platform(pid,
+                              base_url=str(pdata.get('base_url') or '').strip() or None,
+                              api_key=(str(pdata.get('api_key')).strip()
+                                       if pdata.get('api_key') is not None else None),
+                              enabled=pdata.get('enabled'))
+        # 保存后清理调用引擎进程缓存（避免旧认证/旧地址结果混存）
+        try:
+            from services import uapi_client
+            uapi_client.clear_cache()
+        except Exception:
+            pass
         safe_log('更新外部接口服务配置', f'操作人：{current_user.username} | 更新分组数：{saved}')
         return jsonify({'success': True, 'message': f'外部接口配置已保存（{saved} 组）'})
 
@@ -3322,6 +3354,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             timeout = max(1, min(60, int(timeout)))
         except Exception:
             timeout = DEFAULT_GROUPS[gname]['timeout']
+        # V10.11.47：urls 项可携带 platform 字段，平台端点按对应平台协议测试
         results = test_group(gname, urls, timeout=timeout)
         return jsonify({'success': True, 'group': gname, 'results': results})
 
@@ -5979,6 +6012,201 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         except Exception as e:
             db.session.rollback()
             return jsonify({'code': 500, 'message': str(e)}), 500
+
+    # ==================== V10.11.47 API 平台注册表管理（管理员） ====================
+
+    @app.route('/admin/service-config/platform/save', methods=['POST'])
+    @login_required
+    def admin_service_config_platform_save():
+        """保存 API 平台档案（UApiPro base_url / 平台级 API Key / 启用开关）
+        - api_key 语义：None=保持不变（前端未改动）；''=清空 Key 切回访客模式
+        - Key 明文仅存 system_settings（DB 已被 .gitignore 保护不入库 Git）；
+          页面回显走 mask_platform_key 脱敏（仅末 4 位）"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from services.service_config import save_platform, mask_platform_key, get_platforms_for_display
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get('id') or '').strip()
+        if not pid:
+            return jsonify({'success': False, 'message': '平台 ID 不能为空'}), 400
+        base_url = str(data.get('base_url') or '').strip()
+        if base_url and not (base_url.startswith('http://') or base_url.startswith('https://')):
+            return jsonify({'success': False, 'message': '平台地址必须以 http:// 或 https:// 开头'}), 400
+        api_key = data.get('api_key')
+        if api_key is not None and len(str(api_key)) > 256:
+            return jsonify({'success': False, 'message': 'API Key 过长（最多 256 字符）'}), 400
+        enabled = data.get('enabled')
+        if enabled is not None and not isinstance(enabled, bool):
+            enabled = None
+        ok = save_platform(pid, base_url=base_url or None, api_key=api_key, enabled=enabled)
+        if not ok:
+            return jsonify({'success': False, 'message': '未知平台或参数非法'}), 400
+        # 平台配置变更后清理调用引擎进程缓存（避免旧认证结果混存）
+        try:
+            from services import uapi_client
+            uapi_client.clear_cache()
+        except Exception:
+            pass
+        # 回显脱敏后的最新平台状态
+        plat = next((p for p in get_platforms_for_display() if p['id'] == pid), None)
+        safe_log('更新 API 平台配置',
+                 f'操作人：{current_user.username} | 平台：{pid} | Key：'
+                 f'{"已配置(" + mask_platform_key(str(api_key)) + ")" if api_key else ("清空" if api_key == "" else "未改动")}',
+                 user=current_user)
+        return jsonify({'success': True, 'message': '平台配置已保存',
+                        'platform': plat})
+
+    @app.route('/admin/service-config/platform/test', methods=['POST'])
+    @login_required
+    def admin_service_config_platform_test():
+        """平台连通性测试：调用 UApiPro 永久免费接口（一言 /saying）验证
+        base_url 可达性与认证模式（访客/Key），并回显限流响应头余量信息"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from services import uapi_client
+        import time as _t
+        start = _t.time()
+        ok, payload, status, message = uapi_client.call_uapi('saying', timeout=(5, 8))
+        latency = int((_t.time() - start) * 1000)
+        plat = None
+        try:
+            from services.service_config import get_platform
+            plat = get_platform('uapis')
+        except Exception:
+            pass
+        auth_mode = 'API Key 认证' if (plat or {}).get('api_key') else '访客模式（无 Key）'
+        if ok:
+            text = str((payload or {}).get('text') or '')[:40]
+            return jsonify({'success': True, 'latency_ms': latency, 'status': status,
+                            'auth_mode': auth_mode,
+                            'message': f'平台连通正常（{auth_mode}，HTTP {status}，{latency}ms）',
+                            'sample': text})
+        return jsonify({'success': False, 'latency_ms': latency, 'status': status,
+                        'auth_mode': auth_mode,
+                        'message': f'{message or "连接失败"}（{auth_mode}，HTTP {status}）'})
+
+    @app.route('/admin/service-config/uapi/test', methods=['POST'])
+    @login_required
+    def admin_service_config_uapi_test():
+        """uapis.cn API 目录一键测试：按目录预置参数真实调用（高积分接口前端已二次确认）"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from services import uapi_catalog, uapi_client
+        data = request.get_json(silent=True) or {}
+        api_id = str(data.get('api_id') or '').strip()
+        api = uapi_catalog.get_api(api_id)
+        if not api:
+            return jsonify({'success': False, 'message': '未知 API'}), 400
+        if api.get('file_type'):
+            return jsonify({'success': False, 'message': '文件上传型接口暂不支持在线测试，请参考官方文档'}), 400
+        if api.get('stream'):
+            return jsonify({'success': False, 'message': '流式响应接口暂不支持在线测试'}), 400
+        if api.get('test_params') is None:
+            return jsonify({'success': False, 'message': '该接口无预置测试参数，请通过「API 试验台」手动填参调用'}), 400
+        # 允许覆盖预置参数（管理员微调）
+        params = api['test_params']
+        if isinstance(data.get('params'), dict) and data['params']:
+            params = {**api['test_params'], **{k: v for k, v in data['params'].items() if v not in (None, '')}}
+        import time as _t
+        start = _t.time()
+        ok, payload, status, message = uapi_client.call_uapi(api_id, params=params, timeout=(5, 20))
+        latency = int((_t.time() - start) * 1000)
+        if ok:
+            keys = list(payload.keys())[:8] if isinstance(payload, dict) else []
+            return jsonify({'success': True, 'status': status, 'latency_ms': latency,
+                            'message': f'调用成功（HTTP {status}，{latency}ms）',
+                            'data_keys': keys, 'data': payload})
+        return jsonify({'success': False, 'status': status, 'latency_ms': latency,
+                        'message': message or f'调用失败（HTTP {status}）', 'data': payload})
+
+    @app.route('/admin/service-config/uapi/playground', methods=['POST'])
+    @login_required
+    def admin_service_config_uapi_playground():
+        """API 试验台：任意目录 API 动态填参实时调用，返回原始响应元信息
+        （JSON 结构化 / 图片 base64 / 其他文本）。仅固定平台 base_url + 目录 path，
+        不接受任意 URL，无 SSRF 面；参数值限长 2000 字符防滥用"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from services import uapi_catalog, uapi_client
+        data = request.get_json(silent=True) or {}
+        api_id = str(data.get('api_id') or '').strip()
+        api = uapi_catalog.get_api(api_id)
+        if not api:
+            return jsonify({'success': False, 'message': '未知 API'}), 400
+        if api.get('file_type'):
+            return jsonify({'success': False, 'message': '文件上传型接口暂不支持试验台，请参考官方文档调用'}), 400
+        if api.get('stream'):
+            return jsonify({'success': False, 'message': '流式响应接口暂不支持试验台'}), 400
+        params = {}
+        for k, v in (data.get('params') or {}).items():
+            if v is None:
+                continue
+            sv = str(v)
+            if len(sv) > 2000:
+                return jsonify({'success': False, 'message': f'参数 {k} 过长（最多 2000 字符）'}), 400
+            if sv != '':
+                params[k] = sv
+        result = uapi_client.call_uapi_raw(api_id, params=params, timeout=(5, 20))
+        return jsonify({'success': 200 <= (result.get('status') or 0) < 300,
+                        'api_id': api_id, 'result': result})
+
+    # ==================== V10.11.47 实用工具页（快递跟踪 / 手机归属地） ====================
+
+    @app.route('/tools')
+    @login_required
+    def tools_page():
+        """实用工具页：快递物流跟踪 + 手机号归属地查询（登录即可用，不挂 menu_map）
+        数据源：UApiPro 平台（访客模式可用；管理员在「外部接口服务配置」配置 Key 后
+        额度更充裕）。快递查询 40 积分/次（结果缓存 10 分钟），手机归属地 2 积分/次（缓存 24 小时）"""
+        return render_template('tools.html')
+
+    @app.route('/api/tools/express', methods=['POST'])
+    @login_required
+    def api_tools_express():
+        """快递物流查询：单号自动识别快递公司并返回完整轨迹。
+        入参 JSON：{tracking_number: 必填 8~32 位字母数字, phone: 可选收件人手机后 4 位（顺丰等需要）}"""
+        data = request.get_json(silent=True) or {}
+        raw_no = str(data.get('tracking_number') or '').strip()
+        phone = str(data.get('phone') or '').strip()
+        if not raw_no:
+            return jsonify({'code': 400, 'message': '请输入快递单号'}), 400
+        import re as _re
+        if not _re.fullmatch(r'[A-Za-z0-9]{8,32}', raw_no):
+            return jsonify({'code': 400, 'message': '快递单号格式不正确（8~32 位字母或数字）'}), 400
+        if phone and not _re.fullmatch(r'\d{1,11}', phone):
+            return jsonify({'code': 400, 'message': '手机号参数格式不正确'}), 400
+        from services import uapi_client
+        ok, payload, message = uapi_client.query_express(raw_no, phone=phone or None)
+        if ok:
+            safe_log('快递查询', f'单号：{raw_no[:4]}****{raw_no[-4:]} | 结果：{payload.get("carrier_name", "")}', user=current_user)
+            return jsonify({'code': 200, 'message': 'ok', 'data': payload})
+        return jsonify({'code': 502, 'message': message or '快递查询失败，请稍后重试'}), 502
+
+    @app.route('/api/tools/phone-lookup', methods=['POST'])
+    @login_required
+    def api_tools_phone_lookup():
+        """手机号归属地查询。入参 JSON：{phone: 必填 11 位大陆手机号}"""
+        data = request.get_json(silent=True) or {}
+        phone = str(data.get('phone') or '').strip()
+        import re as _re
+        if not _re.fullmatch(r'1[3-9]\d{9}', phone):
+            return jsonify({'code': 400, 'message': '请输入正确的 11 位大陆手机号'}), 400
+        from services import uapi_client
+        ok, payload, message = uapi_client.lookup_phone(phone)
+        if ok:
+            return jsonify({'code': 200, 'message': 'ok', 'data': payload})
+        return jsonify({'code': 502, 'message': message or '归属地查询失败，请稍后重试'}), 502
+
+    @app.route('/api/daily/saying', methods=['GET'])
+    def api_daily_saying():
+        """每日一言（UApiPro 免费接口，服务端缓存 1 小时全站共享一句）：
+        登录页与首页横幅装饰位共用；GET 只读无副作用，免登录可访问（未登录页无 CSRF 上下文）；
+        平台不可达时静默降级空数据（装饰位不显示）"""
+        from services import uapi_client
+        data = uapi_client.get_daily_saying()
+        if data and data.get('text'):
+            return jsonify({'code': 200, 'message': 'ok', 'data': data})
+        return jsonify({'code': 200, 'message': 'ok', 'data': None})
 
     # 启动企业微信智能机器人长连接后台监听守护线程与亲友纪念日自动提醒后台调度器
     try:

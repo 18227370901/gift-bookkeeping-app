@@ -97,6 +97,8 @@
                     <a href="/banquets" class="hb-action-chip"><i class="fa-solid fa-wine-glass me-1"></i>办宴席</a>
                     <a href="/dashboard" class="hb-action-chip"><i class="fa-solid fa-chart-pie me-1"></i>看分析</a>
                     <a href="/weather" class="hb-action-chip"><i class="fa-solid fa-calendar-days me-1"></i>万年历</a>
+                    {# V10.11.47 实用工具直达：送礼寄出快递后随时跟踪（登录即可用） #}
+                    <a href="/tools" class="hb-action-chip" title="快递跟踪 / 手机归属地查询"><i class="fa-solid fa-truck-fast me-1"></i>查快递</a>
                 </div>
             </div>
         </div>
@@ -190,6 +192,15 @@
 .hb-badge.festival { background: #a61e4d; }
 .hb-badge.rest { background: #e03131; }
 .hb-badge.work { background: #6c757d; }
+/* V10.11.47 每日一言徽章：横幅内半透明白底长条样式 */
+.hb-saying {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 10px; border-radius: 999px; font-size: 0.72rem;
+    background: rgba(255, 255, 255, 0.18);
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    max-width: 100%;
+}
+.hb-saying .hb-saying-text { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 /* 中栏微晶玻璃卡片 */
 .hb-mid-card {
@@ -508,6 +519,24 @@
 
     // 初始加载
     loadHomeData();
+
+    // ---- V10.11.47 每日一言（UApiPro 免费接口，服务端缓存 1 小时全站共享一句） ----
+    // 平台不可达时静默降级（装饰位不显示），不影响横幅主体
+    fetch('/api/daily/saying', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+            var text = (j && j.code === 200 && j.data && j.data.text) ? String(j.data.text || '').trim() : '';
+            if (!text) return;
+            var box = el('hbBadges');
+            if (!box) return;
+            var span = document.createElement('span');
+            span.className = 'hb-saying';
+            span.title = '每日一言 · uapis.cn';
+            span.innerHTML = '<i class="fa-solid fa-feather-pointed"></i><span class="hb-saying-text"></span>';
+            span.querySelector('.hb-saying-text').textContent = text;
+            box.appendChild(span);
+        })
+        .catch(function () { /* 平台不可达：装饰位静默不显示 */ });
 
     // ---- V10.11.44 管理员统计时长切换（保存成功立即重拉刷新；全局配置，全站用户下次打开/刷新自动同步） ----
     var periodDd = el('hbPeriodDropdown');
