@@ -2778,6 +2778,101 @@ def admin_batch_user_permissions():
         flash('请勾选需要批量配置权限的用户！', 'warning')
         return redirect(url_for('admin_users'))
 
+    # V10.11.45 修复：V10.11.41「全站表单无刷新异步化」重构时本函数主体被意外截断丢失
+    # （仅残留前置权限与 user_ids 检查），user_ids 非空时视图函数返回 None 触发 500，
+    # 前端批量配置弹窗报「批量配置权限异常」。现自 V10.11.37 基线完整还原主体逻辑，
+    # 并补上与前端 fetch 异步提交配套的 JSON 响应分支（双模自适应，与单用户路由同款）。
+    menus_list = request.form.getlist('allowed_menus') or request.form.getlist('allowed_menus[]')
+    # V10.11.13 保存归一：天气权限级别为 0（无天气访问权限）时，从勾选列表中剔除 weather
+    # （修复「勾选天气 + 选 0 级 → 用户仍可访问天气页」的双轨语义冲突：运行时
+    #   can_access_menu('weather') 只看 allowed_menus，无视 menu_permissions 的 0 值）
+    _wperm_raw = request.form.get('menu_perm_weather')
+    if _wperm_raw is None:
+        _wperm_raw = request.form.get('menu_perms[weather]')
+    if _wperm_raw is not None and str(_wperm_raw).isdigit() and int(_wperm_raw) == 0:
+        menus_list = [m for m in menus_list if m != 'weather']
+    allowed_menus_str = ",".join(menus_list)
+
+    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks']
+    menu_perms = {}
+    for m in ALL_MENUS:
+        val = request.form.get(f'menu_perm_{m}')
+        if val is None:
+            val = request.form.get(f'menu_perms[{m}]')
+        if val is not None and str(val).isdigit():
+            menu_perms[m] = int(val)
+        else:
+            legacy_p = request.form.get('perm_level', '0')
+            menu_perms[m] = int(legacy_p) if str(legacy_p).isdigit() else 0
+
+    # 针对天气只读工具菜单：未勾选天气则权限级别归零，勾选则设为 1
+    if 'weather' not in menus_list:
+        menu_perms['weather'] = 0
+    else:
+        menu_perms['weather'] = 1
+
+    # 批量备份授权
+    backup_auth = request.form.get('backup_authorized', '')
+    backup_auth_val = (backup_auth == '1' or backup_auth == 'on')
+
+    # 批量 Webhook 授权
+    webhook_auth = request.form.get('webhook_authorized', '')
+    webhook_auth_val = (webhook_auth == '1' or webhook_auth == 'on' or 'webhooks' in menus_list)
+
+    # V3: 批量 AI 助手授权
+    ai_auth = request.form.get('ai_authorized', '')
+    ai_auth_val = (ai_auth == '1' or ai_auth == 'on')
+
+    # V6: 批量定时任务授权
+    task_auth = request.form.get('scheduled_task_authorized', '')
+    task_auth_val = (task_auth == '1' or task_auth == 'on')
+
+    count = 0
+    for uid_str in user_ids:
+        try:
+            uid = int(uid_str)
+            u = db.session.get(User, uid)
+            if u and not u.is_admin and u.id != current_user.id:
+                u.allowed_menus = allowed_menus_str
+                u.set_menu_permissions(menu_perms)
+                ledger_p = menu_perms.get('ledger', 0)
+                u.can_view_others = (ledger_p >= 1)
+                u.can_edit_others = (ledger_p >= 2)
+                u.can_delete_others = (ledger_p >= 3)
+                u.ai_authorized = ai_auth_val
+                u.scheduled_task_authorized = task_auth_val
+                u.backup_authorized = backup_auth_val
+                u.webhook_authorized = webhook_auth_val
+                count += 1
+        except Exception:
+            continue
+
+    if count > 0:
+        db.session.commit()
+        log_action('批量配置权限', f"管理员批量更新了 {count} 位用户的菜单与各菜单独立数据权限")
+        # V10.3: 补充批量配置权限推送
+        try:
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'update',
+                f'{current_user.username} 批量配置 {count} 位用户权限',
+                f'操作人：{current_user.username} | 页面：用户管理 | 操作：批量配置权限 | 数量：{count}',
+                page_key='admin_users', user_name=current_user.username,
+                operator_id=current_user.id
+            )
+        except Exception:
+            pass
+        msg = f'已批量更新 {count} 位用户权限'
+        if is_ajax:
+            return jsonify({'code': 200, 'message': msg, 'count': count})
+        flash(msg, 'success')
+    else:
+        warn = '未找到符合批量更新条件的普通用户！'
+        if is_ajax:
+            return jsonify({'code': 400, 'message': warn}), 400
+        flash(warn, 'warning')
+
+    return redirect(url_for('admin_users'))
+
 # ==================== 全局默认权限模板与一键重置路由 ====================
 @app.route('/admin/permissions/default/save_group', methods=['POST'])
 @login_required
@@ -2902,30 +2997,24 @@ def admin_batch_reset_default_permissions():
     flash(f'已成功将选中的 {count} 位普通用户的权限全部重置为系统全局默认模板！', 'success')
     return redirect(url_for('admin_users'))
 
-    from services.permission_service import apply_default_permissions_to_user
-    count = 0
-    names = []
-    for uid in user_ids:
-        if str(uid).isdigit():
-            u = User.query.get(int(uid))
-            if u and not u.is_admin and u.id != current_user.id:
-                apply_default_permissions_to_user(u, force_save=False)
-                count += 1
-                names.append(u.username)
-    db.session.commit()
-    log_action('批量重置用户权限', f'管理员批量重置了 {count} 位普通用户的权限为系统默认模板：{", ".join(names[:5])}')
-    flash(f'已成功将选中的 {count} 位普通用户的权限全部重置为系统全局默认模板！', 'success')
-    return redirect(url_for('admin_users'))
-
 @app.route('/admin/user/permissions/<int:user_id>', methods=['POST'])
 @login_required
 def admin_update_user_permissions(user_id):
+    # V10.11.45 修复：前端 handleUpdateUserPermissions 以 fetch+X-Requested-With 异步提交，
+    # 此前本接口无论成功失败一律 flash+redirect 返回 302 HTML，fetch 重定向后拿到 HTML
+    # 导致 res.json() 解析失败进 catch，弹窗误报「权限保存失败」（实际权限已保存成功）。
+    # 现对齐 admin_reset_user_default_permissions 同款双模自适应：AJAX 返回 JSON，传统表单保留重定向。
+    is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
     if not current_user.is_admin:
+        if is_ajax:
+            return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
 
     user = User.query.get_or_404(user_id)
     if user.id == current_user.id:
+        if is_ajax:
+            return jsonify({'code': 400, 'message': '无需为当前管理员账号设置数据权限！'}), 400
         flash('无需为当前管理员账号设置数据权限！', 'warning')
         return redirect(url_for('admin_users'))
 
@@ -3026,7 +3115,31 @@ def admin_update_user_permissions(user_id):
         )
     except Exception:
         pass
-    flash(f'用户 [{user.username}] 的各菜单独立数据权限已更新：{perm_summary}', 'success')
+    msg = f'用户 [{user.username}] 权限已更新'
+
+    # V10.11.45 AJAX 分支：返回局部更新胶囊与气泡所需字段（与初始渲染/重置接口同款结构）
+    if is_ajax:
+        p_labels = {0: "仅自身", 1: "查他人", 2: "查改他人", 3: "完全"}
+        m_names = {"ledger": "账本", "banquets": "宴席", "reconciliation": "对账", "reminders": "备忘", "recycle_bin": "回收", "backups": "备份"}
+        active_cnt = sum(1 for mk in m_names if user.get_menu_perm(mk) > 0)
+        max_lvl = max(user.get_menu_perm(mk) for mk in m_names)
+        # V10.11.46 精简前端提示语：完整逐模块权限明细保留在审计日志与 Webhook 推送中，
+        # Toast 只展示一句话结论（此前 124 字长文案撑出 150px 高巨型提示条，视觉上像必须手动关闭）
+        if active_cnt > 0:
+            msg = f'用户 [{user.username}] 权限已更新（{active_cnt} 项跨用户授权）'
+        else:
+            msg = f'用户 [{user.username}] 权限已更新（仅限自身数据）'
+        details = {mk: {"name": m_names[mk], "level": user.get_menu_perm(mk), "label": p_labels[user.get_menu_perm(mk)]} for mk in m_names}
+        return jsonify({
+            'code': 200,
+            'message': msg,
+            'user_id': user.id,
+            'username': user.username,
+            'active_count': active_cnt,
+            'max_level': max_lvl,
+            'details': details
+        })
+    flash(msg, 'success')
     return redirect(url_for('admin_users'))
 
 
@@ -3684,9 +3797,9 @@ register_routes_ext(
 from routes.routes_ai import register_ai_routes
 register_ai_routes(app, log_action=log_action)
 
-# 注册天气查询路由（Open-Meteo 数据源）
+# 注册天气查询路由（Open-Meteo 数据源）；V10.11.44 注入 log_action 供首页统计时长保存接口写审计日志
 from routes.routes_weather import register_weather_routes
-register_weather_routes(app)
+register_weather_routes(app, log_action=log_action)
 
 # V10.11.8 注册告警推送路由（配置/测试/日志/授权）并启动后台巡检守护线程
 from routes.routes_alert import register_alert_routes

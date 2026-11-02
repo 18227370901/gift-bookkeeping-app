@@ -676,8 +676,9 @@
     </script>
 
     <!-- 全局异步操作通用 Toast 提示容器 -->
+    <!-- V10.11.46：max-width 约束防止长文案撑出巨型提示条；提示条顶部居中、数秒后自动消失，无需手动点击 -->
     <div class="toast-container position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 2050;">
-        <div id="globalAppToast" class="toast align-items-center text-white border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true">
+        <div id="globalAppToast" class="toast align-items-center text-white border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true" style="max-width: min(92vw, 520px);">
             <div class="d-flex">
                 <div class="toast-body d-flex align-items-center gap-2" id="globalAppToastBody">
                     <i class="fa-solid fa-circle-check fs-6" id="globalAppToastIcon"></i>
@@ -714,7 +715,11 @@
             iconEl.className = "fa-solid fa-circle-info fs-6";
         }
         msgEl.textContent = msg;
-        var bsToast = bootstrap.Toast.getInstance(toastEl) || new bootstrap.Toast(toastEl, { delay: 3500 });
+        // V10.11.46：每次 dispose 后重建 Toast 实例，彻底避免上一次动画/计时的实例状态残留
+        // （连续操作时旧实例复用可能在边缘场景下计时失效需手动关闭）；3 秒后自动淡出消失。
+        var old = bootstrap.Toast.getInstance(toastEl);
+        if (old) { try { old.dispose(); } catch (e) {} }
+        var bsToast = new bootstrap.Toast(toastEl, { delay: 3000 });
         bsToast.show();
     }
     window.showAppToast = showAppToast;

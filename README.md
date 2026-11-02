@@ -10,7 +10,7 @@
 
 > **简洁、安全、全能的人情往来与礼金财务管理系统**。支持自然语言智能记账、专属宴席独立台账、人情往来精准对账、权威万年历与节假日调休感知、AI 记账助手、多渠道 Webhook 告警与 WebDAV 加密云备份。
 >
-> 📌 **当前版本**：`V10.11.43` | 📖 **[查看全量版本发布历史与更新日志 (docs/CHANGELOG.md)](docs/CHANGELOG.md)**
+> 📌 **当前版本**：`V10.11.46` | 📖 **[查看全量版本发布历史与更新日志 (docs/CHANGELOG.md)](docs/CHANGELOG.md)**
 
 <!-- 
   【AI 协作与维护规范 - 严禁违背】
@@ -60,6 +60,7 @@
    - **实时天气与预报**：集成 Open-Meteo 免费气象接口，提供城市实时温湿度、空气质量与未来预报，支持多级缓存降级保障。
 
 6. 📊 **数据看板与专业导出 (Dashboard & Export)**
+   - **首页引导快捷统计**：首页大卡片实时展示人情往来收送净结余，统计时长（本月/近一年/本自然年/自定义 1~120 月）由管理员一键配置，全站用户自动同步；
    - **可视化分析看板**：集成 ECharts，提供月度/年度收支走势折线图、事由分布饼图与亲友往来 TOP10 排行；
    - **传统中式 A4 打印**：纯 CSS 实现古典竖排人情簿 A4 打印预览（含金额大写、页眉页脚与汇总栏）；
    - **专业对账单与海报**：服务端一键生成 PDF 对账单；前端支持渲染 375px 手机端暖色长图海报（含二维码水印）。
@@ -124,7 +125,7 @@ gift_bookkeeping_app/
 │   ├── DEPLOYMENT.md          # 详细部署与 Nginx/SSL/Git 运维手册
 │   ├── PSD_Design_Document.md # 详细设计与重构决策文档 (Markdown 原生版)
 │   ├── PSD_Design_Document.html # 设计文档图表离线 HTML 交互版
-│   ├── CHANGELOG.md           # 全量版本演进与历史变更日志 (V2 ~ V10.11.37)
+│   ├── CHANGELOG.md           # 全量版本演进与历史变更日志 (V2 ~ V10.11.46)
 │   ├── SAMPLE_DATA.md         # 样例数据体系与 9 项推送前核查规范
 │   └── ANDROID_BUILD.md       # Android 原生 APK 打包指南
 │
@@ -149,8 +150,8 @@ gift_bookkeeping_app/
 深入了解系统部署、架构设计或二次开发，请参阅 `docs/` 目录下的专有手册：
 
 - 🛠️ **[完整部署与运维手册 (docs/DEPLOYMENT.md)](docs/DEPLOYMENT.md)**：包含端口配置、多项目共用 443 SNI 分流、自签名 SSL 证书定制、Nginx 自动渲染以及 Linux 服务器代码免冲突更新方案；
-- 📐 **[PSD 架构设计与重构决策文档 (docs/PSD_Design_Document.md)](docs/PSD_Design_Document.md)**：包含系统全景技术栈审计、漂移矩阵分析、前后台完整设计规格及 ADR-01~57 全部架构决策记录（另备有包含完整图表的 [HTML 交互版](docs/PSD_Design_Document.html)）；
-- 📜 **[全量版本发布与变更日志 (docs/CHANGELOG.md)](docs/CHANGELOG.md)**：记录从 V2 至 V10.11.37 每一个版本的迭代日志与详细技术升级公告；
+- 📐 **[PSD 架构设计与重构决策文档 (docs/PSD_Design_Document.md)](docs/PSD_Design_Document.md)**：包含系统全景技术栈审计、漂移矩阵分析、前后台完整设计规格及 ADR-01~76 全部架构决策记录（另备有包含完整图表的 [HTML 交互版](docs/PSD_Design_Document.html)）；
+- 📜 **[全量版本发布与变更日志 (docs/CHANGELOG.md)](docs/CHANGELOG.md)**：记录从 V2 至 V10.11.46 每一个版本的迭代日志与详细技术升级公告；
 - 📦 **[开箱即用样例数据体系规范 (docs/SAMPLE_DATA.md)](docs/SAMPLE_DATA.md)**：包含 151 条高仿真演示记录构成、多角色测试账号矩阵、敏感数据脱敏准则及推送前 9 项核查红线；
 - 📱 **[Android APK 打包指南 (docs/ANDROID_BUILD.md)](docs/ANDROID_BUILD.md)**：基于 GitHub Actions 与 Buildozer 的移动端离线安装包自动构建流程；
 - 🌐 **[多形态交付生态矩阵 (Ecosystem)](docs/DEPLOYMENT.md#八项目多形态交付矩阵-ecosystem)**：了解 Web 原生版、Docker Compose 版与 Android APK 版的源码仓库。

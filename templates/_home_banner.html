@@ -1,10 +1,17 @@
-{# V10.11.16 首页背景横幅（时间/农历/黄历宜忌/本月往来/天气）
+{# V10.11.44 首页背景横幅（时间/农历/黄历宜忌/人情往来统计/天气）
    被 index.html 与 permission_tickets.html 引入。
-   三栏式高雅布局，解决卡片中间留白，融合传统黄历与人情账本核心数据。 #}
+   三栏式高雅布局，解决卡片中间留白，融合传统黄历与人情账本核心数据。
+   V10.11.44：人情往来统计时长管理员可配置（本月/近一年/本自然年/自定义月数），
+   全局唯一配置全员自动同步，标题文案与统计区间随档位动态渲染。 #}
 <!-- ==================== 首页背景横幅 ==================== -->
 <div class="hb-banner mb-4" id="homeBanner">
-    <div class="hb-deco hb-deco-1"></div>
-    <div class="hb-deco hb-deco-2"></div>
+    <!-- V10.11.46 装饰光斑专用裁剪层：此前 .hb-banner 自身 overflow:hidden 会连带裁剪
+         统计时长下拉菜单（184px 高、下半部分超出横幅下缘被剪掉，自定义输入框不可用）；
+         现光斑单独放入本绝对定位裁剪层，横幅本体不再限制子元素溢出，下拉菜单完整可见 -->
+    <div class="hb-banner-clip" aria-hidden="true">
+        <div class="hb-deco hb-deco-1"></div>
+        <div class="hb-deco hb-deco-2"></div>
+    </div>
     <div class="row g-3 align-items-center position-relative">
         <!-- 左栏：时钟、公历、农历与节日班休 -->
         <div class="col-lg-4 col-md-5">
@@ -34,10 +41,32 @@
                     </div>
                 </div>
 
-                <!-- 本月人情收支看板 -->
+                <!-- 人情往来统计看板（V10.11.44 统计时长管理员可配置，全员自动同步） -->
                 <div class="hb-ledger-stats mb-2" id="hbLedgerStats">
                     <div class="d-flex justify-content-between align-items-center small opacity-90 mb-1">
-                        <span><i class="fa-solid fa-receipt me-1 opacity-75"></i>本月人情往来</span>
+                        <span class="d-inline-flex align-items-center">
+                            <i class="fa-solid fa-receipt me-1 opacity-75"></i><span id="hbStatTitle">人情往来</span>
+                            {% if current_user.is_admin %}
+                            <div class="dropdown ms-1" id="hbPeriodDropdown" data-bs-auto-close="outside">
+                                <button type="button" class="hb-period-btn" data-bs-toggle="dropdown" aria-expanded="false"
+                                        title="设置统计时长（管理员设置后全站用户自动同步）">
+                                    <i class="fa-solid fa-sliders"></i>
+                                </button>
+                                <ul class="dropdown-menu hb-period-menu" id="hbPeriodMenu" aria-labelledby="hbPeriodDropdown">
+                                    <li><a class="dropdown-item" href="javascript:void(0)" data-period="month"><i class="fa-regular fa-calendar me-2"></i>本月</a></li>
+                                    <li><a class="dropdown-item" href="javascript:void(0)" data-period="year_rolling"><i class="fa-solid fa-arrows-rotate me-2"></i>近一年（推荐）</a></li>
+                                    <li><a class="dropdown-item" href="javascript:void(0)" data-period="year_calendar"><i class="fa-regular fa-calendar-days me-2"></i>本自然年</a></li>
+                                    <li><hr class="dropdown-divider"></li>
+                                    <li class="dropdown-item-text small text-muted">自定义（近 N 个月）</li>
+                                    <li class="px-3 pb-1 d-flex align-items-center gap-2">
+                                        <input type="number" class="form-control form-control-sm hb-period-input" id="hbCustomMonths"
+                                               min="1" max="120" step="1" value="12" title="月数范围 1~120" style="width:78px">
+                                        <button type="button" class="btn btn-sm btn-warning text-white flex-shrink-0" id="hbCustomApply">应用</button>
+                                    </li>
+                                </ul>
+                            </div>
+                            {% endif %}
+                        </span>
                         <span class="opacity-75" id="hbStatCount">-- 笔</span>
                     </div>
                     <div class="row g-1 text-center hb-stat-row">
@@ -96,14 +125,21 @@
 <style>
 /* 首页背景横幅：红金渐变主视觉（白天/黑夜双主题，自包含纯 CSS 零图片） */
 /* 组件设计规范 3: 横幅卡（Hero Banner）圆角 rounded-3xl，三色渐变背景，叠加两处大尺寸绝对定位毛玻璃微光斑（bg-white/10 blur-2xl），内嵌半透明玻璃卡片 */
+/* V10.11.46：横幅本体不再 overflow:hidden（会裁剪统计时长下拉菜单）；
+   圆角裁剪下沉到专用 .hb-banner-clip 绝对定位层，只包装饰光斑 */
 .hb-banner {
-    position: relative; overflow: hidden;
+    position: relative; overflow: visible !important;
     border-radius: 1.5rem !important; /* rounded-3xl */
     padding: 1.75rem 2rem; color: #fff;
     /* bg-gradient-to-r from-orange-500 via-rose-500 to-amber-500 */
     background: linear-gradient(135deg, #f97316 0%, #f43f5e 50%, #f59e0b 100%) !important;
     box-shadow: 0 0.75rem 2.5rem rgba(249, 115, 22, 0.28), 0 0.2rem 0.6rem rgba(244, 63, 94, 0.16);
     border: 1px solid rgba(255, 255, 255, 0.22);
+}
+/* 装饰光斑裁剪层：绝对定位铺满横幅、继承圆角，只裁剪光斑不裁剪功能内容 */
+.hb-banner-clip {
+    position: absolute; inset: 0; border-radius: inherit;
+    overflow: hidden; pointer-events: none; z-index: 0;
 }
 [data-bs-theme="dark"] .hb-banner {
     background: linear-gradient(135deg, #7c2d12 0%, #881337 50%, #78350f 100%) !important;
@@ -195,6 +231,23 @@
 }
 .hb-stat-label { font-size: 0.72rem; opacity: 0.8; }
 .hb-stat-val { font-size: 0.88rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* V10.11.44 统计时长切换小滑杆按钮（仅管理员渲染）与下拉菜单 */
+.hb-period-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; padding: 0; line-height: 1;
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.32);
+    color: #fff; font-size: 0.62rem; border-radius: 50%;
+    cursor: pointer; transition: all 0.2s ease; opacity: 0.9;
+}
+.hb-period-btn:hover, .hb-period-btn[aria-expanded="true"] {
+    background: rgba(255, 255, 255, 0.34); opacity: 1; transform: translateY(-1px);
+}
+.hb-period-menu { font-size: 0.82rem; min-width: 186px; box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.22); z-index: 1020; }
+.hb-period-menu .dropdown-item { padding-top: 0.32rem; padding-bottom: 0.32rem; }
+.hb-period-menu .dropdown-item.active, .hb-period-menu .dropdown-item:active { background: #f59e0b; color: #fff; }
+.hb-period-input { text-align: center; }
 
 /* 快捷按钮 */
 .hb-action-chip {
@@ -366,70 +419,130 @@
     } catch (e) { }
 
     var qStr = qParams.length ? ('?' + qParams.join('&')) : '';
-    fetch('/api/home/weather' + qStr, { credentials: 'same-origin' })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-            var data = (j && j.code === 200) ? j.data : null;
-            if (!data) { hideWeather(); return; }
+    var badgeAdded = false;  // V10.11.44 重拉防班/休徽章重复插入
 
-            // 班/休徽章
-            if (data.badge) {
-                var b = data.badge;
-                el('hbBadges').insertAdjacentHTML('beforeend',
-                    '<span class="hb-badge ' + (b.holiday ? 'rest' : 'work') + '" title="' +
-                    (b.holiday ? '今日休息日：' : '今日调休补班：') + (b.name || '') + '">' +
-                    (b.holiday ? '休' : '班') + '</span>');
+    function hideWeather() { el('hbWeatherBox').style.display = 'none'; }
+
+    // V10.11.44 数据拉取抽为可重复调用：初始加载一次，管理员切换统计时长保存成功后再拉一次
+    function loadHomeData() {
+        fetch('/api/home/weather' + qStr, { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(renderHomeData)
+            .catch(function () { hideWeather(); });
+    }
+
+    function renderHomeData(j) {
+        var data = (j && j.code === 200) ? j.data : null;
+        if (!data) { hideWeather(); return; }
+
+        // 班/休徽章（仅首次插入）
+        if (data.badge && !badgeAdded) {
+            badgeAdded = true;
+            var b = data.badge;
+            el('hbBadges').insertAdjacentHTML('beforeend',
+                '<span class="hb-badge ' + (b.holiday ? 'rest' : 'work') + '" title="' +
+                (b.holiday ? '今日休息日：' : '今日调休补班：') + (b.name || '') + '">' +
+                (b.holiday ? '休' : '班') + '</span>');
+        }
+
+        // 人情往来统计渲染（V10.11.44 标题与统计区间随管理员配置档位动态展示）
+        if (data.ledger) {
+            var l = data.ledger;
+            el('hbStatTitle').textContent = (l.label || '') + '人情往来';
+            var statBox = el('hbLedgerStats');
+            if (statBox) {
+                statBox.title = '统计区间：' + (l.start_date || '--') + ' ~ ' + (l.end_date || '--') +
+                    '（时长由管理员设置，全站用户自动同步）';
             }
-
-            // 本月人情往来统计渲染
-            if (data.ledger) {
-                var l = data.ledger;
-                el('hbStatRec').textContent = '¥' + Number(l.received || 0).toLocaleString('zh-CN', {minimumFractionDigits: 0, maximumFractionDigits: 2});
-                el('hbStatSent').textContent = '¥' + Number(l.sent || 0).toLocaleString('zh-CN', {minimumFractionDigits: 0, maximumFractionDigits: 2});
-                var netVal = Number(l.net || 0);
-                el('hbStatNet').textContent = (netVal >= 0 ? '+' : '') + '¥' + netVal.toLocaleString('zh-CN', {minimumFractionDigits: 0, maximumFractionDigits: 2});
-                el('hbStatNet').className = 'hb-stat-val ' + (netVal >= 0 ? 'text-success' : 'text-danger');
-                el('hbStatCount').textContent = '共 ' + (l.count || 0) + ' 笔往来';
-            } else {
-                var statBox = el('hbLedgerStats');
-                if (statBox) statBox.style.display = 'none';
-            }
-
-            // 天气渲染
-            if (!data.weather) { hideWeather(); return; }
-            var w = data.weather;
-            var isPreset = !data.has_weather_permission || data.is_admin_preset;
-            var srcBadgeText = isPreset ? '管理员预设' : (data.source === 'user' ? '我的地点' : '管理员预设');
-            var srcBadge = '<span class="hb-src-badge" title="地点来源">' + srcBadgeText + '</span>';
-            var iconHtml = w.icon ? '<i class="fa-solid ' + w.icon + ' me-2"></i>' : '';
-            var tempText = (w.temp === null || w.temp === undefined) ? '--' : Math.round(w.temp);
-            var minmax = '';
-            if (w.today_max !== null && w.today_max !== undefined) {
-                minmax += '今 ' + Math.round(w.today_max) + '°/' + Math.round(w.today_min) + '°';
-                if (w.tomorrow_max !== null && w.tomorrow_max !== undefined) {
-                    minmax += ' · 明 ' + Math.round(w.tomorrow_max) + '°/' + Math.round(w.tomorrow_min) + '°';
+            var periodMenu = el('hbPeriodMenu');
+            if (periodMenu) {
+                var items = periodMenu.querySelectorAll('.dropdown-item[data-period]');
+                for (var pi = 0; pi < items.length; pi++) {
+                    items[pi].classList.toggle('active', items[pi].getAttribute('data-period') === l.period);
                 }
+                var mInput = el('hbCustomMonths');
+                if (mInput && l.period === 'custom' && l.months) { mInput.value = String(l.months); }
             }
+            el('hbStatRec').textContent = '¥' + Number(l.received || 0).toLocaleString('zh-CN', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+            el('hbStatSent').textContent = '¥' + Number(l.sent || 0).toLocaleString('zh-CN', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+            var netVal = Number(l.net || 0);
+            el('hbStatNet').textContent = (netVal >= 0 ? '+' : '') + '¥' + netVal.toLocaleString('zh-CN', {minimumFractionDigits: 0, maximumFractionDigits: 2});
+            el('hbStatNet').className = 'hb-stat-val ' + (netVal >= 0 ? 'text-success' : 'text-danger');
+            el('hbStatCount').textContent = '共 ' + (l.count || 0) + ' 笔往来';
+        } else {
+            var statBoxHide = el('hbLedgerStats');
+            if (statBoxHide) statBoxHide.style.display = 'none';
+        }
 
-            var extraAction = '';
-            if (isPreset) {
-                extraAction = '<div class="mt-1 small opacity-75" title="管理员预设"><i class="fa-solid fa-circle-info me-1"></i>这是管理员预设的地址</div>';
-            } else {
-                extraAction = '<div class="mt-1"><a href="/weather" class="text-white text-opacity-75 small text-decoration-none"><i class="fa-solid fa-angle-right me-1"></i>查看15天预报</a></div>';
+        // 天气渲染
+        if (!data.weather) { hideWeather(); return; }
+        var w = data.weather;
+        var isPreset = !data.has_weather_permission || data.is_admin_preset;
+        var srcBadgeText = isPreset ? '管理员预设' : (data.source === 'user' ? '我的地点' : '管理员预设');
+        var srcBadge = '<span class="hb-src-badge" title="地点来源">' + srcBadgeText + '</span>';
+        var iconHtml = w.icon ? '<i class="fa-solid ' + w.icon + ' me-2"></i>' : '';
+        var tempText = (w.temp === null || w.temp === undefined) ? '--' : Math.round(w.temp);
+        var minmax = '';
+        if (w.today_max !== null && w.today_max !== undefined) {
+            minmax += '今 ' + Math.round(w.today_max) + '°/' + Math.round(w.today_min) + '°';
+            if (w.tomorrow_max !== null && w.tomorrow_max !== undefined) {
+                minmax += ' · 明 ' + Math.round(w.tomorrow_max) + '°/' + Math.round(w.tomorrow_min) + '°';
             }
+        }
 
-            el('hbWeatherBox').innerHTML =
-                '<div class="hb-weather-content">' +
-                '<div class="hb-city"><i class="fa-solid fa-location-dot me-1"></i>' + data.city + srcBadge + '</div>' +
-                '<div class="hb-temp-line"><span class="hb-temp">' + tempText + '</span><span class="hb-temp-unit">°C</span><span class="hb-desc">' + iconHtml + (w.desc || '') + '</span></div>' +
-                (minmax ? '<div class="hb-minmax">' + minmax + '</div>' : '') +
-                extraAction +
-                '</div>';
-        })
-        .catch(function () { hideWeather(); });
+        var extraAction = '';
+        if (isPreset) {
+            extraAction = '<div class="mt-1 small opacity-75" title="管理员预设"><i class="fa-solid fa-circle-info me-1"></i>这是管理员预设的地址</div>';
+        } else {
+            extraAction = '<div class="mt-1"><a href="/weather" class="text-white text-opacity-75 small text-decoration-none"><i class="fa-solid fa-angle-right me-1"></i>查看15天预报</a></div>';
+        }
 
-    function hideWeather() {
-        el('hbWeatherBox').style.display = 'none';
+        el('hbWeatherBox').innerHTML =
+            '<div class="hb-weather-content">' +
+            '<div class="hb-city"><i class="fa-solid fa-location-dot me-1"></i>' + data.city + srcBadge + '</div>' +
+            '<div class="hb-temp-line"><span class="hb-temp">' + tempText + '</span><span class="hb-temp-unit">°C</span><span class="hb-desc">' + iconHtml + (w.desc || '') + '</span></div>' +
+            (minmax ? '<div class="hb-minmax">' + minmax + '</div>' : '') +
+            extraAction +
+            '</div>';
+    }
+
+    // 初始加载
+    loadHomeData();
+
+    // ---- V10.11.44 管理员统计时长切换（保存成功立即重拉刷新；全局配置，全站用户下次打开/刷新自动同步） ----
+    var periodDd = el('hbPeriodDropdown');
+    if (periodDd) {
+        var ddToggle = periodDd.querySelector('[data-bs-toggle="dropdown"]');
+        var ddHide = function () {
+            try {
+                if (window.bootstrap && ddToggle) { bootstrap.Dropdown.getOrCreateInstance(ddToggle).hide(); }
+            } catch (e) { }
+        };
+        var savePeriod = function (payload) {
+            payload.csrf_token = '{{ csrf_token }}';
+            fetch('/api/home/banner-period', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+                body: JSON.stringify(payload)
+            }).then(function (r) { return r.json(); }).then(function (j) {
+                if (j && j.code === 200) { ddHide(); loadHomeData(); }
+                else { alert((j && j.message) || '保存失败，请稍后重试'); }
+            }).catch(function () { alert('保存失败，请稍后重试'); });
+        };
+        var presetItems = periodDd.querySelectorAll('.dropdown-item[data-period]');
+        for (var ii = 0; ii < presetItems.length; ii++) {
+            presetItems[ii].addEventListener('click', function (evt) {
+                savePeriod({ period: evt.currentTarget.getAttribute('data-period') });
+            });
+        }
+        var applyBtn = el('hbCustomApply');
+        if (applyBtn) {
+            applyBtn.addEventListener('click', function () {
+                var v = parseInt(el('hbCustomMonths').value, 10);
+                if (!v || v < 1 || v > 120) { alert('自定义月数必须是 1~120 之间的整数！'); return; }
+                savePeriod({ period: 'custom', months: v });
+            });
+        }
     }
 })();
 </script>

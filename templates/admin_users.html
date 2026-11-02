@@ -841,8 +841,8 @@
                               <div style="min-width: 210px;">
                                 {% set p_weather = u.get_menu_perm('weather') %}
                                 <select class="form-select form-select-sm" name="menu_perm_weather">
-                                  <option value="0" {% if p_weather == 0 %}selected{% endif %}>无天气访问权限 (0级)</option>
-                                  <option value="1" {% if p_weather >= 1 %}selected{% endif %}>可查看实时天气与万年历 (1级)</option>
+                                  <option value="0" {% if p_weather == 0 %}selected{% endif %}>无天气访问权限</option>
+                                  <option value="1" {% if p_weather >= 1 %}selected{% endif %}>可查看实时天气与万年历</option>
                                 </select>
                               </div>
                             </div>
@@ -2090,11 +2090,10 @@ function handleBatchUserPermissions(e, formEl) {
         var m = bootstrap.Modal.getInstance(modalEl);
         if (m) m.hide();
       }
-      // 局部异步刷新勾选用户的权限胶囊
-      var checked = document.querySelectorAll('.user-checkbox:checked');
-      checked.forEach(function(cb) {
-        submitSingleUserResetDefault(cb.value, '', true);
-      });
+      // V10.11.45 修复：此前误用 submitSingleUserResetDefault 刷新胶囊——那是「重置为系统默认」
+      // 接口，会把刚批量配置的权限覆盖回默认模板。批量配置影响多用户多项权限，
+      // 改为整页刷新，保证胶囊/气泡/复选框状态与服务端完全一致。
+      setTimeout(function() { window.location.reload(); }, 600);
     } else {
       if (window.showAppToast) showAppToast(data.message || "批量配置权限失败", "danger");
     }
@@ -2375,8 +2374,8 @@ function handleBatchUserPermissions(e, formEl) {
                 </div>
                 <div style="min-width: 210px;">
                   <select class="form-select form-select-sm" name="menu_perm_weather">
-                    <option value="0">无天气访问权限 (0级)</option>
-                    <option value="1" selected>可查看实时天气与万年历 (1级)</option>
+                    <option value="0">无天气访问权限</option>
+                    <option value="1" selected>可查看实时天气与万年历</option>
                   </select>
                 </div>
               </div>

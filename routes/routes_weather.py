@@ -6,6 +6,7 @@
     - GET /api/weather/query       天气查询 JSON API（V10.11.7：days 天数参数 + 级联省/市参数）
     - GET /api/holiday/year/<y>    法定节假日班/休 JSON API（V10.11.10：万年历模块班休角标）
     - GET /api/home/weather        首页背景横幅轻量天气 JSON API（V10.11.12，登录即可不挂 menu_map）
+    - POST /api/home/banner-period 首页横幅统计时长保存接口（V10.11.44，仅管理员，全局配置全员自动同步）
 参数说明：
     - city        城市名/区县名（自由文本或级联的末级地名，必填；/api/home/weather 中为可选的“当前用户自己记忆的城市”）
     - province    级联模式下的省名（可选，如「四川省」，用于候选城市智能匹配）
@@ -14,8 +15,9 @@
 遵循项目现有路由组织方式：模块内定义 register_weather_routes(app)，
 由 app.py 在应用初始化末尾调用注册。
 """
+import calendar as _calendar
 import time as _time
-from datetime import date as _date
+from datetime import date as _date, datetime as _dt
 
 from flask import render_template, request, jsonify, current_app
 from flask_login import login_required, current_user
@@ -34,6 +36,71 @@ _HOME_WEATHER_DEFAULT_CITY = '成都'
 _HOME_WEATHER_CACHE = {}
 _HOME_WEATHER_TTL = 30 * 60
 _HOME_WEATHER_MAX_ENTRIES = 200
+
+# ===================== V10.11.44 首页横幅统计时长档位（管理员配置·全员自动同步） =====================
+# 档位含义：month=本自然月 | year_rolling=近12个月滚动（默认） | year_calendar=本自然年 | custom=近N个月(1~120)
+# 存储复用 system_settings 表（全局唯一配置，不随用户变化）：管理员保存后，全站用户下次打开/刷新首页
+# 即由 /api/home/weather 按最新配置计算，无需推送、无需重启，天然自动同步。
+_HOME_STAT_PERIOD_KEY = 'home_banner_stat_period'
+_HOME_STAT_MONTHS_KEY = 'home_banner_stat_months'
+_HOME_STAT_PERIODS = ('month', 'year_rolling', 'year_calendar', 'custom')
+_HOME_STAT_DEFAULT_PERIOD = 'year_rolling'
+_HOME_STAT_DEFAULT_MONTHS = 12
+_HOME_STAT_MONTHS_MIN = 1
+_HOME_STAT_MONTHS_MAX = 120
+
+
+def _months_ago_date(base, months):
+    """base 日期往前推 months 个自然月，按日对齐并自动处理月末边界（如 3-31 推 1 个月 → 2-28/29）"""
+    y = base.year
+    m = base.month - months
+    while m <= 0:
+        m += 12
+        y -= 1
+    last_day = _calendar.monthrange(y, m)[1]
+    return _date(y, m, min(base.day, last_day))
+
+
+def _home_stat_label(period, months, today):
+    """档位 → 横幅标题文案（近一年滚动优先保证任何时点都覆盖完整人情往来周期）"""
+    if period == 'month':
+        return '本月'
+    if period == 'year_calendar':
+        return '%d年' % today.year
+    if period == 'custom':
+        return '近%d个月' % months
+    return '近一年'
+
+
+def _resolve_home_stat_range(today=None):
+    """解析当前生效的首页统计时长配置（非法/缺失自动回退「近一年」）。
+    返回 {period, months, label, start_dt, start_date, end_date}；start_dt 为统计起始零点。"""
+    today = today or _date.today()
+    period = (SystemSetting.get_val(_HOME_STAT_PERIOD_KEY) or '').strip()
+    if period not in _HOME_STAT_PERIODS:
+        period = _HOME_STAT_DEFAULT_PERIOD
+    months = _HOME_STAT_DEFAULT_MONTHS
+    if period == 'custom':
+        try:
+            months = int(float((SystemSetting.get_val(_HOME_STAT_MONTHS_KEY) or '').strip()))
+        except (TypeError, ValueError):
+            months = _HOME_STAT_DEFAULT_MONTHS
+        if not (_HOME_STAT_MONTHS_MIN <= months <= _HOME_STAT_MONTHS_MAX):
+            months = _HOME_STAT_DEFAULT_MONTHS
+    if period == 'month':
+        start = today.replace(day=1)
+    elif period == 'year_calendar':
+        start = today.replace(month=1, day=1)
+    else:  # year_rolling / custom
+        start = _months_ago_date(today, 12 if period == 'year_rolling' else months)
+    return {
+        'period': period,
+        'months': months if period == 'custom' else (12 if period == 'year_rolling' else 0),
+        'label': _home_stat_label(period, months, today),
+        'start_dt': _dt(start.year, start.month, start.day),
+        'start_date': start.isoformat(),
+        'end_date': today.isoformat(),
+    }
 
 
 def _build_home_weather(city=None, lat=None, lon=None, label=None):
@@ -84,8 +151,10 @@ def _build_home_weather(city=None, lat=None, lon=None, label=None):
     return payload
 
 
-def register_weather_routes(app):
-    """注册天气相关路由"""
+def register_weather_routes(app, log_action=None):
+    """注册天气相关路由
+    V10.11.44 起新增 log_action 注入参数，供首页统计时长保存接口写审计日志
+    （与 routes_ai 的注入模式一致，由 app.py 调用处传入）。"""
 
     @app.route('/weather')
     @login_required
@@ -274,16 +343,12 @@ def register_weather_routes(app):
         except Exception:
             pass
 
-        # 4. 本月人情往来摘要
+        # 4. 人情往来摘要（V10.11.44：统计时长管理员可配置，全局唯一配置全员自动同步；默认近一年滚动）
         ledger_summary = None
         try:
             from services.models import GiftRecord
             today = _date.today()
-            first_day = today.replace(day=1)
-            if today.month == 12:
-                next_month = today.replace(year=today.year + 1, month=1, day=1)
-            else:
-                next_month = today.replace(month=today.month + 1, day=1)
+            rng = _resolve_home_stat_range(today)
 
             if getattr(current_user, "is_admin", False) or (hasattr(current_user, "can_view_others_for") and current_user.can_view_others_for("ledger")):
                 l_q = GiftRecord.query.filter(GiftRecord.deleted_at.is_(None))
@@ -302,8 +367,7 @@ def register_weather_routes(app):
                     else_=0.0
                 )), 0.0)
             ).filter(
-                GiftRecord.created_at >= first_day,
-                GiftRecord.created_at < next_month
+                GiftRecord.created_at >= rng["start_dt"]
             ).order_by(None).first()
 
             if stats:
@@ -314,7 +378,12 @@ def register_weather_routes(app):
                     "received": round(rec, 2),
                     "sent": round(snt, 2),
                     "net": round(rec - snt, 2),
-                    "count": int(cnt or 0)
+                    "count": int(cnt or 0),
+                    "period": rng["period"],
+                    "months": rng["months"],
+                    "label": rng["label"],
+                    "start_date": rng["start_date"],
+                    "end_date": rng["end_date"],
                 }
         except Exception:
             pass
@@ -332,5 +401,72 @@ def register_weather_routes(app):
                 "weather": weather,
                 "badge": badge,
                 "ledger": ledger_summary,
+            }
+        })
+
+    @app.route('/api/home/banner-period', methods=['POST'])
+    @login_required
+    def api_home_banner_period_save():
+        """V10.11.44 首页横幅统计时长保存接口（仅管理员；全局唯一配置，保存后全站用户自动同步）
+        入参 JSON：{period: month|year_rolling|year_calendar|custom, months: 1~120（仅 custom 必填）}
+        安全设计：
+          - CSRF 由全局 csrf_protect 前置拦截保障（JSON body csrf_token / X-CSRF-Token 均可）
+          - 权限由本接口 is_admin 判定，不挂 menu_map（与 update_session_timeout 先例一致，
+            普通用户直访一律 403；menu_map 白名单式，不挂即不受子路由权限系统影响）
+          - 审计日志归 system 模块（含「系统配置」关键词），审计日志页自动可追溯
+          - 复用现有 'system' 类 Webhook 事件推送（Webhook 配置页零改造）
+        """
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'code': 403, 'message': '只有超级管理员才能调整首页统计时长！'}), 403
+
+        data = request.get_json(silent=True) or request.form or {}
+        period = str(data.get('period') or '').strip()
+        if period not in _HOME_STAT_PERIODS:
+            return jsonify({'code': 400, 'message': '统计时长档位非法（可选：本月 / 近一年 / 本自然年 / 自定义）'}), 400
+
+        months = _HOME_STAT_DEFAULT_MONTHS
+        if period == 'custom':
+            try:
+                months = int(float(str(data.get('months') or '').strip()))
+            except (TypeError, ValueError):
+                months = 0
+            if not (_HOME_STAT_MONTHS_MIN <= months <= _HOME_STAT_MONTHS_MAX):
+                return jsonify({'code': 400, 'message': '自定义月数必须是 %d~%d 之间的整数！' % (
+                    _HOME_STAT_MONTHS_MIN, _HOME_STAT_MONTHS_MAX)}), 400
+
+        # 全局唯一配置落库（复用 system_settings，WebDAV/定时备份为整库物理备份自动包含，零改造）
+        SystemSetting.set_val(_HOME_STAT_PERIOD_KEY, period)
+        SystemSetting.set_val(_HOME_STAT_MONTHS_KEY, str(months) if period == 'custom' else '')
+
+        rng = _resolve_home_stat_range()
+        if log_action:
+            try:
+                log_action('修改系统配置',
+                           '管理员 %s 将首页人情往来统计时长调整为「%s人情往来」（统计区间 %s ~ %s，全站用户自动同步）' % (
+                               current_user.username, rng['label'], rng['start_date'], rng['end_date']))
+            except Exception:
+                pass
+        try:
+            from services.models import WebhookConfig
+            from services.webhook_utils import trigger_webhook_event
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
+                '%s 调整首页统计时长为「%s」' % (current_user.username, rng['label']),
+                '操作人：%s | 页面：首页横幅 | 操作：调整人情往来统计时长为「%s」（全员同步生效）' % (
+                    current_user.username, rng['label']),
+                page_key='index', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
+
+        return jsonify({
+            'code': 200,
+            'message': '保存成功',
+            'data': {
+                'period': rng['period'],
+                'months': rng['months'],
+                'label': rng['label'],
+                'start_date': rng['start_date'],
+                'end_date': rng['end_date'],
             }
         })

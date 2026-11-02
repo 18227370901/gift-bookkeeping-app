@@ -2390,3 +2390,65 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
 - **验证与效果**：
   - 传统版与 Docker 版各脚本全量通过 POSIX `sh -n` 严格语法校验；
   - 经双沙盒环境动态渲染验证：公网模式准确生成 `listen 3443 default_server ssl;`，前置代理模式准确生成 `listen 127.0.0.1:3443 ssl;`，无任何占位符残留；热重载平滑顺畅。
+
+
+### ADR-74：首页横幅人情往来统计时长管理员可配置与全站自动同步（V10.11.44 落地）
+- **背景与痛点**：
+  1. **固定本自然月统计窗口过短**：首页引导大卡片的「本月人情往来」快捷统计固定只统计当月数据，而人情往来具有强季节周期性（春节集中送礼、婚宴看黄历扎堆），单月窗口在多数时点只有零星几笔，无法反映用户真实的人情往来总貌；
+  2. **无任何可配置能力**：统计窗口写死在后端 `first_day ~ next_month` 区间，管理员与普通用户均无调整手段。
+- **决策方案**：
+  1. **四档位时长模型（全局唯一配置·全员自动同步）**：
+     - 档位定义：`month`（本自然月）| `year_rolling`（近 12 个月滚动，**默认档**）| `year_calendar`（本自然年）| `custom`（近 N 个月，N ∈ [1,120]）；
+     - 配置存储复用 `system_settings` 表（`home_banner_stat_period` / `home_banner_stat_months`），`register_weather_routes` 新增 `log_action` 注入参数；
+     - **同步机制**：时间范围由服务端统一计算，每个用户首页统计实时读最新配置——管理员保存成功即对全站生效（下次打开/刷新首页），无需推送/重启/客户端升级；普通用户界面不渲染切换入口（模板 `{% if current_user.is_admin %}`），杜绝个人口径漂移；
+     - 默认档采用「近一年」滚动而非本自然年：任何时点都覆盖完整人情周期，规避年初数据失真；非法配置自动回退近一年；`_months_ago_date` 按日对齐处理月末边界。
+  2. **横幅内联切换交互**：
+     - 统计条标题旁小滑杆圆形按钮（仅管理员渲染），Bootstrap 下拉 `data-bs-auto-close="outside"` 保证自定义输入框点击不误关；切换即时保存并重拉刷新（`loadHomeData` 抽取为可重复调用，班/休徽章加 flag 防重复插入）；
+     - 标题文案由 API `label` 驱动动态渲染，统计区块 `title` 悬浮展示起止区间。
+  3. **零破坏兼容与影响面治理（逐页核验）**：
+     - `/api/home/weather` 的 `ledger` 字段结构向后兼容，仅新增 `period/months/label/start_date/end_date`；
+     - 新增 `POST /api/home/banner-period`：CSRF 走全局 `csrf_protect`、`is_admin` 内部判定不挂 `menu_map`、审计自动归 system 模块、复用 `system` 类 Webhook 事件——权限管理页/审计日志页/Webhook 配置页/WebDAV 备份页/外部接口配置页全部零改造；
+     - 数据可见范围分流（全站 vs 仅自己）与时长配置两层独立互不干扰。
+- **验证与效果**：
+  - `py_compile` 通过；服务重启平稳；浏览器四档位切换逐项验证全绿（本月 0 笔 ↔ 近一年 1760 笔对比直观印证痛点；自定义 6 个月区间按日对齐正确）；
+  - 安全边界：未登录 403、无 CSRF Token 403、非法档位 400、月数越界 400；
+  - permission_tickets 落点页横幅渲染正常，AI 视觉审读确认三栏布局无错位溢出。
+
+
+### ADR-75：用户权限保存 AJAX 化误报修复、批量配置权限主体还原与天气权限文案优化（V10.11.45 落地）
+- **背景与痛点**：
+  1. **单用户权限保存误报「权限保存失败」**：前端 `handleUpdateUserPermissions` 以 fetch + `X-Requested-With` 异步提交期待 JSON，后端 `admin_update_user_permissions` 一律 `flash + redirect` 返回 302 HTML，fetch 跟随重定向后 `res.json()` 解析失败进 `.catch()` 误报失败（实际权限已保存成功，纯交互层缺陷）；
+  2. **批量配置权限功能自 V10.11.41 起整体不可用**：`admin_batch_user_permissions` 在 V10.11.41「全站表单异步化」重构时函数主体被意外截断丢失（仅残留前置检查），user_ids 非空时视图返回 `None` 触发 500；
+  3. **天气权限下拉文案带级别标注**：「无天气访问权限 (0级) / 可查看实时天气与万年历 (1级)」表述冗余；
+  4. **PSD HTML 版 ADR-69 ~ 73 历史欠账**：md 版已收录但 HTML 版未同步。
+- **决策方案**：
+  1. **单用户权限保存双模自适应**：
+     - 对齐 `admin_reset_user_default_permissions` 先例：AJAX 请求返回标准 JSON（`user_id/username/active_count/max_level/details` 完整字段集供前端 `updateUserRowPermCapsule` 局部更新胶囊与气泡），传统表单保留 flash + redirect；权限不足（403）与管理员自身（400）等早期返回分支同步补齐 AJAX JSON。
+  2. **批量权限主体自 V10.11.37 基线完整还原 + AJAX 分支补齐**：
+     - 还原菜单勾选归一（含 V10.11.13 天气 0 级剔除归一）、10 菜单独立数据权限解析、备份/Webhook/AI/定时任务四项功能授权、循环更新普通用户 + commit + 审计日志 + Webhook 推送 + AJAX JSON 响应；
+     - 同步修复连带前端缺陷：`handleBatchUserPermissions` 成功回调误调 `submitSingleUserResetDefault`（重置为系统默认接口，会覆盖刚批量配置的权限），改为 Toast + 600ms 后整页刷新，保证多用户状态与服务端一致；
+     - 顺手移除 `admin_batch_reset_default_permissions` return 后 14 行不可达死代码。
+  3. **天气文案去级别标注（全局引用同步校验）**：
+     - `admin_users.html` 两处弹窗 4 行选项文案统一去掉 (0级)/(1级)；经全项目搜索确认级别标注文案仅此 4 处，`permission_service.py` CRUD 细粒度权限项描述、JS 联动逻辑、后端归一逻辑均不受影响，无需连带修改。
+  4. **ADR-69 ~ 73 补录 HTML 版**：5 条 ADR 按表格区块格式完整补录（补充十二 ~ 十六），ADR-74 序号修正为补充十七，双版本完全同步。
+- **验证与效果**：
+  - `py_compile` 通过；服务重启平稳；
+  - 浏览器验证全绿：单用户权限保存返回 JSON 200、Toast 成功、弹窗自动关闭、行内胶囊与气泡即时刷新、无误报；批量配置 500 根除、成功后整页刷新；天气下拉文案两处均无级别标注。
+
+
+### ADR-76：首页横幅统计时长下拉被横幅裁剪修复与权限保存 Toast 精简自动消失（V10.11.46 落地）
+- **背景与痛点**：
+  1. **统计时长下拉菜单被裁剪、自定义档不可用**：`.hb-banner` 为裁剪装饰光斑设置 `overflow: hidden`，184px 高的下拉菜单下半部分超出横幅下缘被直接剪掉——「自定义（近 N 个月）」月数输入框与「应用」按钮不可见不可点，管理员无法自定义时间范围；
+  2. **权限保存提示语过长**：单用户保存的 Toast 拼接 10 个菜单逐项权限明细（124 字），撑出 150px 高巨型提示条，视觉上像必须手动关闭；
+  3. **Toast 自动消失感知不稳**：`showAppToast` 以 `getInstance || new` 复用实例，连续操作时旧实例动画/计时状态残留存在需手动关闭的边缘风险。
+- **决策方案**：
+  1. **裁剪下沉专用层（光斑裁剪与内容溢出解耦）**：
+     - 新增 `.hb-banner-clip` 绝对定位裁剪层（`inset: 0`、`border-radius: inherit`、`overflow: hidden`、`pointer-events: none`、`z-index: 0`）只包两个装饰光斑；横幅本体改 `overflow: visible`——光斑仍被圆角裁剪、下拉菜单不再被裁；`.hb-period-menu` z-index 提升至 1020 盖过后续内容；
+  2. **Toast 一句话结论化（明细无损下沉审计）**：
+     - 单用户保存精简为 `用户 [xxx] 权限已更新（N 项跨用户授权）`（0 项时为「仅限自身数据」）、批量精简为 `已批量更新 N 位用户权限`；完整逐模块 perm_summary 保留在 log_action 审计日志与 Webhook 推送中，信息不损失；
+  3. **Toast 自动消失加固**：
+     - `showAppToast` 每次先 `dispose()` 旧实例再 `new bootstrap.Toast(el, { delay: 3000 })`，杜绝实例状态残留；`#globalAppToast` 增加 `max-width: min(92vw, 520px)` 防长文案撑条。
+- **验证与效果**：
+  - `py_compile` 通过；服务重启平稳；
+  - 下拉菜单几何检测：输入框/应用按钮完整位于菜单矩形内且可交互，AI 视觉审读确认无裁剪、光斑仍被圆角裁剪无外溢；自定义档全链路可用（3 个月 → 标题/区间/回显/自动关闭全部正确）；
+  - Toast 实测：24 字单行 45px、约 3 秒自动消失无需手动点击；测试数据已恢复。
