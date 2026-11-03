@@ -632,7 +632,11 @@
         <div>
           {% if not current_user.is_admin %}
           <div class="alert alert-info border-0 rounded-3 mb-3 py-2 px-3 small">
-            <i class="fa-solid fa-shield-halved me-1 text-info"></i>您导出的备份仅包含本人的账目明细与礼金数据。
+            <i class="fa-solid fa-shield-halved me-1 text-info"></i>您导出的备份仅包含本人的账目明细与礼金数据（不含系统配置与其他用户数据）。
+          </div>
+          {% else %}
+          <div class="alert alert-info border-0 rounded-3 mb-3 py-2 px-3 small">
+            <i class="fa-solid fa-shield-halved me-1 text-info"></i>管理员导出的为整库全量备份（含全部用户数据、权限配置与系统配置——含外部接口配置及 API 平台 Key 等敏感设置），请妥善保管备份文件，谨防外传泄露。
           </div>
           {% endif %}
           <label class="form-label fw-bold text-dark mb-2">当前运行环境与格式</label>

@@ -343,6 +343,8 @@ def purge_expired_logs(days=90):
 import json as _json_module
 
 # V10: 审计日志模块过滤映射——按 action 关键词归组
+# V10.11.50 新增 tools（实用工具：快递/手机归属地）与 service_config（外部接口/平台）两组，
+# 与权限/页面矩阵同步；service_config 置于 ai_assistant 之前避免 'API' 关键词截胡
 AUDIT_MODULE_MAP = {
     'ledger': ['记录', '极简记账', '导入', '导出', '查询记录'],
     'banquets': ['大账本', '宴席', '分享链接'],
@@ -354,6 +356,8 @@ AUDIT_MODULE_MAP = {
     'backups': ['WebDAV', '备份', '恢复', '定时任务', '附件'],
     'permission_tickets': ['工单', '权限申请'],
     'broadcasts': ['广播'],
+    'tools': ['快递', '手机归属地', '实用工具'],
+    'service_config': ['外部接口', 'API 平台', '端点', '服务配置'],
     'ai_assistant': ['AI', '会话', '配置更新', '授权管理'],
     'auth': ['登录', '注册', '退出', '找回', '风控', '锁定'],
     'system': ['系统配置', '注册策略', '邀请', '日志'],
@@ -367,15 +371,58 @@ def _get_audit_module(action_text):
                 return module_key
     return 'system'  # 未匹配的默认归入 system
 
+def _parse_audit_modules(raw):
+    """容错解析审计日志模块白名单（V10.11.50）
+    历史缺陷：旧版提交可能产生双重序列化畸形值（如 json.dumps(["['a','b']"])——列表内嵌
+    Python repr 字符串），导致白名单匹配永不成功、全站日志被静默丢弃。此处对畸形值
+    做二次解析并自愈回写正常单层 JSON（保留管理员原意图），解析失败返回 None（默认全记）"""
+    if not raw:
+        return None
+    try:
+        modules = _json_module.loads(raw)
+    except Exception:
+        return None
+    if isinstance(modules, str):        # 值本身是 JSON 字符串再包一层
+        try:
+            modules = _json_module.loads(modules)
+        except Exception:
+            return None
+    if not isinstance(modules, list):
+        return None
+    clean = []
+    for m in modules:
+        if isinstance(m, str) and m.strip():
+            s = m.strip()
+            if s.startswith('['):        # 列表元素是 repr 风格字符串 → 二次解析展开
+                try:
+                    inner = _json_module.loads(s.replace("'", '"'))
+                    if isinstance(inner, list):
+                        clean.extend(str(x).strip() for x in inner if str(x).strip())
+                        continue
+                except Exception:
+                    pass
+            clean.append(s)
+    return clean or None
+
+
 def _should_log_module(action_text):
     """检查当前模块是否在管理员配置的审计日志白名单中"""
     try:
-        config_val = SystemSetting.get_val('audit_log_modules', None)
-        if not config_val:
+        raw = SystemSetting.get_val('audit_log_modules', None)
+        if not raw:
             return True  # 未配置 = 默认全部记录
-        modules = _json_module.loads(config_val)
-        if not modules or 'all' in modules:
-            return True  # 空列表或包含 'all' = 全部记录
+        modules = _parse_audit_modules(raw)
+        if modules is None:
+            return True  # 解析失败 = 默认全部记录
+        if 'all' in modules:
+            return True  # 包含 'all' = 全部记录
+        # V10.11.50 自愈：检测到原始值为畸形双重序列化时回写正常单层 JSON（保留管理员意图）
+        normalized = _json_module.dumps(modules)
+        if normalized != raw.strip():
+            try:
+                SystemSetting.set_val('audit_log_modules', normalized)
+            except Exception:
+                pass
         module_key = _get_audit_module(action_text)
         return module_key in modules
     except Exception:
@@ -2453,15 +2500,16 @@ def admin_logs():
         ('broadcasts', '系统广播'), ('ai_assistant', 'AI助手'), ('auth', '认证安全'),
         ('system', '系统配置'), ('weather', '天气'), ('family', '家庭记账'),
         ('dashboard', '数据分析'),
+        # V10.11.50 新增模块组（与功能/权限体系同步）：实用工具与外部接口配置
+        ('tools', '实用工具'), ('service_config', '外部接口配置'),
     ]
     if not audit_modules_raw:
         audit_modules_enabled = [m[0] for m in audit_modules_all]  # 默认全部启用
     else:
-        try:
-            audit_modules_enabled = _json_module.loads(audit_modules_raw)
-            if not audit_modules_enabled or 'all' in audit_modules_enabled:
-                audit_modules_enabled = [m[0] for m in audit_modules_all]
-        except Exception:
+        # V10.11.50 容错解析：畸形双重序列化值自动展开（与 _should_log_module 同款），
+        # 页面复选框回显与白名单匹配语义一致
+        audit_modules_enabled = _parse_audit_modules(audit_modules_raw) or [m[0] for m in audit_modules_all]
+        if 'all' in audit_modules_enabled:
             audit_modules_enabled = [m[0] for m in audit_modules_all]
 
     return render_template(
@@ -2704,6 +2752,15 @@ def admin_save_audit_log_config():
     if not modules and request.is_json:
         req_data = request.get_json(silent=True) or {}
         modules = req_data.get('audit_modules', [])
+        # V10.11.50 保存端加固：JSON 分支若传字符串（历史双重序列化来源），尝试二次解析为列表
+        if isinstance(modules, str):
+            try:
+                modules = _json_module.loads(modules.replace("'", '"'))
+            except Exception:
+                modules = [modules] if modules.strip() else []
+        if not isinstance(modules, list):
+            modules = []
+        modules = [str(m).strip() for m in modules if str(m).strip()]
     if not modules:
         SystemSetting.set_val('audit_log_modules', '[]')
     elif 'all' in modules:
@@ -2793,7 +2850,7 @@ def admin_batch_user_permissions():
         menus_list = [m for m in menus_list if m != 'weather']
     allowed_menus_str = ",".join(menus_list)
 
-    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks']
+    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools']
     menu_perms = {}
     for m in ALL_MENUS:
         val = request.form.get(f'menu_perm_{m}')
@@ -3034,7 +3091,7 @@ def admin_update_user_permissions(user_id):
     user.allowed_menus = ",".join(menus_list)
 
     # 2. 各菜单独立数据权限更新
-    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks']
+    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools']
     MENU_NAMES = {
         'ledger': '礼金账本',
         'dashboard': '数据分析',
@@ -3045,7 +3102,8 @@ def admin_update_user_permissions(user_id):
         'recycle_bin': '回收站',
         'backups': 'WebDAV备份',
         'weather': '天气',
-        'webhooks': 'Webhook通知'
+        'webhooks': 'Webhook通知',
+        'tools': '实用工具'
     }
     PERM_LABELS = {
         0: '仅自身',

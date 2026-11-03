@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-新用户全局默认权限模板 (CRUD 细粒度 74项) 与权限工具服务
+新用户全局默认权限模板 (CRUD 细粒度 75项) 与权限工具服务
 参考 mengya 权限矩阵架构规范
 """
 
 import json
 
-# ==================== 74 项全局细粒度权限分组与定义 ====================
+# ==================== 75 项全局细粒度权限分组与定义 ====================
 PERMISSION_GROUPS = [
     {
         "key": "menu_access",
@@ -23,6 +23,7 @@ PERMISSION_GROUPS = [
             {"key": "menu_weather", "name": "万年历/天气", "desc": "访问桌面生活助手与黄历天气", "default": True},
             {"key": "menu_webhooks", "name": "告警通知", "desc": "访问消息通知与系统告警记录", "default": False},
             {"key": "menu_backups", "name": "数据备份", "desc": "访问 WebDAV 云端备份与快照中心", "default": False},
+            {"key": "menu_tools", "name": "实用工具", "desc": "快递物流跟踪与手机号归属地查询（消耗外部接口积分）", "default": False},
         ]
     },
     {
@@ -220,7 +221,7 @@ def apply_default_permissions_to_user(user, force_save=True):
     
     # 1. 计算 allowed_menus
     menus = []
-    menu_keys = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'dashboard', 'family', 'weather', 'webhooks', 'backups']
+    menu_keys = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'dashboard', 'family', 'weather', 'webhooks', 'backups', 'tools']
     for m in menu_keys:
         if template.get(f'menu_{m}', False):
             menus.append(m)

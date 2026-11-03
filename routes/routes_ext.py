@@ -733,6 +733,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             'admin_alerts_logs_csv': 'webhooks',
             'admin_alerts_grants': 'webhooks',
             'admin_alerts_grants_save': 'webhooks',
+            # V10.11.50 实用工具页菜单门控：快递/手机归属地消耗外部接口积分，
+            # 普通用户需管理员在用户管理页勾选「实用工具」授权后才可使用
+            'tools_page': 'tools',
+            'api_tools_express': 'tools',
+            'api_tools_phone_lookup': 'tools',
         }
         required_menu = menu_map.get(endpoint)
         if required_menu and hasattr(current_user, 'can_access_menu'):
@@ -749,7 +754,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 ,
                     'webhooks': 'Webhook通知',
                     'admin_webhooks': 'Webhook通知',
-                    'backups': 'WebDAV备份'
+                    'backups': 'WebDAV备份',
+                    'tools': '实用工具'
                 }
                 m_name = menu_names.get(required_menu, '该功能')
                 if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -5017,6 +5023,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         ('reminders', '纪念日备忘'),
         ('recycle_bin', '回收站'),
         ('webhooks', 'Webhook通知'),
+        # V10.11.50 实用工具入工单申请范围：普通用户可自助申请，管理员审批即合并进 allowed_menus
+        ('tools', '实用工具'),
     ]
 
     @app.route('/permission_tickets')
@@ -6025,13 +6033,15 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     # ==================== V10.11.47/48 API 平台注册表管理（管理员，多平台多 Key） ====================
 
     def _push_service_config_webhook(title, detail):
-        """外部接口/API 平台配置变更的 Webhook 推送（V10.11.48 联动：system 事件通道）"""
+        """外部接口/API 平台配置变更的 Webhook 推送（V10.11.48 联动：system 事件通道）
+        V10.11.50 同步：page_key 改为 'service_config'——推送配置矩阵新增「外部接口配置」页面行，
+        用户可在 Webhook 配置页按页面×事件精细订阅/静音这类推送（此前 'index' 不在矩阵无法订阅控制）"""
         try:
             from services.models import WebhookConfig
             from services.webhook_utils import trigger_webhook_event
             trigger_webhook_event(
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'system', title, detail,
-                page_key='index', user_name=current_user.username, operator_id=current_user.id
+                page_key='service_config', user_name=current_user.username, operator_id=current_user.id
             )
         except Exception:
             pass
@@ -6331,6 +6341,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         from services import uapi_client
         ok, payload, message = uapi_client.lookup_phone(phone)
         if ok:
+            # V10.11.50 审计补齐：手机号脱敏记录（与快递查询同款审计链路；字段 sp=运营商）
+            safe_log('手机归属地查询', f'手机号：{phone[:3]}****{phone[-4:]} | 归属：{payload.get("province", "")}·{payload.get("city", "")} {payload.get("sp", "")}', user=current_user)
             return jsonify({'code': 200, 'message': 'ok', 'data': payload})
         return jsonify({'code': 502, 'message': message or '归属地查询失败，请稍后重试'}), 502
 

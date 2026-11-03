@@ -170,10 +170,12 @@
                         <a class="nav-link text-info" href="{{ url_for('weather_page') }}"><i class="fa-solid fa-cloud-sun me-1"></i>天气</a>
                     </li>
                     {% endif %}
-                    {# V10.11.47 实用工具（快递跟踪/手机归属地）：登录即可用，不挂菜单权限 #}
+                    {# V10.11.50 实用工具（快递跟踪/手机归属地）：挂 tools 菜单权限门控——普通用户需管理员在用户管理页勾选「实用工具」授权后可见可用 #}
+                    {% if current_user.is_admin or current_user.can_access_menu('tools') %}
                     <li class="nav-item">
                         <a class="nav-link text-secondary" href="{{ url_for('tools_page') }}"><i class="fa-solid fa-toolbox me-1"></i>实用工具</a>
                     </li>
+                    {% endif %}
                     {% if current_user.is_admin or current_user.can_access_menu('dashboard') %}
                     <li class="nav-item">
                         <a class="nav-link text-primary" href="{{ url_for('dashboard_view') }}"><i class="fa-solid fa-chart-line me-1"></i>数据分析</a>

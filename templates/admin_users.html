@@ -847,7 +847,29 @@
                               </div>
                             </div>
 
-                            <!-- 9. Webhook通知 -->
+                            <!-- V10.11.50 实用工具：快递跟踪/手机归属地（勾选授权整页；消耗外部接口积分，默认关闭） -->
+                            <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
+                              <div class="form-check mb-0 d-flex align-items-center">
+                                <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="tools" id="menu_tools_{{ u.id }}" {% if u.can_access_menu('tools') %}checked{% endif %}>
+                                <label class="form-check-label fw-semibold small text-dark" for="menu_tools_{{ u.id }}">
+                                  <i class="fa-solid fa-toolbox text-success me-1"></i>实用工具
+                                </label>
+                              </div>
+                              <div class="small text-muted"><i class="fa-solid fa-truck-fast me-1"></i>快递物流跟踪 · <i class="fa-solid fa-phone me-1"></i>手机号归属地查询</div>
+                            </div>
+
+                            <!-- V10.11.50 实用工具：批量勾选授权（默认不勾选——与全局默认权限模板 default=False 一致） -->
+               <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
+                 <div class="form-check mb-0 d-flex align-items-center">
+                   <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="tools" id="batch_menu_tools">
+                   <label class="form-check-label fw-semibold small text-dark" for="batch_menu_tools">
+                     <i class="fa-solid fa-toolbox text-success me-1"></i>实用工具
+                   </label>
+                 </div>
+                 <div class="small text-muted"><i class="fa-solid fa-truck-fast me-1"></i>快递物流跟踪 · <i class="fa-solid fa-phone me-1"></i>手机号归属地查询</div>
+               </div>
+
+               <!-- 9. Webhook通知 -->
                             <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
                               <div class="form-check mb-0 d-flex align-items-center">
                                 <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="webhooks" id="menu_webhooks_{{ u.id }}" {% if u.can_access_menu('webhooks') or u.webhook_authorized %}checked{% endif %}>

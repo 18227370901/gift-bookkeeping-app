@@ -490,6 +490,7 @@ PAGE_NAMES = {
     'security': '系统安全', 'invites': '邀请链接', 'permission_tickets': '权限工单',
     'dashboard': '数据分析', 'family': '家庭记账',
     'weather': '天气',
+    'service_config': '外部接口配置',
 }
 
 ALL_PAGES = list(PAGE_NAMES.keys())
@@ -524,6 +525,8 @@ PAGE_EVENT_MATRIX = {
     # 只读页面：数据分析（dashboard）与天气（weather）不产生业务事件，矩阵留空展示为"—"
     'dashboard':         [],
     'weather':           [],
+    # V10.11.50 外部接口配置：端点组保存/平台增删改/启停（_push_service_config_webhook → system 事件）
+    'service_config':    ['create', 'update', 'delete', 'status_change', 'system'],
 }
 
 # 事件类型 → 开关字段名映射
