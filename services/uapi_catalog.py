@@ -61,10 +61,41 @@ CATEGORIES = [
 ]
 
 
-def _p(name, label, ptype='text', required=False, example='', options=None):
-    """参数定义构造器（压缩目录书写篇幅）"""
+def _p(name, label, ptype='text', required=False, example='', options=None, convert=None):
+    """参数定义构造器（压缩目录书写篇幅）
+    ptype: text/number/bool/select/date/datetime
+    convert: 前端提交值转换（'timestamp_ms' 日期时间→毫秒时间戳；None 不转换）
+    date/datetime 型渲染为系统日历选择器，人类友好输入"""
     return {'name': name, 'label': label, 'type': ptype,
-            'required': required, 'example': example, 'options': options or []}
+            'required': required, 'example': example, 'options': options or [],
+            'convert': convert}
+
+
+# 预置参数哨兵（resolve_test_params 运行时替换为真实值；前端日历控件同样处理）
+SENTRY_NOW_MS = '__NOW_MS__'   # 当前毫秒时间戳
+SENTRY_NOW_S = '__NOW_S__'     # 当前秒级时间戳（lunartime 实测参数 ts 为秒级）
+SENTRY_TODAY = '__TODAY__'     # 今天 YYYY-MM-DD
+SENTRY_YEAR = '__YEAR__'       # 当前年份
+
+
+def resolve_test_params(api):
+    """解析 API 预置测试参数：哨兵值替换为运行时真实值（今天日期/当前时间戳/年份）
+    供后端一键测试与前端日历预填共用"""
+    import time as _t
+    lt = _t.localtime()
+    out = {}
+    for k, v in (api.get('test_params') or {}).items():
+        if v == SENTRY_NOW_MS:
+            out[k] = str(int(_t.time() * 1000))
+        elif v == SENTRY_NOW_S:
+            out[k] = str(int(_t.time()))
+        elif v == SENTRY_TODAY:
+            out[k] = '%04d-%02d-%02d' % (lt.tm_year, lt.tm_mon, lt.tm_mday)
+        elif v == SENTRY_YEAR:
+            out[k] = str(lt.tm_year)
+        else:
+            out[k] = v
+    return out
 
 
 # ===================== 全量 API 目录（110 个） =====================
@@ -88,10 +119,10 @@ APIS = [
          test_params={'type': 'weibo'},
          doc='https://uapis.cn/docs/api-reference/get-misc-hotboard'),
     dict(id='misc_worldtime', name='查询世界时间', cat='misc', method='GET', path='/misc/worldtime', credits=0,
-         desc='按城市查询世界各地当前时间',
-         params=[_p('city', '城市名（必填，如 北京/Tokyo）', 'text', True, '北京'),
-                 _p('timezone', 'IANA 时区名', example='Asia/Shanghai')],
-         test_params={'city': '北京'},
+         desc='按城市查询世界各地当前时间（城市名仅支持英文，如 Tokyo/Shanghai/Beijing）',
+         params=[_p('city', '城市英文名（必填，如 Tokyo）', 'text', True, 'Shanghai'),
+                 _p('timezone', 'IANA 时区名（可选，配合 city）', example='Asia/Shanghai')],
+         test_params={'city': 'Shanghai'},
          doc='https://uapis.cn/docs/api-reference/get-misc-worldtime'),
     dict(id='misc_phoneinfo', name='查询手机归属地', cat='misc', method='GET', path='/misc/phoneinfo', credits=2,
          desc='大陆手机号归属省市、运营商（移动/联通/电信）与固话区号',
@@ -105,9 +136,10 @@ APIS = [
          test_params={},
          doc='https://uapis.cn/docs/api-reference/get-history-programmer-today'),
     dict(id='misc_lunartime', name='查询农历时间', cat='misc', method='GET', path='/misc/lunartime', credits=0,
-         desc='时间戳对应的农历/干支/节气信息',
-         params=[_p('timestamp', '毫秒时间戳', 'number', example='1700000000000'), _p('timezone', '时区')],
-         test_params={'timestamp': str(int(time.time() * 1000))},
+         desc='指定日期时间对应的农历/干支/生肖信息（日历选择器选日期，提交时自动转为秒级时间戳；经实测参数名为 ts 且为秒级，官方文档的 timestamp 参数实为无效参数）',
+         params=[_p('ts', '日期时间（日历选择，提交时自动转秒级时间戳）', 'datetime', True,
+                    example='2026-11-03 12:00', convert='timestamp_s')],
+         test_params={'ts': SENTRY_NOW_S},
          doc='https://uapis.cn/docs/api-reference/get-misc-lunartime'),
     dict(id='misc_randomnumber', name='随机数生成', cat='misc', method='GET', path='/misc/randomnumber', credits=0,
          desc='指定范围内的随机数',
@@ -121,18 +153,18 @@ APIS = [
          doc='https://uapis.cn/docs/api-reference/get-history-programmer'),
     dict(id='misc_holiday_calendar', name='节假日与万年历', cat='misc', method='GET',
          path='/misc/holiday-calendar', credits=1,
-         desc='按 date/month/year 三种模式查询班休/农历/干支/节气（date/month/year 三选一）',
-         params=[_p('date', '按日查询 YYYY-MM-DD', example='2026-10-01'),
+         desc='按 date/month/year 三种模式查询班休/农历/干支/节气（date/month/year 三选一，日历选择器选日期）',
+         params=[_p('date', '按日查询（日历选择）', 'date', True, '2026-10-01'),
                  _p('month', '按月查询 YYYY-MM', example='2026-10'),
                  _p('year', '按年查询 YYYY', example='2026'),
                  _p('holiday_type', '类型过滤', 'select', options=['all', 'legal', 'solar', 'lunar', 'term']),
                  _p('region', '地区 CN/HK', 'select', options=['CN', 'HK']),
                  _p('include_nearby', '含前后最近节日（仅 date 模式）', 'bool'),
                  _p('exclude_past', '过滤已过去节日', 'bool')],
-         test_params={'year': str(time.localtime().tm_year)},
+         test_params={'date': SENTRY_TODAY, 'include_nearby': 'true'},
          doc='https://uapis.cn/docs/api-reference/get-misc-holiday-calendar'),
     dict(id='misc_timestamp', name='转换时间戳（旧版）', cat='misc', method='GET', path='/misc/timestamp', credits=0,
-         desc='时间戳与日期互转（参数名 ts；官方推荐改用 /convert/unixtime）',
+         desc='时间戳与日期互转（参数名 ts，支持时间戳或常见日期格式；官方推荐改用 /convert/unixtime）',
          params=[_p('ts', '时间戳或日期串（必填）', 'text', True, '1700000000')],
          test_params={'ts': '1700000000'},
          doc='https://uapis.cn/docs/api-reference/get-misc-timestamp'),
@@ -152,15 +184,15 @@ APIS = [
          test_params={'adcode': '110000'},
          doc='https://uapis.cn/docs/api-reference/get-misc-district'),
     dict(id='misc_date_diff', name='计算日期差值', cat='misc', method='POST', path='/misc/date-diff', credits=0,
-         desc='两个日期之间的精确差值（年/月/日/天数）',
-         params=[_p('start_date', '开始日期 YYYY-MM-DD', 'text', True, '2026-01-01'),
-                 _p('end_date', '结束日期 YYYY-MM-DD', 'text', True, '2026-12-31')],
-         test_params={'start_date': '2026-01-01', 'end_date': '2026-12-31'},
+         desc='两个日期之间的精确差值（年/月/日/天数，日历选择器选日期）',
+         params=[_p('start_date', '开始日期 YYYY-MM-DD', 'date', True, '2026-01-01'),
+                 _p('end_date', '结束日期 YYYY-MM-DD', 'date', True, '2026-12-31')],
+         test_params={'start_date': '2026-01-01', 'end_date': SENTRY_TODAY},
          doc='https://uapis.cn/docs/api-reference/post-misc-date-diff'),
     dict(id='misc_weather_history', name='查询历史天气', cat='misc', method='GET', path='/misc/weather/history', credits=1,
-         desc='指定城市与日期的历史天气数据',
-         params=[_p('city', '城市名', 'text', True, '北京'), _p('date', '日期 YYYY-MM-DD', 'text', True, '2026-01-01')],
-         test_params={'city': '北京', 'date': '2026-01-01'},
+         desc='指定城市与日期的历史天气数据（日历选择器选日期）',
+         params=[_p('city', '城市名', 'text', True, '北京'), _p('date', '日期 YYYY-MM-DD', 'date', True, '2026-01-01')],
+         test_params={'city': '北京', 'date': SENTRY_TODAY},
          doc='https://uapis.cn/docs/api-reference/get-misc-weather-history'),
     dict(id='misc_tracking_detect', name='识别快递公司', cat='misc', method='GET',
          path='/misc/tracking/detect', credits=2,
@@ -505,9 +537,9 @@ APIS = [
     dict(id='translate_text', name='翻译', cat='translate', method='POST', path='/translate/text', credits=2,
          desc='多语种文本翻译',
          params=[_p('text', '待翻译文本', 'text', True, '你好世界'),
-                 _p('to', '目标语言', 'text', True, 'en'),
-                 _p('from', '源语言（可自动检测）', 'text', False, 'zh')],
-         test_params={'text': '你好世界', 'to': 'en'},
+                 _p('toLang', '目标语言（如 en/ja/ko）', 'text', True, 'en'),
+                 _p('fromLang', '源语言（可省略自动检测）', 'text', False, 'zh')],
+         test_params={'text': '礼轻情意重', 'toLang': 'en'},
          doc='https://uapis.cn/docs/api-reference/post-translate-text'),
     dict(id='ai_translate', name='AI 智能翻译', cat='translate', method='POST', path='/ai/translate', credits=4,
          desc='大模型翻译（更自然的译文，支持语气/风格）',
@@ -670,9 +702,9 @@ APIS = [
 
     # ---------- 格式转换 convert（2） ----------
     dict(id='convert_unixtime', name='时间戳转换', cat='convert', method='GET', path='/convert/unixtime', credits=0,
-         desc='时间戳 ⇄ 日期字符串双向转换（参数 ts，永久免费）',
-         params=[_p('ts', '时间戳或日期串（必填）', 'text', True, '1700000000')],
-         test_params={'ts': '1700000000'},
+         desc='时间戳 ⇄ 日期字符串双向转换（参数 time，传时间戳返回日期，传日期返回时间戳；永久免费）',
+         params=[_p('time', '时间戳或日期串（必填）', 'text', True, '1700000000')],
+         test_params={'time': '1700000000'},
          doc='https://uapis.cn/docs/api-reference/get-convert-unixtime'),
     dict(id='convert_json', name='JSON 格式化', cat='convert', method='POST', path='/convert/json', credits=0,
          desc='JSON 校验/格式化/压缩（参数 content，永久免费）',

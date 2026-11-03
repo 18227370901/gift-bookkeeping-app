@@ -74,14 +74,17 @@ HOLIDAY_PLACEHOLDER = '{年份}'
 
 AI_SEARCH_ENABLED_KEY = 'ai_search_enabled'
 
-# ===================== V10.11.47 API 平台注册表 =====================
-# 平台级一份 API Key 集中管理：端点只引用平台 ID，换 Key 改一处即可
-# 存储：system_settings 表 'api_platforms' 键，JSON 列表 [{id, name, base_url, auth_type, auth_key_name, api_key, enabled}]
+# ===================== V10.11.47/48 API 平台注册表 =====================
+# 多平台多 Key 架构：平台注册表支持任意多平台并存，每平台一个有序 Key 池。
+# Key 池按序轮换：调用时依次尝试，401（Key 无效）/402（额度不足）/访客额度耗尽自动切换下一个 Key，
+# 全部 Key 失败才返回错误；Key 行支持上移/下移/启停/测试（前端与端点行同构交互）。
+# 存储：system_settings 表 'api_platforms' 键，JSON 列表：
+#   [{id, name, base_url, auth_type, auth_key_name, api_keys: [{key, label, enabled}], enabled}]
 # 认证方式 auth_type：none=无认证 | bearer=Authorization: Bearer <key>（UApiPro）| header=自定义头（auth_key_name 为头名）| query=URL 参数（auth_key_name 为参数名）
 
 PLATFORMS_KEY = 'api_platforms'
 
-# 内置默认平台档案（库中无配置时自动生效；UApiPro 支持「访客模式」：Key 可空，按 IP 月 1500 积分/4QPS）
+# 内置默认平台档案（库中无配置时自动生效；UApiPro 支持「访客模式」：Key 池为空也可调用，按 IP 月 1500 积分/4QPS）
 DEFAULT_PLATFORMS = [
     {
         'id': 'uapis',
@@ -89,16 +92,18 @@ DEFAULT_PLATFORMS = [
         'base_url': 'https://uapis.cn/api/v1',
         'auth_type': 'bearer',
         'auth_key_name': '',
-        'api_key': '',          # 空 = 访客模式（无需 Key 直连）
+        'api_keys': [],        # Key 池（空 = 访客模式）
         'enabled': True,
-        'builtin': True,        # 内置平台不可删除
+        'builtin': True,      # 内置平台不可删除
     },
 ]
 
 # 支持的认证方式（前端下拉 + 后端白名单校验）
 AUTH_TYPES = ('none', 'bearer', 'header', 'query')
-# 端点可绑定的平台 ID 白名单（当前内置平台）
+# 端点可绑定的平台 ID 白名单（当前内置平台；自定义平台由管理员动态添加）
 KNOWN_PLATFORM_IDS = ('uapis',)
+# 单平台 Key 池上限（防误粘贴巨量行）
+MAX_KEYS_PER_PLATFORM = 10
 
 
 # ===================== 存储 key =====================
@@ -213,9 +218,18 @@ def get_enabled_endpoints(group):
     return [u for u in get_urls(group) if u.get('enabled')]
 
 
+def get_enabled_platform_endpoints(group):
+    """V10.11.48 新增：返回该组启用的「平台端点」[(url, platform_id)]（任意平台，按序）
+    V10.11.47 仅支持 uapis；多平台升级后自定义平台端点同样返回（协议解析均按 UApiPro 兼容适配器）"""
+    return [(u['url'], u.get('platform', '')) for u in get_urls(group)
+            if u.get('enabled') and u.get('platform')]
+
+
 def get_enabled_uapi_endpoints(group):
-    """V10.11.47 新增：返回该组启用的 UApiPro 平台端点 URL 列表（故障转移遍历用）"""
-    return [u['url'] for u in get_urls(group) if u.get('enabled') and u.get('platform') == 'uapis']
+    """V10.11.47：返回该组启用的 UApiPro 平台端点 URL 列表（故障转移遍历用）
+    V10.11.48 多平台升级：保留向后兼容（仅 uapis 平台），新调用方建议改用
+    get_enabled_platform_endpoints（返回 url+platform_id 元组列表）"""
+    return [u['url'] for u in get_urls(group) if u.get('enabled') and u.get('platform')]
 
 
 def get_first_enabled_platform(group):
@@ -376,9 +390,10 @@ def test_endpoint(group, url, timeout=None, platform=''):
 
 
 def _test_platform_endpoint(group, url, timeout, platform, start):
-    """V10.11.47 平台端点测试：按组绑定的目录 API 真实调用 + 响应结构校验
-    - forecast 组 → UApiPro 查询天气（city=北京）：校验 weather/temperature 字段
-    - holiday 组 → UApiPro 节假日万年历（year=当前年）：校验 days/holidays 字段
+    """V10.11.47/48 平台端点测试：按组绑定的目录 API 真实调用 + 响应结构校验
+    - forecast 组 → 查询天气（city=Shanghai 英文名）：校验 weather/temperature 字段
+    - holiday 组 → 节假日万年历（date=今天）：校验 days/holidays 字段
+    - 平台 id 按端点绑定分发（认证从对应平台 Key 池注入）
     - 未绑定平台 API 的组（geocoding/air_quality/wecom_ws/ai_search）：明确不支持"""
     def _res(ok, message):
         return {'url': url, 'ok': ok, 'message': message,
@@ -391,25 +406,30 @@ def _test_platform_endpoint(group, url, timeout, platform, start):
         return _res(False, '该组未绑定平台 API（%s 组不支持平台端点，请使用无认证直连端点）' % group)
 
     from services import uapi_client
-    params = dict(api.get('test_params') or {})
+    import time as _t
+    params = dict(uapi_catalog.resolve_test_params(api))
     if group == 'forecast':
-        params.update({'city': '北京', 'extended': 'true'})
+        # V10.11.48：worldtime 教训——城市名用英文（避免 TIMEZONE_NOT_FOUND 类问题）
+        params.update({'city': 'Shanghai', 'extended': 'true'})
     elif group == 'holiday':
-        params = {'year': str(time.localtime().tm_year)}
+        params = {'date': '%04d-%02d-%02d' % (_t.localtime().tm_year, _t.localtime().tm_mon, _t.localtime().tm_mday)}
 
     ok, payload, status, message = uapi_client.call_uapi(
-        api['id'], params=params, timeout=max(timeout, 8), full_url=url or None)
+        api['id'], params=params, timeout=max(timeout, 8),
+        full_url=url or None, platform_id=platform or None)
     if not ok or not isinstance(payload, dict):
         return _res(False, 'HTTP %s：%s' % (status, message or '平台接口调用失败')[:200])
     if group == 'forecast':
         if 'weather' in payload and 'temperature' in payload:
             city = payload.get('city') or ''
-            return _res(True, 'UApiPro 天气协议正常（%s：%s %s°C，HTTP %s）' % (
+            return _res(True, '平台天气协议正常（%s：%s %s°C，HTTP %s）' % (
                 city, payload.get('weather', ''), payload.get('temperature'), status))
         return _res(False, '响应缺少 weather/temperature 字段（非 UApiPro 天气兼容端点）')
     if group == 'holiday':
         if isinstance(payload.get('days'), list) or isinstance(payload.get('holidays'), list):
-            return _res(True, 'UApiPro 万年历协议正常（HTTP %s）' % status)
+            day0 = (payload.get('days') or [{}])[0] or {}
+            hm = day0.get('weekday_cn') or day0.get('date') or ''
+            return _res(True, '平台万年历协议正常（%s，HTTP %s）' % (hm, status))
         return _res(False, '响应缺少 days/holidays 字段（非 UApiPro 万年历兼容端点）')
     return _res(True, '平台接口调用成功（HTTP %s）' % status)
 
@@ -472,11 +492,42 @@ def test_group(group, urls, timeout=None, retries=None):
     return results
 
 
-# ===================== V10.11.47 API 平台注册表 =====================
+# ===================== V10.11.47/48 API 平台注册表 =====================
+
+def _normalize_key_pool(raw_keys):
+    """Key 池规范化：[{key, label, enabled, uid}] 列表清洗
+    - uid：每 Key 唯一标识（新 Key 自动生成；前端「保持原值」提交 key='__KEEP__' + uid，
+      由 save_platform 按 uid 回填明文，明文不出库不回传）
+    - 空 Key 行剔除、label/enabled 补默认、限长上限（MAX_KEYS_PER_PLATFORM）"""
+    import uuid as _uuid
+    pool = []
+    if not isinstance(raw_keys, list):
+        return pool
+    for item in raw_keys:
+        if isinstance(item, dict):
+            k = str(item.get('key') or '').strip()
+            if not k:
+                continue
+            rec = {
+                'key': k,
+                'label': str(item.get('label') or 'Key %d' % (len(pool) + 1))[:30],
+                'enabled': bool(item.get('enabled', True)),
+                'uid': str(item.get('uid') or '')[:40] or _uuid.uuid4().hex[:12],
+            }
+            pool.append(rec)
+        elif isinstance(item, str) and item.strip():
+            # V10.11.47 旧格式：纯字符串 Key 列表
+            pool.append({'key': item.strip(), 'label': 'Key %d' % (len(pool) + 1),
+                         'enabled': True, 'uid': _uuid.uuid4().hex[:12]})
+        if len(pool) >= MAX_KEYS_PER_PLATFORM:
+            break
+    return pool
+
 
 def get_platforms():
     """读取全部平台档案：库中记录与内置默认档案合并（内置平台缺失项由默认档案补全）
-    返回 [{id, name, base_url, auth_type, auth_key_name, api_key, enabled, builtin}]"""
+    V10.11.47 旧档案的单一 api_key 字符串自动升级为 Key 池 [{key, label:'默认', enabled:True}]（读取兼容，零迁移）
+    返回 [{id, name, base_url, auth_type, auth_key_name, api_keys:[{key,label,enabled}], enabled, builtin}]"""
     raw = _get_setting(PLATFORMS_KEY, None)
     stored = {}
     if raw:
@@ -491,23 +542,34 @@ def get_platforms():
     result = []
     for d in DEFAULT_PLATFORMS:
         rec = dict(d)
+        rec['api_keys'] = list(d.get('api_keys') or [])
         s = stored.pop(d['id'], None)
         if isinstance(s, dict):
-            # 库中配置覆盖默认档案（builtin 标记保持不变）
-            for k in ('name', 'base_url', 'auth_type', 'auth_key_name', 'api_key', 'enabled'):
+            for k in ('name', 'base_url', 'auth_type', 'auth_key_name', 'enabled'):
                 if k in s:
                     rec[k] = s[k]
-        rec['enabled'] = bool(rec.get('enabled', True))
+            # Key 池：新列表 > 旧单 Key 字符串（升级兼容，同步补 uid 供明文不回传协议使用）
+            if isinstance(s.get('api_keys'), list) and s.get('api_keys'):
+                rec['api_keys'] = _normalize_key_pool(s.get('api_keys'))
+            elif s.get('api_key'):
+                _uid = __import__('uuid').uuid4().hex[:12]
+                rec['api_keys'] = [{'key': str(s['api_key']), 'label': '默认', 'enabled': True, 'uid': _uid}]
         result.append(rec)
     # 其余自定义平台（非内置）按库中记录原样加入
     for pid, s in stored.items():
+        pool = []
+        if isinstance(s.get('api_keys'), list):
+            pool = _normalize_key_pool(s.get('api_keys'))
+        elif s.get('api_key'):
+            _uid = __import__('uuid').uuid4().hex[:12]
+            pool = [{'key': str(s['api_key']), 'label': '默认', 'enabled': True, 'uid': _uid}]
         result.append({
             'id': pid,
             'name': str(s.get('name') or pid),
             'base_url': str(s.get('base_url') or ''),
             'auth_type': str(s.get('auth_type') or 'none'),
             'auth_key_name': str(s.get('auth_key_name') or ''),
-            'api_key': str(s.get('api_key') or ''),
+            'api_keys': pool,
             'enabled': bool(s.get('enabled', True)),
             'builtin': False,
         })
@@ -522,36 +584,27 @@ def get_platform(pid):
     return None
 
 
-def mask_platform_key(key):
-    """API Key 脱敏展示：仅显示末 4 位（页面回显用，避免整串泄露）"""
-    k = str(key or '')
-    if not k:
-        return ''
-    if len(k) <= 8:
-        return '****' + k[-2:]
-    return '****' + k[-4:]
-
-
 def save_platform(pid, name=None, base_url=None, auth_type=None,
-                  auth_key_name=None, api_key=None, enabled=None):
-    """保存平台档案（增量合并：仅更新传入的非 None 字段）。
-    api_key 语义：None = 保持不变（前端未改动）；'' = 清空 Key（切回访客/无认证模式）。
-    内置平台（uapis）不允许改 id/删除，只允许改连接参数。"""
+                  auth_key_name=None, api_keys=None, api_key=None, enabled=None):
+    """保存平台档案（增量合并：仅更新传入的非 None 字段）
+    - api_keys：Key 池整池覆盖提交（[{key, label, enabled}]，Key 行式管理与端点组同构）
+    - api_key：V10.11.47 单 Key 兼容入参（None=不动；''=清空池）
+    内置平台（uapis）不允许删除，只允许改连接参数与 Key 池"""
     pid = str(pid or '').strip()
     if not pid:
         return False
     platforms = get_platforms()
-    # 定位目标平台记录（不存在则新建，仅允许已知平台 ID 白名单内的新建）
     target = None
     for p in platforms:
         if p['id'] == pid:
             target = p
             break
     if target is None:
+        # 新平台仅允许两种来源：内置白名单（builtin）或管理员添加自定义平台（不带 builtin）
         if pid not in KNOWN_PLATFORM_IDS:
             return False
         target = {'id': pid, 'name': pid, 'base_url': '', 'auth_type': 'none',
-                  'auth_key_name': '', 'api_key': '', 'enabled': True, 'builtin': True}
+                  'auth_key_name': '', 'api_keys': [], 'enabled': True, 'builtin': True}
         platforms.append(target)
     if name is not None:
         target['name'] = str(name).strip() or target['name']
@@ -563,27 +616,137 @@ def save_platform(pid, name=None, base_url=None, auth_type=None,
             target['auth_type'] = v
     if auth_key_name is not None:
         target['auth_key_name'] = str(auth_key_name).strip()
-    if api_key is not None:
-        target['api_key'] = str(api_key).strip()
+    if api_keys is not None:
+        # V10.11.48 明文不回传协议：前端未编辑的已保存行提交 key='__KEEP__'+uid，
+        # 此处按 uid 从现有池回填原明文（明文仅存库不回传不失联）；
+        # uid 失配兜底（V10.11.47 旧数据无 uid）：按 label 唯一匹配回填
+        old_pool = {str(k.get('uid') or ''): str(k.get('key') or '')
+                    for k in (target.get('api_keys') or []) if isinstance(k, dict)}
+        old_by_label = {}
+        for k in (target.get('api_keys') or []):
+            if isinstance(k, dict):
+                old_by_label.setdefault(str(k.get('label') or ''), str(k.get('key') or ''))
+        merged = []
+        for item in (api_keys if isinstance(api_keys, list) else []):
+            # V10.11.48b 占位符防线：'已保存' 是前端只读行的显示值，绝不可能是真实 Key 明文；
+            # 若误提交（前端 dataset 属性名错误等），按 __KEEP__ 语义回填原值/跳过，防止覆盖真实 Key
+            _raw_key = str(item.get('key') or '').strip() if isinstance(item, dict) else ''
+            if isinstance(item, dict) and _raw_key in ('__KEEP__', '已保存'):
+                uid = str(item.get('uid') or '')[:40]
+                label = str(item.get('label') or '').strip()
+                filled = None
+                if uid and uid in old_pool:
+                    filled = old_pool[uid]
+                elif label and label in old_by_label:
+                    filled = old_by_label[label]
+                if filled and filled not in ('__KEEP__', '已保存'):
+                    patched = dict(item)
+                    patched['key'] = filled
+                    merged.append(patched)
+                # uid 与 label 均失配（或原值本身已损坏）→ 跳过该行（不误存占位符）
+            else:
+                merged.append(item)
+        target['api_keys'] = _normalize_key_pool(merged)
+    elif api_key is not None:
+        target['api_keys'] = ([{'key': str(api_key).strip(), 'label': '默认', 'enabled': True}]
+                              if str(api_key).strip() else [])
     if enabled is not None:
         target['enabled'] = bool(enabled)
-    # 持久化（builtin 标记不入库，读取时由默认档案补全）
-    stored = [{k: p[k] for k in ('id', 'name', 'base_url', 'auth_type', 'auth_key_name', 'api_key', 'enabled')}
-              for p in platforms]
-    _set_setting(PLATFORMS_KEY, json.dumps(stored, ensure_ascii=False))
+    _persist_platforms(platforms)
     return True
 
 
-def get_auth_headers(pid):
-    """构造平台认证请求头：按平台 auth_type + api_key 生成
-    - bearer：{'Authorization': 'Bearer <key>'}
-    - header：{<auth_key_name>: <key>}
-    - none/query 或 Key 为空：返回 {}（无认证/访客模式；query 型认证由调用方拼 URL 参数）"""
+def add_custom_platform(pid, name, base_url, auth_type='bearer', auth_key_name='', api_keys=None, enabled=True):
+    """新增自定义平台（V10.11.48）：管理员可接入任意自有平台（须与 UApiPro 协议兼容才能用于
+    天气/节假日端点组；试验台仅支持 UApiPro 目录平台）。
+    pid 白名单校验：小写字母/数字/连字符 2~30 位且不与已有平台冲突"""
+    import re as _re
+    pid = str(pid or '').strip().lower()
+    if not _re.fullmatch(r'[a-z][a-z0-9-]{1,29}', pid):
+        return False, '平台 ID 需 2~30 位小写字母/数字/连字符，且以字母开头'
+    if any(p['id'] == pid for p in get_platforms()):
+        return False, '平台 ID 已存在：%s' % pid
+    name = str(name or '').strip()
+    base_url = str(base_url or '').strip()
+    if not name:
+        return False, '平台名称不能为空'
+    if not (base_url.startswith('http://') or base_url.startswith('https://')):
+        return False, '平台地址必须以 http:// 或 https:// 开头'
+    auth_type = str(auth_type or 'none').strip()
+    if auth_type not in AUTH_TYPES:
+        return False, '认证方式非法'
+    platforms = get_platforms()
+    platforms.append({
+        'id': pid, 'name': name, 'base_url': base_url, 'auth_type': auth_type,
+        'auth_key_name': str(auth_key_name or '').strip(),
+        'api_keys': _normalize_key_pool(api_keys or []),
+        'enabled': bool(enabled), 'builtin': False,
+    })
+    _persist_platforms(platforms)
+    return True, ''
+
+
+def delete_platform(pid):
+    """删除自定义平台（内置平台 uapis 不允许删除）。平台被端点引用时不阻断删除——
+    端点的 platform 引用会自动回落为无认证直连语义（调用方对未知平台不注入认证）。"""
+    pid = str(pid or '').strip()
+    platforms = get_platforms()
+    if not any(p['id'] == pid for p in platforms):
+        return False, '平台不存在'
+    if pid in KNOWN_PLATFORM_IDS:
+        return False, '内置平台 UApiPro 不允许删除'
+    platforms = [p for p in platforms if p['id'] != pid]
+    _persist_platforms(platforms)
+    return True, ''
+
+
+def _persist_platforms(platforms):
+    """平台列表持久化（builtin 标记不入库，读取时由默认档案补全）"""
+    stored = []
+    for p in platforms:
+        stored.append({
+            'id': p['id'], 'name': p['name'], 'base_url': p['base_url'],
+            'auth_type': p['auth_type'], 'auth_key_name': p['auth_key_name'],
+            'api_keys': p.get('api_keys') or [], 'enabled': bool(p.get('enabled', True)),
+        })
+    _set_setting(PLATFORMS_KEY, json.dumps(stored, ensure_ascii=False))
+
+
+def get_platform_keys(pid):
+    """返回平台启用的 Key 池 [{key, label, uid}]（按配置顺序，轮换遍历用；池空返回 [] = 访客模式）"""
     p = get_platform(pid)
-    if not p or not p.get('enabled') or not p.get('api_key'):
+    if not p or not p.get('enabled'):
+        return []
+    return [{'key': k['key'], 'label': k['label'], 'uid': str(k.get('uid') or '')}
+            for k in (p.get('api_keys') or []) if k.get('enabled') and str(k.get('key') or '').strip()]
+
+
+def mask_platform_key(key):
+    """API Key 脱敏展示：仅显示末 4 位（页面回显用，避免整串泄露）"""
+    k = str(key or '')
+    if not k:
+        return ''
+    if len(k) <= 8:
+        return '****' + k[-2:]
+    return '****' + k[-4:]
+
+
+def get_auth_headers(pid, key=None):
+    """构造平台认证请求头（V10.11.48 支持指定具体 Key，供 Key 轮换引擎使用）
+    - key=None：取 Key 池第一个启用的 Key；池空返回 {}（访客模式）
+    - bearer：{'Authorization': 'Bearer <key>'}；header：{<auth_key_name>: <key>}
+    - none/query 或平台停用/不存在：返回 {}（query 型认证由调用方拼 URL 参数）"""
+    p = get_platform(pid)
+    if not p or not p.get('enabled'):
+        return {}
+    if key is None:
+        pool = get_platform_keys(pid)
+        if not pool:
+            return {}
+        key = pool[0]['key']
+    if not key:
         return {}
     at = p.get('auth_type') or 'none'
-    key = p['api_key']
     if at == 'bearer':
         return {'Authorization': 'Bearer ' + key}
     if at == 'header':
@@ -593,14 +756,20 @@ def get_auth_headers(pid):
 
 
 def get_platforms_for_display():
-    """供配置页面渲染：平台列表（Key 脱敏回显 + 是否已配置标记）"""
+    """供配置页面渲染：平台列表（Key 池脱敏回显 + 状态汇总），V10.11.48 含 Key 明细与 uid
+    （uid 供前端「保持原值」提交协议使用，不含明文）"""
     out = []
     for p in get_platforms():
+        pool = p.get('api_keys') or []
         out.append({
             'id': p['id'], 'name': p['name'], 'base_url': p['base_url'],
             'auth_type': p['auth_type'], 'auth_key_name': p['auth_key_name'],
-            'key_masked': mask_platform_key(p['api_key']),
-            'key_set': bool(p['api_key']),
+            'keys': [{'label': k['label'], 'key_masked': mask_platform_key(k['key']),
+                      'key_set': bool(str(k.get('key') or '').strip()),
+                      'enabled': bool(k.get('enabled')), 'uid': str(k.get('uid') or '')}
+                     for k in pool],
+            'key_count': len(pool),
+            'key_enabled_count': sum(1 for k in pool if k.get('enabled')),
             'enabled': p['enabled'], 'builtin': p.get('builtin', False),
         })
     return out

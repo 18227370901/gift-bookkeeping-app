@@ -1,16 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-uapi_client.py — UApiPro（uapis.cn）统一调用引擎（V10.11.47 新增）
+uapi_client.py — UApiPro（uapis.cn）统一调用引擎（V10.11.47 新增，V10.11.48 多 Key 轮换升级）
 
 全站调用 uapis.cn 平台 110 个 API 的唯一出入口，能力：
-  1. 认证注入：自动读取「API 平台」注册表的 base_url 与平台级 API Key
-     （Authorization: Bearer <key>；Key 为空 = 访客模式直连，按 IP 月 1500 积分 / 4 QPS）
-  2. 双路径网络：禁代理直连优先 + 系统代理兜底（与 weather_service._http_get 同款策略，
-     覆盖「直连可达」与「仅代理可达」两种网络环境）
-  3. 限流退避：429 尊重 Retry-After 头，否则按 0.5s/1s/2s 指数退避；
-     5xx/超时/网络异常退避重试；400/401/402/403/404 属客户端错误不重试
-  4. 错误标准化：兼容 {code, message} 与 {error, ...} 双格式错误体（官方 FAQ Q32）
-  5. 试验台原始调用：识别非 JSON 响应（图片/音频/文件流）并 base64 回传展示
+  1. 认证注入：自动读取「API 平台」注册表的 base_url 与平台 Key 池（V10.11.48 多 Key）
+     （Authorization: Bearer <key>；池空 = 访客模式直连）
+  2. **Key 轮换（V10.11.48）**：按 Key 池顺序依次尝试——401（Key 无效）/402（额度不足）/
+     访客额度耗尽自动切换下一个 Key 重试；全部 Key 失败才返回错误。单 Key 场景行为与旧版一致
+  3. 双路径网络：禁代理直连优先 + 系统代理兜底（与 weather_service._http_get 同款策略）
+  4. 限流退避：429 尊重 Retry-After 头，否则按 0.5s/1s/2s 指数退避；
+     5xx/超时/网络异常退避重试；400/401/402/403/404 属客户端错误不重试（Key 级错误切 Key）
+  5. 错误标准化：兼容 {code, message} 与 {error, ...} 双格式错误体（官方 FAQ Q32）
+  6. **响应美化（V10.11.48）**：format_uapi_result() 把常用 API 的 JSON 响应转为
+     人类可读中文摘要（目录一键测试与试验台展示用）
+  7. 试验台原始调用：识别非 JSON 响应（图片/音频/文件流）并 base64 回传展示
 
 对外主入口（业务便捷函数）：
   get_daily_saying()          一言（登录页/首页装饰，免费接口，进程级缓存 1 小时）
@@ -19,6 +22,7 @@ uapi_client.py — UApiPro（uapis.cn）统一调用引擎（V10.11.47 新增）
   search_hotboard(type)       热榜（1 积分/次，缓存 5 分钟）
   get_daily_word(category)    每日单词（1 积分/次，缓存 6 小时）
   call_uapi(...)              通用调用（weather/holiday 适配器与试验台使用）
+  format_uapi_result(...)     响应美化（目录测试/试验台展示）
 """
 import base64
 import json
@@ -38,6 +42,8 @@ NO_RETRY_STATUS = (400, 401, 402, 403, 404, 405, 413)
 
 # 访客月额度耗尽错误码（官方 FAQ Q14：访客额度用尽返回 429 + 该错误码）
 VISITOR_QUOTA_CODE = 'VISITOR_MONTHLY_QUOTA_EXHAUSTED'
+# Key 级失败错误码集：出现这些情况时自动切换 Key 池下一个 Key 重试（V10.11.48）
+KEY_FATAL_CODES = (VISITOR_QUOTA_CODE, 'UNAUTHORIZED', 'INSUFFICIENT_CREDITS', 'AUTHENTICATION_REQUIRED')
 
 
 class UapiError(Exception):
@@ -118,20 +124,20 @@ def _http_request(method, url, params=None, json_body=None, timeout=None, header
     raise last_err
 
 
-def _platform_headers():
-    """平台认证头：从注册表读取（Key 空 = 访客模式，无认证头）"""
-    return dict(service_config.get_auth_headers(uapi_catalog.UAPI_PLATFORM_ID))
+def _platform_headers(platform_id=uapi_catalog.UAPI_PLATFORM_ID, key=None):
+    """平台认证头：从注册表读取（V10.11.48 指定具体 Key，供轮换引擎用；池空 = 访客模式无认证头）"""
+    return dict(service_config.get_auth_headers(platform_id, key=key))
 
 
-def _platform_base_url():
+def _platform_base_url(platform_id=uapi_catalog.UAPI_PLATFORM_ID):
     """平台 base_url：注册表优先，缺省回落官方默认"""
-    p = service_config.get_platform(uapi_catalog.UAPI_PLATFORM_ID)
+    p = service_config.get_platform(platform_id)
     return (p or {}).get('base_url') or uapi_catalog.UAPI_DEFAULT_BASE_URL
 
 
-def _platform_enabled():
-    """平台是否启用（管理员停用后全站 uapis 调用静默降级）"""
-    p = service_config.get_platform(uapi_catalog.UAPI_PLATFORM_ID)
+def _platform_enabled(platform_id=uapi_catalog.UAPI_PLATFORM_ID):
+    """平台是否启用（管理员停用后全站该平台调用静默降级）"""
+    p = service_config.get_platform(platform_id)
     return bool((p or {}).get('enabled', True))
 
 
@@ -163,18 +169,69 @@ def extract_error_message(status, payload):
     return ('HTTP %s：%s' % (status, message)) if message else 'HTTP %s：接口调用失败' % status
 
 
-def _request_with_backoff(method, url, params=None, json_body=None, timeout=None):
-    """带退避的请求循环：429/5xx/超时按 BACKOFF_SCHEDULE 退避重试，客户端错误立即返回。
-    返回 (ok, payload_dict|None, status, message)"""
-    headers = _platform_headers()
-    headers.setdefault('Accept', 'application/json')
+def _request_with_key_rotation(method, url, params=None, json_body=None, timeout=None,
+                               platform_id=None):
+    """V10.11.48 Key 轮换请求循环（替代 V10.11.47 单 Key 版）：
+    外层按 Key 池顺序轮换（池空 = 单轮访客模式），内层做退避重试。
+    Key 级失败（401 Key 无效 / 402 额度不足 / 429 访客额度耗尽 / 速率限流重试仍败）
+    自动切换下一个 Key；平台级/网络错误（5xx 重试仍败、连接失败）也换 Key 兜底再试
+    （多 Key 请求路径可能不同，切换无害且提高成功率）；全部 Key 失败返回最后一个错误。
+    返回 (ok, payload, status, message, key_label)——key_label 为成功所用 Key 标签
+    （访客模式返回 '访客模式'；多 Key 仅展示用，不回传明文）"""
+    platform_id = platform_id or uapi_catalog.UAPI_PLATFORM_ID
+    keys = service_config.get_platform_keys(platform_id)
+    # 轮换序列：启用的 Key 池（每项 {key, label}）；池空 = 单轮访客模式 (None, '访客模式')
+    rotation = [(k['key'], k['label']) for k in keys] or [(None, '访客模式')]
+
+    last_status, last_message = 0, ''
+    for key, label in rotation:
+        headers = _platform_headers(platform_id, key=key)
+        headers.setdefault('Accept', 'application/json')
+        ok, payload, status, message = _request_single_with_backoff(
+            method, url, params=params, json_body=json_body, timeout=timeout, headers=headers)
+        if ok:
+            return True, payload, status, '', label
+        last_status, last_message = status, message
+        # Key 级失败：切换下一个 Key（信息附 Key 标签便于排查）
+        if _is_key_level_failure(status, payload):
+            print('[UapiClient] Key「%s」调用失败（HTTP %s：%s），自动切换下一个 Key' % (
+                (label or '未命名')[:30], status, (message or '')[:80]))
+            continue
+        # 网络级/平台级失败：也尝试下一个 Key（不同 Key 独立限流桶，切换可能恢复）
+        if status == 0 or status >= 500 or status == 429 or status == 408:
+            continue
+        # 其他客户端错误（400 参数错 / 404 资源不存在等）：与 Key 无关，直接返回
+        return False, payload, status, message, label
+    # 全部 Key 失败：返回最后错误（多 Key 轮换尽力信息）
+    if len(rotation) > 1:
+        last_message = ('已按序轮换 %d 个 Key 均失败，最后错误：%s' % (len(rotation), last_message or '未知')) \
+            if last_message else ('已按序轮换 %d 个 Key 均失败' % len(rotation))
+    return False, None, last_status, last_message, rotation[-1][1]
+
+
+def _is_key_level_failure(status, payload):
+    """判定失败是否 Key 级（切换 Key 可能恢复）：401/402/访客额度耗尽/认证要求"""
+    if status in (401, 402):
+        return True
+    if isinstance(payload, dict):
+        code = str(payload.get('code') or payload.get('error') or '')
+        if code in KEY_FATAL_CODES:
+            return True
+        msg = str(payload.get('message') or '')
+        if VISITOR_QUOTA_CODE in msg:
+            return True
+    return False
+
+
+def _request_single_with_backoff(method, url, params=None, json_body=None, timeout=None, headers=None):
+    """单 Key 带退避的请求循环（轮换引擎内层）：429/5xx/超时按 BACKOFF_SCHEDULE 退避重试，
+    客户端错误立即返回。返回 (ok, payload_dict|None, status, message)"""
     last_status, last_payload, last_message = 0, None, ''
     for round_idx in range(MAX_BACKOFF_ROUNDS):
         try:
             resp = _http_request(method, url, params=params, json_body=json_body,
                                  timeout=timeout, headers=headers)
         except Exception as e:
-            # 网络层异常（超时/连接失败）：退避后重试
             last_status, last_payload = 0, None
             last_message = '网络请求失败：%s' % str(e)[:150]
             if round_idx < MAX_BACKOFF_ROUNDS - 1:
@@ -190,10 +247,8 @@ def _request_with_backoff(method, url, params=None, json_body=None, timeout=None
             return True, (last_payload if isinstance(last_payload, dict) else
                           {'_raw_non_dict': True, '_status': resp.status_code}), resp.status_code, ''
         last_message = extract_error_message(resp.status_code, last_payload)
-        # 客户端错误（400/401/402/403/404…）：修正请求后才可能成功，不重试
         if resp.status_code in NO_RETRY_STATUS:
             break
-        # 限流：优先尊重服务端 Retry-After
         if resp.status_code == 429 or resp.status_code >= 500 or resp.status_code == 408:
             retry_after = resp.headers.get('Retry-After')
             wait = None
@@ -213,23 +268,29 @@ def _request_with_backoff(method, url, params=None, json_body=None, timeout=None
 
 # ===================== 通用调用入口 =====================
 
-def call_uapi(api_id, params=None, timeout=None, full_url=None):
-    """按目录 API ID 调用 UApiPro 接口，返回 (ok, payload_dict|None, status, message)
+def call_uapi(api_id, params=None, timeout=None, full_url=None,
+              platform_id=None, return_key=False):
+    """按目录 API ID 调用 UApiPro 接口
     - api_id：uapi_catalog 目录内部 ID（如 misc_weather）
     - params：GET 拼 query / POST 作 JSON body（值统一转字符串）
-    - full_url：非空时直接使用该完整地址（组内端点故障转移遍历用，认证头照常注入），
-      为空时按 平台 base_url + API path 拼接
-    - 平台被管理员停用时返回 (False, None, 503, 提示)"""
+    - full_url：非空时直接使用该完整地址（组内端点故障转移遍历用），认证照常注入
+    - platform_id：V10.11.48 平台 ID（默认 uapis；端点适配器按端点 platform 分发）
+    - return_key：True 时返回 5 元组（附成功所用 Key 标签）；默认 4 元组向后兼容
+    返回 (ok, payload_dict|None, status, message[, key_label])；平台停用返回 503"""
     api = uapi_catalog.get_api(api_id)
     if not api:
-        return False, None, 400, '未知 API：%s' % api_id
-    if not _platform_enabled():
-        return False, None, 503, 'UApiPro 平台已停用，请在「系统设置 → 外部接口服务 → API 平台」重新启用'
+        result = (False, None, 400, '未知 API：%s' % api_id)
+        return result + (None,) if return_key else result
+    platform_id = platform_id or uapi_catalog.UAPI_PLATFORM_ID
+    if not _platform_enabled(platform_id):
+        result = (False, None, 503, 'API 平台「%s」已停用，请在「系统设置 → 外部接口服务 → API 平台」重新启用' % platform_id)
+        return result + (None,) if return_key else result
 
     method = (api.get('method') or 'GET').upper()
-    url = full_url or uapi_catalog.build_full_url(api_id, base_url=_platform_base_url())
+    url = full_url or uapi_catalog.build_full_url(api_id, base_url=_platform_base_url(platform_id))
     if not url:
-        return False, None, 500, 'API 地址构造失败（base_url 未配置）'
+        result = (False, None, 500, 'API 地址构造失败（平台 base_url 未配置）')
+        return result + (None,) if return_key else result
 
     # 参数清洗：None/空串剔除，bool 转 'true'/'false'，其余转字符串
     clean = {}
@@ -245,24 +306,28 @@ def call_uapi(api_id, params=None, timeout=None, full_url=None):
             clean[k] = str(v)
 
     if method == 'POST':
-        return _request_with_backoff('POST', url, params=None,
-                                     json_body=clean, timeout=timeout)
-    return _request_with_backoff('GET', url, params=clean, timeout=timeout)
+        ok, payload, status, message, key_label = _request_with_key_rotation(
+            'POST', url, params=None, json_body=clean, timeout=timeout, platform_id=platform_id)
+    else:
+        ok, payload, status, message, key_label = _request_with_key_rotation(
+            'GET', url, params=clean, timeout=timeout, platform_id=platform_id)
+    return (ok, payload, status, message, key_label) if return_key else (ok, payload, status, message)
 
 
-def call_uapi_raw(api_id, params=None, timeout=None):
+def call_uapi_raw(api_id, params=None, timeout=None, platform_id=None):
     """试验台原始调用：返回响应元信息 + 内容（JSON 文本化 / 图片 base64 / 其他文本）
-    不做退避重试（管理员调试需要看到真实失败），返回
-    {status, content_type, is_json, json, is_image, image_b64, body_text, message}"""
+    不做退避重试与 Key 轮换（管理员调试需要看到单次真实失败，Key 问题由平台测试按钮验证），
+    返回 {status, content_type, is_json, json, is_image, image_b64, body_text, message}"""
     api = uapi_catalog.get_api(api_id)
     if not api:
         return {'status': 400, 'message': '未知 API：%s' % api_id, 'is_json': False,
                 'is_image': False, 'content_type': '', 'json': None, 'image_b64': '', 'body_text': ''}
-    if not _platform_enabled():
-        return {'status': 503, 'message': 'UApiPro 平台已停用', 'is_json': False,
+    platform_id = platform_id or uapi_catalog.UAPI_PLATFORM_ID
+    if not _platform_enabled(platform_id):
+        return {'status': 503, 'message': 'API 平台已停用', 'is_json': False,
                 'is_image': False, 'content_type': '', 'json': None, 'image_b64': '', 'body_text': ''}
     method = (api.get('method') or 'GET').upper()
-    url = uapi_catalog.build_full_url(api_id, base_url=_platform_base_url())
+    url = uapi_catalog.build_full_url(api_id, base_url=_platform_base_url(platform_id))
     clean = {}
     for k, v in (params or {}).items():
         if v is None or v == '':
@@ -273,7 +338,8 @@ def call_uapi_raw(api_id, params=None, timeout=None):
     try:
         resp = _http_request(method, url, params=(clean if method == 'GET' else None),
                              json_body=(clean if method == 'POST' else None),
-                             timeout=timeout or (5, 15), headers=_platform_headers())
+                             timeout=timeout or (5, 15),
+                             headers=_platform_headers(platform_id))
         out['status'] = resp.status_code
         ctype = (resp.headers.get('Content-Type') or '').lower()
         out['content_type'] = ctype
@@ -298,6 +364,231 @@ def call_uapi_raw(api_id, params=None, timeout=None):
         out['status'] = 0
         out['message'] = '网络请求失败：%s' % str(e)[:150]
     return out
+
+
+# ===================== V10.11.48 响应美化层（人类可读格式化器） =====================
+# 每个 formatter: (payload_dict) -> 中文人读摘要字符串；字段缺失时容错跳过，无法格式化返回 None
+
+def _fmt_worldtime(d):
+    parts = []
+    if d.get('query'):
+        parts.append('📍 %s' % d['query'])
+    if d.get('timezone'):
+        parts.append('时区 %s' % d['timezone'])
+    if d.get('datetime'):
+        parts.append('当地时间 %s %s' % (d['datetime'], d.get('weekday') or ''))
+    if d.get('offset_string'):
+        parts.append('UTC%s' % str(d['offset_string']).replace('UTC', ''))
+    return '　|　'.join(parts)
+
+
+def _fmt_lunartime(d):
+    parts = []
+    if d.get('datetime'):
+        parts.append('公历 %s %s' % (d['datetime'], d.get('weekday_cn') or ''))
+    if d.get('lunar_month_cn') and d.get('lunar_day_cn'):
+        leap = '（闰）' if d.get('is_leap_month') else ''
+        parts.append('农历%s年%s%s%s（%s年）' % (d.get('ganzhi_year') or '', d['lunar_month_cn'],
+                                              leap, d['lunar_day_cn'],
+                                              d.get('lunar_year_cn') or d.get('lunar_year') or ''))
+    if d.get('zodiac'):
+        parts.append('生肖%s' % d['zodiac'])
+    if d.get('ganzhi_day'):
+        parts.append('日干支 %s' % d['ganzhi_day'])
+    return '　·　'.join(parts)
+
+
+def _fmt_weather(d):
+    parts = []
+    if d.get('city'):
+        parts.append('📍 %s%s' % (str((d.get('province') or '') + ' ' if d.get('province') else '')[:12], d['city']))
+    if d.get('weather'):
+        parts.append(d['weather'])
+    if d.get('temperature') is not None:
+        parts.append('%s°C' % d['temperature'])
+    if d.get('humidity') is not None:
+        parts.append('湿度 %s%%' % d['humidity'])
+    if d.get('wind_direction') or d.get('wind_power'):
+        parts.append('%s%s' % (d.get('wind_direction') or '', d.get('wind_power') or ''))
+    if d.get('aqi') is not None:
+        parts.append('AQI %s（%s）' % (d.get('aqi'), d.get('aqi_category') or ''))
+    if d.get('temp_max') is not None or d.get('temp_min') is not None:
+        parts.append('今日 %s°C / %s°C' % (d.get('temp_max', '-'), d.get('temp_min', '-')))
+    if d.get('report_time'):
+        parts.append('更新 %s' % d['report_time'])
+    return '　|　'.join(parts)
+
+
+def _fmt_hotboard(d):
+    items = d.get('list') or []
+    if not items:
+        return None
+    lines = ['📊 %s热榜（更新 %s）' % (d.get('type') or '', str((d.get('update_time') or ''))[:19])]
+    for it in items[:10]:
+        hot = it.get('hot_value')
+        lines.append('%d. %s%s' % (it.get('index') or 0, it.get('title') or '',
+                                   ('（热度 %s）' % hot) if hot else ''))
+    return '\n'.join(lines)
+
+
+def _fmt_phoneinfo(d):
+    return '📱 %s %s · %s · 区号 %s' % (d.get('province') or '--', d.get('city') or '--',
+                                      d.get('sp') or '--', d.get('area_code') or '--')
+
+
+def _fmt_date_diff(d):
+    if d.get('human_readable'):
+        return '📅 相差 %s（%d 天 / %d 周）' % (d['human_readable'], d.get('days') or 0, d.get('weeks') or 0)
+    if d.get('days') is not None:
+        return '📅 相差 %d 天（%d 周）' % (d['days'], d.get('weeks') or 0)
+    return None
+
+
+def _fmt_unixtime(d):
+    if d.get('datetime') and d.get('timestamp'):
+        return '🕓 时间戳 %d = %s' % (d['timestamp'], d['datetime'])
+    return None
+
+
+def _fmt_daily_word(d):
+    words = d.get('words') or []
+    if not words:
+        return None
+    w = words[0]
+    lines = ['📖 %s %s' % (w.get('word') or '', w.get('phonetic') or '')]
+    if w.get('translation'):
+        lines.append('释义：%s' % w['translation'])
+    exs = w.get('examples') or []
+    if exs:
+        e = exs[0]
+        lines.append('例句：%s' % e.get('text') or '')
+        if e.get('translation'):
+            lines.append('　　译文：%s' % e['translation'])
+    return '\n'.join(lines)
+
+
+def _fmt_programmer(d):
+    events = d.get('events') or []
+    if not events:
+        return None
+    lines = ['💻 %s 月 %s 日科技史（%d 条）' % (d.get('date') or '', '', len(events))]
+    for e in events[:6]:
+        lines.append('%d年 [%s] %s' % (e.get('year') or 0, e.get('category') or '', e.get('title') or ''))
+    return '\n'.join(lines)
+
+
+def _fmt_ip(d):
+    region = ' '.join(str(x) for x in [d.get('country') or d.get('region') or '', d.get('city') or ''] if x)
+    return '🌐 IP %s · %s%s' % (d.get('ip') or '--', region or '未知',
+                                (' · %s' % d['llc']) if d.get('llc') else '')
+
+
+def _fmt_translate(d):
+    if d.get('translate'):
+        return '🌐 %s → %s' % (d.get('text') or '', d['translate'])
+    return None
+
+
+def _fmt_saying(d):
+    return '💬 %s' % d.get('text') if d.get('text') else None
+
+
+def _fmt_kv_wrapper(field, prefix):
+    def _f(d):
+        if d.get(field):
+            return '%s%s' % (prefix, d[field])
+        return None
+    return _f
+
+
+def _fmt_holiday_calendar(d):
+    days = d.get('days') or []
+    if not days:
+        return None
+    day = days[0]
+    lines = ['📅 %s（%s）' % (day.get('date') or '', day.get('weekday_cn') or '')]
+    names = []
+    if day.get('legal_holiday_name'):
+        marks = '休' if day.get('legal_holiday_type') == 'rest' else '补班'
+        names.append('%s（%s）' % (day['legal_holiday_name'], marks))
+    for f in ('solar_festival', 'lunar_festival', 'solar_term'):
+        if day.get(f):
+            names.append(day[f])
+    if names:
+        lines.append('　' + ' · '.join(names))
+    lines.append('　农历 %s年%s月%s' % (day.get('ganzhi_year') or '', day.get('lunar_month_name') or '',
+                                       day.get('lunar_day_name') or ''))
+    if day.get('is_rest_day') is not None:
+        lines.append('　%s' % ('今日休息日' if day.get('is_rest_day') else '今日工作日'))
+    return '\n'.join(lines)
+
+
+def _fmt_github_repo(d):
+    if not d.get('full_name'):
+        return None
+    return '🐙 %s ⭐%s 🍴%s · %s' % (d.get('full_name'), d.get('stargazers_count', '-'),
+                                  d.get('forks_count', '-'), d.get('language') or '')
+
+
+def _fmt_epic_free(d):
+    games = d.get('games') or d.get('list') or d.get('data') or []
+    if isinstance(games, list) and games:
+        lines = ['🎮 Epic 免费游戏']
+        for g in games[:5]:
+            name = g.get('title') or g.get('name') or ''
+            lines.append('　· %s' % name)
+        return '\n'.join(lines)
+    return None
+
+
+# 格式化器注册表：API ID → formatter 映射（未注册的 API 返回 None 走原始 JSON 展示）
+FORMATTERS = {
+    'misc_worldtime': _fmt_worldtime,
+    'misc_lunartime': _fmt_lunartime,
+    'misc_weather': _fmt_weather,
+    'misc_weather_history': _fmt_weather,
+    'misc_hotboard': _fmt_hotboard,
+    'misc_phoneinfo': _fmt_phoneinfo,
+    'misc_date_diff': _fmt_date_diff,
+    'convert_unixtime': _fmt_unixtime,
+    'misc_timestamp': _fmt_unixtime,
+    'misc_holiday_calendar': _fmt_holiday_calendar,
+    'daily_word': _fmt_daily_word,
+    'history_programmer': _fmt_programmer,
+    'history_programmer_today': _fmt_programmer,
+    'network_myip': _fmt_ip,
+    'network_ipinfo': _fmt_ip,
+    'network_pingmyip': _fmt_ip,
+    'translate_text': _fmt_translate,
+    'saying': _fmt_saying,
+    'saying_random': _fmt_saying,
+    'answerbook_ask': _fmt_kv_wrapper('answer', '🔮 '),
+    'random_string': _fmt_kv_wrapper('result', '🎲 '),
+    'misc_randomnumber': _fmt_kv_wrapper('result', '🎲 随机数：'),
+    'text_md5': _fmt_kv_wrapper('md5', '🔑 MD5：'),
+    'text_md5_post': _fmt_kv_wrapper('md5', '🔑 MD5：'),
+    'text_base64_encode': _fmt_kv_wrapper('encoded', '🔐 Base64：'),
+    'text_base64_decode': _fmt_kv_wrapper('decoded', '🔓 解码：'),
+    'github_repo': _fmt_github_repo,
+    'game_epic_free': _fmt_epic_free,
+    'dictionary_lookup': _fmt_kv_wrapper('translation', '📖 '),
+    'misc_tracking_detect': _fmt_kv_wrapper('carrier_name', '📦 该单号快递公司：'),
+}
+
+
+def format_uapi_result(api_id, payload):
+    """响应美化：把常用 API 的 JSON 响应转为人类可读中文摘要
+    返回格式化文本；未注册格式化器或字段不匹配返回 None（前端回落原始 JSON 展示）"""
+    if not isinstance(payload, dict):
+        return None
+    fn = FORMATTERS.get(api_id)
+    if not fn:
+        return None
+    try:
+        text = str(fn(payload) or '').strip()
+        return text or None
+    except Exception:
+        return None
 
 
 # ===================== 业务便捷函数（带进程级缓存） =====================

@@ -112,10 +112,10 @@ def _fetch_from_timor(year):
     last_err = None
     for _round in range(retries + 1):
         for ep in endpoints:
-            # ---- V10.11.47 UApiPro 平台端点：万年历协议分发 ----
+            # ---- V10.11.47/48 平台端点：按端点绑定的平台分发（认证从对应 Key 池注入）----
             if ep.get('platform'):
                 try:
-                    result = _fetch_from_uapi(year, ep['url'])
+                    result = _fetch_from_uapi(year, ep['url'], ep.get('platform'))
                     if result:
                         return result
                 except Exception as e:
@@ -149,35 +149,72 @@ def _fetch_from_timor(year):
     return {}
 
 
-def _fetch_from_uapi(year, url):
-    """V10.11.47 UApiPro 万年历端点拉取：GET {端点}?year=YYYY（认证头由 uapi_client 注入）
-    响应 holidays 事件表 → timor 同构精简结构 {MM-DD: {holiday: bool, name: str}}：
+def _fetch_from_uapi(year, url, platform_id=None):
+    """V10.11.47/48 平台万年历端点拉取：GET {端点}?date=YYYY-MM-DD（认证按端点绑定平台的 Key 池注入）
+    响应 days 列表 → timor 同构精简结构 {MM-DD: {holiday: bool, name: str}}：
     - legal_rest（法定休假日）→ holiday=True
-    - legal_workday_adjust（调休补班日）→ holiday=False
-    其余事件类型（公历节日/农历节日/节气）与 timor 语义无关，不纳入。失败返回空字典。"""
-    from services import uapi_client
+    - legal_workday_adjust（调休补班日/工作日）→ holiday=False
+    其余事件类型（公历节日/农历节日/节气）与 timor 语义无关，不纳入。失败返回空字典。
+    注：按年查询改用逐日合并前 120 天窗口成本高，改为单日探测不可行——
+    直接用官方 year 模式若不支持则回退逐月拼接（month 模式 12 次调用，服务端 12h 缓存内重复免费/半价）。"""
+    from services import uapi_client, uapi_catalog
+    result = {}
+
+    def _parse_days(payload):
+        """days[]（legal_holiday_type: rest/workday_adjust）与 holidays[]（type:
+        legal_rest/legal_workday_adjust）双结构解析，合并为 timor 同构精简字典"""
+        out = {}
+        for day in (payload.get('days') or []):
+            if not isinstance(day, dict):
+                continue
+            date = str(day.get('date') or '').strip()
+            if len(date) != 10 or date[4] != '-':
+                continue
+            etype = str(day.get('legal_holiday_type') or '')
+            name = str(day.get('legal_holiday_name') or '')
+            if not name:
+                continue
+            if etype == 'rest':
+                out[date[5:]] = {'holiday': True, 'name': name}
+            elif etype in ('workday_adjust', 'workday'):
+                out[date[5:]] = {'holiday': False, 'name': name}
+        for item in (payload.get('holidays') or []):
+            if not isinstance(item, dict):
+                continue
+            date = str(item.get('date') or '').strip()
+            if len(date) != 10 or date[4] != '-':
+                continue
+            etype = str(item.get('type') or '')
+            name = str(item.get('name') or '')
+            if not name:
+                continue
+            if etype == 'legal_rest':
+                out.setdefault(date[5:], {'holiday': True, 'name': name})
+            elif etype == 'legal_workday_adjust':
+                out.setdefault(date[5:], {'holiday': False, 'name': name})
+        return out
+
+    # 首选：year 模式单次拉取（若平台支持）
     ok, payload, status, message = uapi_client.call_uapi(
         'misc_holiday_calendar', params={'year': str(year)},
-        timeout=(5, 10), full_url=url or None)
-    if not ok or not isinstance(payload, dict):
-        print('[Holiday] UApiPro 万年历拉取 %d 年失败: HTTP %s %s' % (year, status, (message or '')[:120]))
-        return {}
-    result = {}
-    for item in (payload.get('holidays') or []):
-        if not isinstance(item, dict):
+        timeout=(5, 10), full_url=url or None, platform_id=platform_id or None)
+    if ok and isinstance(payload, dict):
+        result = _parse_days(payload)
+        if result:
+            return result
+
+    # 回退：month 模式逐月拼接（12 次调用；服务端有 12h 缓存，月度拉取重复成本低）
+    merged = {}
+    for m in range(1, 13):
+        try:
+            ok, payload, status, message = uapi_client.call_uapi(
+                'misc_holiday_calendar', params={'month': '%04d-%02d' % (year, m)},
+                timeout=(5, 10), full_url=url or None, platform_id=platform_id or None)
+            if ok and isinstance(payload, dict):
+                merged.update(_parse_days(payload))
+        except Exception:
             continue
-        date = str(item.get('date') or '').strip()
-        # YYYY-MM-DD → MM-DD（与 timor 精简结构键格式一致）
-        if len(date) == 10 and date[4] == '-':
-            mm_dd = date[5:]
-        else:
-            continue
-        etype = str(item.get('type') or '')
-        if etype == 'legal_rest':
-            result[mm_dd] = {'holiday': True, 'name': str(item.get('name') or '')}
-        elif etype == 'legal_workday_adjust':
-            result[mm_dd] = {'holiday': False, 'name': str(item.get('name') or '')}
-    return result
+    return merged
 
 
 def _parse_timor(resp):

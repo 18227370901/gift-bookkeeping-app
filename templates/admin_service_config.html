@@ -101,60 +101,146 @@
 {% set PLATFORM_GROUPS = ['forecast', 'holiday'] %}
 {# V10.11.47 平台支持组：仅「天气预报」「法定节假日」两组支持 UApiPro 平台端点双协议混排 #}
 
-<!-- ==================== V10.11.47 API 平台注册表（平台级 Key 集中管理） ==================== -->
+<!-- ==================== V10.11.47/48 API 平台注册表（多平台 · 每平台多 Key 轮换） ==================== -->
 <div class="card shadow-sm rounded-4 mb-4" id="platformCard">
-    <div class="card-header d-flex justify-content-between align-items-center rounded-top-4">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 rounded-top-4">
         <span><i class="fa-solid fa-plug me-2 text-primary"></i><b>API 平台</b>
-            <span class="badge bg-success-subtle text-success border ms-2">UApiPro 已内置</span>
+            <span class="badge bg-primary-subtle text-primary border ms-1" id="platCountBadge">{{ platforms|length }} 个平台</span>
         </span>
         <div class="d-flex gap-2">
-            <button class="btn btn-outline-info btn-sm rounded-pill" onclick="testPlatform()"><i class="fa-solid fa-vial me-1"></i>测试平台连通</button>
+            <button class="btn btn-outline-info btn-sm rounded-pill" onclick="testPlatformAll()"><i class="fa-solid fa-vial me-1"></i>测试全部平台</button>
+            <button class="btn btn-success btn-sm rounded-pill" onclick="showAddPlatformModal()"><i class="fa-solid fa-plus me-1"></i>添加自定义平台</button>
         </div>
     </div>
     <div class="card-body">
         <div class="alert alert-light border small mb-3 rounded-3">
             <i class="fa-solid fa-circle-info me-1 text-primary"></i>
-            平台级一份 <b>API Key</b> 集中管理：所有绑定该平台的端点与 API 调用自动附加认证头（<code>Authorization: Bearer &lt;key&gt;</code>），换 Key 只需改这里一处。<br>
-            <b>UApiPro 访客模式</b>：Key 留空即可直接调用（按出口 IP 每月 1500 积分 / 4 QPS，月初自动重置）；<b>配置 Key 后</b>：按账号每月 3500 积分 / 7 QPS，可在 <a href="https://uapis.cn/console/api-keys" target="_blank" rel="noopener">uapis.cn 控制台</a>管理。
+            <b>多平台接入</b>：内置 UApiPro（uapis.cn）+ 管理员自建平台并存；每个平台一个 <b>Key 池</b>（按序轮换：Key 无效/额度不足/限流自动切换下一个，全部失败才报错）。Key 行支持<b>上移/下移</b>排序、行内<b>启停开关</b>（即时保存）、单 Key <b>测试</b>；池空 = 访客模式。<br>
+            <b>UApiPro 访客模式</b>：不配 Key 即可用（按出口 IP 每月 1500 积分 / 4 QPS，月初重置）；<b>配置 Key 后</b>按账号每月 3500 积分 / 7 QPS（<a href="https://uapis.cn/console/api-keys" target="_blank" rel="noopener">控制台管理</a>）。天气/节假日端点组可绑定任意平台（协议需 UApiPro 兼容）。
         </div>
         {% for p in platforms %}
-        <div class="row g-2 align-items-end platform-row" data-pid="{{ p.id }}">
-            <div class="col-12 col-lg-3">
-                <label class="form-label small text-muted mb-1">平台</label>
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <b class="text-nowrap">{{ p.name }}</b>
-                    <span class="badge {{ 'bg-success-subtle text-success border' if p.enabled else 'bg-secondary-subtle text-secondary border' }}"
-                          id="platEnabledBadge_{{ p.id }}">{{ '已启用' if p.enabled else '已停用' }}</span>
-                    <span class="badge {{ 'bg-primary-subtle text-primary border' if p.key_set else 'bg-warning-subtle text-warning border' }}"
-                          id="platKeyBadge_{{ p.id }}" title="{{ 'Key 已配置（脱敏回显）' if p.key_set else '未配置 Key（访客模式）' }}">
-                        {{ ('Key ' ~ p.key_masked) if p.key_set else '访客模式' }}</span>
-                    <div class="form-check form-switch mb-0 ms-1">
-                        <input type="checkbox" class="form-check-input platform-enabled" role="switch" {% if p.enabled %}checked{% endif %}
-                               id="platEnabled_{{ p.id }}" onchange="savePlatform('{{ p.id }}', 'switch')">
+        <div class="border rounded-3 mb-3 p-3 platform-block" data-pid="{{ p.id }}" id="platBlock_{{ p.id }}">
+            <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+                <i class="fa-solid fa-cloud text-primary"></i>
+                <b>{{ p.name }}</b>
+                <code class="small text-muted">{{ p.id }}</code>
+                {% if p.builtin %}<span class="badge bg-success-subtle text-success border">内置</span>{% else %}<span class="badge bg-info-subtle text-info border">自定义</span>{% endif %}
+                <span class="badge {{ 'bg-success-subtle text-success border' if p.enabled else 'bg-secondary-subtle text-secondary border' }} plat-enabled-badge" id="platEnabledBadge_{{ p.id }}">{{ '已启用' if p.enabled else '已停用' }}</span>
+                <span class="badge {{ 'bg-primary-subtle text-primary border' if p.key_count else 'bg-warning-subtle text-warning border' }} plat-keysum-badge" id="platKeyBadge_{{ p.id }}">
+                    {{ ('%d 个 Key · 启用 %d' % (p.key_count, p.key_enabled_count)) if p.key_count else '访客模式（无 Key）' }}</span>
+                <div class="form-check form-switch mb-0 ms-1">
+                    <input type="checkbox" class="form-check-input platform-enabled" role="switch" {% if p.enabled %}checked{% endif %}
+                           id="platEnabled_{{ p.id }}" onchange="savePlatformSwitch('{{ p.id }}')" title="平台总开关（停用后全站该平台调用静默降级）">
+                </div>
+                <span class="ms-auto d-flex gap-2">
+                    <button class="btn btn-outline-info btn-sm rounded-pill px-3" onclick="testPlatform('{{ p.id }}')"><i class="fa-solid fa-vial me-1"></i>测试平台</button>
+                    {% if not p.builtin %}
+                    <button class="btn btn-outline-danger btn-sm rounded-pill px-3" onclick="deletePlatform('{{ p.id }}', '{{ p.name }}')"><i class="fa-solid fa-trash-can me-1"></i>删除平台</button>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="row g-2 mb-2">
+                <div class="col-12 col-md-7">
+                    <label class="form-label small text-muted mb-1">平台地址 Base URL{% if not p.builtin %}（认证方式：{{ {'none':'无认证','bearer':'Bearer 头','header':'自定义头','query':'URL 参数'}[p.auth_type] }}{% if p.auth_key_name %} · {{ p.auth_key_name }}{% endif %}）{% endif %}</label>
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control platform-baseurl" value="{{ p.base_url }}" placeholder="https://uapis.cn/api/v1" aria-label="平台地址">
+                        <button class="btn btn-outline-primary" type="button" onclick="savePlatformBase('{{ p.id }}')"><i class="fa-solid fa-floppy-disk me-1"></i>保存地址</button>
                     </div>
                 </div>
-            </div>
-            <div class="col-12 col-md-6 col-lg-4">
-                <label class="form-label small text-muted mb-1">平台地址 Base URL</label>
-                <input type="text" class="form-control form-control-sm platform-baseurl" value="{{ p.base_url }}"
-                       placeholder="https://uapis.cn/api/v1" aria-label="平台地址">
-            </div>
-            <div class="col-12 col-md-6 col-lg-5">
-                <label class="form-label small text-muted mb-1">API Key（留空 = 保持不变；输入新值 = 更新）</label>
-                <div class="input-group input-group-sm">
-                    <input type="password" class="form-control platform-apikey" autocomplete="new-password"
-                           placeholder="{{ ('已配置：' ~ p.key_masked ~ '（留空保持不变）') if p.key_set else '未配置（访客模式可用，可选填 Key）' }}"
-                           aria-label="API Key">
-                    <button class="btn btn-outline-danger" type="button" title="清除已保存的 Key（切回访客模式）"
-                            onclick="clearPlatformKey('{{ p.id }}')"><i class="fa-solid fa-eraser"></i></button>
-                    <button class="btn btn-primary" type="button" onclick="savePlatform('{{ p.id }}')">
-                        <i class="fa-solid fa-floppy-disk me-1"></i>保存平台
-                    </button>
+                <div class="col-12 col-md-5 d-flex align-items-end">
+                    <div class="small text-muted" id="platTestResult_{{ p.id }}"></div>
                 </div>
+            </div>
+            <div class="d-flex align-items-center mb-1">
+                <b class="small">API Key 池</b>
+                <span class="small text-muted ms-2"><i class="fa-solid fa-arrows-rotate me-1"></i>按序轮换：Key 失效/额度不足自动切换下一个</span>
+                <button class="btn btn-outline-success btn-sm rounded-pill ms-auto px-3" type="button" onclick="addPlatformKeyRow('{{ p.id }}')"><i class="fa-solid fa-plus me-1"></i>添加 Key</button>
+            </div>
+            <div class="platform-key-list" id="platKeys_{{ p.id }}">
+                {% for k in p['keys'] %}
+                <div class="input-group input-group-sm mb-2 pkey-row" data-uid="{{ k.uid }}" data-keyset="{{ '1' if k.key_set else '' }}">
+                    <span class="input-group-text" style="min-width:120px" title="Key 标签（备注用途）">
+                        <span class="pkey-label text-truncate" title="{{ k.label }}">{{ k.label }}</span>
+                        <input type="text" class="pkey-label-input d-none bg-transparent border-0 p-0 flex-grow-1" style="min-width:0;width:112px" value="{{ k.label }}" maxlength="30" placeholder="标签（备注）" aria-label="Key 标签">
+                    </span>
+                    <input type="password" class="form-control pkey-input" autocomplete="new-password" readonly
+                           value="{{ '已保存' if k.key_set else '' }}"
+                           placeholder="{{ (k.key_masked ~ '（点「编辑」修改）') if k.key_set else '未保存（新 Key）' }}" aria-label="API Key">
+                    <span class="input-group-text d-flex align-items-center" title="启用该 Key（停用则不参与轮换；切换后即时保存生效）">
+                        <div class="form-check form-switch mb-0">
+                            <input type="checkbox" class="form-check-input pkey-enabled" role="switch" {% if k.enabled %}checked{% endif %}>
+                        </div>
+                    </span>
+                    <button class="btn btn-outline-success btn-icon" type="button" title="测试该 Key（免费接口验证有效性）" onclick="testPlatformKey(this, '{{ p.id }}')"><i class="fa-solid fa-vial"></i></button>
+                    <button class="btn btn-outline-secondary btn-icon btn-pkey-up" type="button" title="上移（轮换优先级提前）" onclick="movePkeyRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
+                    <button class="btn btn-outline-secondary btn-icon btn-pkey-down" type="button" title="下移" onclick="movePkeyRow(this, 1)"><i class="fa-solid fa-arrow-down"></i></button>
+                    <button class="btn btn-outline-primary btn-icon btn-pkey-edit" type="button" title="编辑此 Key（解锁输入框）" onclick="editPkeyRow(this)"><i class="fa-solid fa-pen-to-square"></i></button>
+                    <button class="btn btn-outline-danger btn-icon btn-pkey-del" type="button" title="删除此 Key" onclick="delPkeyRow(this)"><i class="fa-solid fa-trash-can"></i></button>
+                    <button class="btn btn-success btn-icon btn-pkey-save d-none text-nowrap" type="button" title="保存 Key 池（整池提交）" onclick="savePlatformKeys('{{ p.id }}')"><i class="fa-solid fa-floppy-disk"></i></button>
+                    <button class="btn btn-outline-danger btn-icon btn-pkey-cancel d-none" type="button" title="取消编辑（还原）" onclick="resetPkeyRow(this)"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                {% endfor %}
+                {% if not p['keys'] %}
+                <div class="small text-muted mb-2" id="platKeysEmpty_{{ p.id }}"><i class="fa-solid fa-user-ninja me-1"></i>未配置 Key（访客模式可直接调用；点「添加 Key」接入账号额度）</div>
+                {% endif %}
             </div>
         </div>
         {% endfor %}
-        <div class="small text-muted mt-2" id="platformTestResult"></div>
+    </div>
+</div>
+
+<!-- V10.11.48 添加自定义平台模态 -->
+<div class="modal fade" id="addPlatformModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fa-solid fa-plus me-2 text-success"></i>添加自定义 API 平台</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2 small text-muted">接入自有/第三方平台（须 UApiPro 协议兼容才能用于天气/节假日端点；API 目录与试验台仍为 UApiPro 专属）。</div>
+                <div class="row g-2">
+                    <div class="col-6"><label class="form-label small text-muted mb-1">平台 ID（小写字母/数字/连字符）</label>
+                        <input type="text" class="form-control form-control-sm" id="npId" placeholder="my-mirror" maxlength="30"></div>
+                    <div class="col-6"><label class="form-label small text-muted mb-1">平台名称</label>
+                        <input type="text" class="form-control form-control-sm" id="npName" placeholder="我的镜像平台" maxlength="50"></div>
+                    <div class="col-12"><label class="form-label small text-muted mb-1">Base URL</label>
+                        <input type="text" class="form-control form-control-sm" id="npBaseUrl" placeholder="https://example.com/api/v1"></div>
+                    <div class="col-6"><label class="form-label small text-muted mb-1">认证方式</label>
+                        <select class="form-select form-select-sm" id="npAuthType">
+                            <option value="none">无认证</option>
+                            <option value="bearer" selected>Bearer 头（Authorization: Bearer）</option>
+                            <option value="header">自定义请求头</option>
+                            <option value="query">URL 查询参数</option>
+                        </select></div>
+                    <div class="col-6"><label class="form-label small text-muted mb-1">自定义头/参数名（header/query 型必填）</label>
+                        <input type="text" class="form-control form-control-sm" id="npAuthKeyName" placeholder="X-API-Key" maxlength="50"></div>
+                    <div class="col-12"><label class="form-label small text-muted mb-1">初始 API Key（可选，保存后可随时增删）</label>
+                        <input type="password" class="form-control form-control-sm" id="npApiKey" autocomplete="new-password" placeholder="留空 = 暂不配置"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-success rounded-pill px-3" onclick="submitAddPlatform()"><i class="fa-solid fa-check me-1"></i>添加平台</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- V10.11.48 删除平台二次确认 -->
+<div class="modal fade" id="delPlatformModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fa-solid fa-triangle-exclamation me-2 text-warning"></i>删除自定义平台</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body" id="delPlatformBody">确定删除该平台吗？</div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger rounded-pill px-3" id="delPlatformBtn">确定删除</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -196,16 +282,18 @@
                     <input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)">
                 </span>
                 <input type="text" class="form-control endpoint-url" value="{{ ep.url }}" placeholder="{{ gcfg.defaults[0].url if gcfg.defaults else '如：https://...' }}" readonly aria-label="端点地址" title="默认只读锁定，点击「编辑」解锁">
-                {# V10.11.47 平台端点徽章（只读态）：UApiPro 平台端点自动附加平台认证 #}
+                {# V10.11.48 平台端点徽章（只读态）：端点绑定平台自动附加该平台 Key 池认证 #}
                 {% if gname in PLATFORM_GROUPS %}
-                <span class="input-group-text platform-badge {{ '' if ep.platform else 'd-none' }}" title="UApiPro 平台端点（调用时自动附加平台级 Bearer 认证，按平台协议解析）">
-                    <i class="fa-solid fa-cloud me-1 text-primary"></i><span class="small">UApiPro</span>
+                <span class="input-group-text platform-badge {{ '' if ep.platform else 'd-none' }}" title="平台端点（调用时自动附加该平台 Key 池认证并按 UApiPro 兼容协议解析）">
+                    <i class="fa-solid fa-cloud me-1 text-primary"></i><span class="small">{{ (platforms | selectattr('id', 'equalto', ep.platform) | list | first).name if (ep.platform and (platforms | selectattr('id', 'equalto', ep.platform) | list)) else '平台' }}</span>
                 </span>
-                {# 编辑态协议选择（与编辑按钮联动显隐）#}
-                <span class="input-group-text p-0 platform-edit d-none" title="端点协议类型">
-                    <select class="form-select form-select-sm border-0 endpoint-platform" style="min-width:118px" aria-label="端点协议">
+                {# 编辑态平台选择（与编辑按钮联动显隐）：动态列出全部已注册平台 #}
+                <span class="input-group-text p-0 platform-edit d-none" title="端点绑定的 API 平台（认证与协议）">
+                    <select class="form-select form-select-sm border-0 endpoint-platform" style="min-width:130px" aria-label="端点平台">
                         <option value="" {% if not ep.platform %}selected{% endif %}>直连·无认证</option>
-                        <option value="uapis" {% if ep.platform == 'uapis' %}selected{% endif %}>UApiPro 平台</option>
+                        {% for p in platforms %}
+                        <option value="{{ p.id }}" {% if ep.platform == p.id %}selected{% endif %}>{{ p.name }}</option>
+                        {% endfor %}
                     </select>
                 </span>
                 {% endif %}
@@ -245,7 +333,7 @@
         {% endif %}
 
         {% if gname in PLATFORM_GROUPS %}
-        <div class="small text-primary mt-2"><i class="fa-solid fa-cloud me-1"></i>V10.11.47 双协议混排：本组支持 <b>UApiPro 平台端点</b>（{{ '如 https://uapis.cn/api/v1/misc/weather' if gname == 'forecast' else '如 https://uapis.cn/api/v1/misc/holiday-calendar' }}）——端点行点「编辑」可切换协议；平台端点调用时自动附加平台级认证并按平台协议解析，<b>组内端点顺序即协议优先级</b>（平台端点排首位时优先走平台通路，失败自动回落直连端点）。</div>
+        <div class="small text-primary mt-2"><i class="fa-solid fa-cloud me-1"></i>V10.11.48 双协议混排：本组端点可绑定任意 <b>已注册 API 平台</b>（{{ '如 https://uapis.cn/api/v1/misc/weather' if gname == 'forecast' else '如 https://uapis.cn/api/v1/misc/holiday-calendar' }}）——端点行点「编辑」可选择绑定平台；平台端点调用时自动附加该平台 Key 池认证（按序轮换）并按 UApiPro 兼容协议解析，<b>组内端点顺序即协议优先级</b>（平台端点排首位时优先走平台通路，失败自动回落直连端点）。</div>
         {% endif %}
         {% if gname == 'holiday' %}
         <div class="small text-success mt-2"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>地址末尾的 <b>{年份}</b> 变量由系统自动补全（如输入到 <code>.../year/</code> 即可），无需手工填写年份。</div>
@@ -382,7 +470,6 @@
     // V10.11.47：支持平台端点的组（天气/节假日双协议混排）与平台注册表数据
     const PLATFORM_GROUPS = {{ PLATFORM_GROUPS|tojson }};
     const PLATFORMS_DATA = {{ platforms|tojson }};
-    const clearKeyFlags = {};   // pid → true：用户已点击「清除 Key」，下次保存提交空串
 
     function getCsrfToken() {
         const m = document.querySelector('meta[name="csrf-token"]');
@@ -526,22 +613,34 @@
         }).join('');
     }
 
+    // 生成端点平台下拉选项（V10.11.48 动态平台列表）
+    function endpointPlatformOptionsHtml(selected) {
+        let html = '<option value=""' + (selected ? '' : ' selected') + '>直连·无认证</option>';
+        PLATFORMS_DATA.forEach(p => {
+            html += `<option value="${esc(p.id)}"${selected === p.id ? ' selected' : ''}>${esc(p.name)}</option>`;
+        });
+        return html;
+    }
+
     // 端点行构造函数（新增/恢复/取消共用）
     // V10.11.23 行状态机：所有行（含新增行）默认只读锁定（地址输入框 readonly），
     // 点「编辑」进入可编辑态（编辑/删除隐藏，保存/取消显示）；保存成功后经 renderSavedRows
     // 重渲染回只读态；启用开关为高频快捷操作，不受编辑按钮限制（任何时候可直接切换）
     // V10.11.24：首列新增选择框（单选/多选参与批量）；启用开关升级为滑动开关图标（form-switch）
-    // V10.11.47：新增 platform 参数——支持平台端点的组（天气/节假日）渲染 UApiPro 徽章（只读态）
-    // 与协议下拉（编辑态），其余组不渲染平台控件（后端同样白名单拦截）
+    // V10.11.47/48：新增 platform 参数——支持平台端点的组（天气/节假日）渲染平台徽章（只读态）
+    // 与平台下拉（编辑态，动态列出全部已注册平台），其余组不渲染平台控件（后端同样拦截）
     function makeEndpointRow(url, enabled, placeholder, isNew, platform, gname) {
         platform = platform || '';
         const supportPlatform = PLATFORM_GROUPS.indexOf(gname) >= 0;
+        const platName = platform
+            ? ((PLATFORMS_DATA.find(p => p.id === platform) || {}).name || platform)
+            : '';
         const row = document.createElement('div');
         row.className = 'input-group input-group-sm mb-2 endpoint-row' + (isNew ? ' is-new-row' : '');
         row.dataset.platform = platform;
         const platformHtml = supportPlatform ? `
-            <span class="input-group-text platform-badge ${platform ? '' : 'd-none'}" title="UApiPro 平台端点（调用时自动附加平台级 Bearer 认证，按平台协议解析）"><i class="fa-solid fa-cloud me-1 text-primary"></i><span class="small">UApiPro</span></span>
-            <span class="input-group-text p-0 platform-edit d-none" title="端点协议类型"><select class="form-select form-select-sm border-0 endpoint-platform" style="min-width:118px" aria-label="端点协议"><option value="" ${platform ? '' : 'selected'}>直连·无认证</option><option value="uapis" ${platform === 'uapis' ? 'selected' : ''}>UApiPro 平台</option></select></span>` : '';
+            <span class="input-group-text platform-badge ${platform ? '' : 'd-none'}" title="平台端点（调用时自动附加该平台 Key 池认证并按 UApiPro 兼容协议解析）"><i class="fa-solid fa-cloud me-1 text-primary"></i><span class="small">${esc(platName)}</span></span>
+            <span class="input-group-text p-0 platform-edit d-none" title="端点绑定的 API 平台（认证与协议）"><select class="form-select form-select-sm border-0 endpoint-platform" style="min-width:130px" aria-label="端点平台">${endpointPlatformOptionsHtml(platform)}</select></span>` : '';
         row.innerHTML = `
             <span class="input-group-text" title="勾选参与批量操作（可单选/多选）"><input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)"></span>
             <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}" readonly aria-label="端点地址" title="默认只读锁定，点击「编辑」解锁">${platformHtml}
@@ -555,6 +654,8 @@
             <button class="btn btn-outline-danger btn-icon btn-cancel d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark"></i></button>`;
         return row;
     }
+
+    function makePkeyRowLabel() { return 'Key ' + (document.querySelectorAll('.pkey-row').length + 1); }
 
     // ===== V10.11.24 批量操作（行级单选/多选 + 组级全选 + 批量启用/停用） =====
 
@@ -1104,110 +1205,402 @@
         if (isAllClean()) clearDirty();
     });
 
-    // ===================== V10.11.47 API 平台注册表（平台级 Key 集中管理） =====================
+    // ===================== V10.11.47/48 API 平台注册表（多平台 · 多 Key 轮换） =====================
+    // Key 行与端点行交互同构：只读锁定 + 编辑/保存/取消 + 启停即时保存 + 上下移 + 行内测试 + 删除
 
-    function getPlatformRow(pid) {
-        return document.querySelector(`.platform-row[data-pid="${pid}"]`);
+    function getPlatBlock(pid) {
+        return document.getElementById('platBlock_' + pid);
     }
 
-    // 保存平台配置：base_url + Key（留空保持不变 / 点清除后保存=清空）+ 启用开关
-    // mode='switch' 为启用开关即时保存（toast 文案区分）
-    function savePlatform(pid, mode) {
-        const row = getPlatformRow(pid);
-        if (!row) return;
-        const baseUrl = row.querySelector('.platform-baseurl').value.trim();
-        const keyInput = row.querySelector('.platform-apikey');
-        const apiKey = keyInput.value.trim();
-        const enabledCb = row.querySelector('.platform-enabled');
-        const body = { id: pid, base_url: baseUrl, enabled: enabledCb ? enabledCb.checked : null };
-        if (apiKey) body.api_key = apiKey;
-        else if (clearKeyFlags[pid]) body.api_key = '';   // 用户点了「清除 Key」：提交空串切回访客模式
-        postJSON('/admin/service-config/platform/save', body)
+    // 平台启停开关：即时保存生效（停用后全站该平台调用静默降级）
+    function savePlatformSwitch(pid) {
+        const block = getPlatBlock(pid);
+        if (!block) return;
+        const enabled = block.querySelector('.platform-enabled').checked;
+        postJSON('/admin/service-config/platform/save', { id: pid, enabled })
             .then(data => {
                 if (data && data.success) {
-                    showToast(mode === 'switch'
-                        ? `平台「${pid}」启停状态已保存生效`
-                        : `平台「${pid}」配置已保存（${data.platform && data.platform.key_set ? 'Key 已配置' : '访客模式'}）`);
-                    clearKeyFlags[pid] = false;
-                    keyInput.value = '';
                     refreshPlatformBadges(pid, data.platform);
-                    if (mode !== 'switch') markCleanAfterPlatformSave();
+                    showToast(enabled ? `平台「${pid}」已启用` : `平台「${pid}」已停用：相关调用将静默降级`, true, !enabled);
                 } else {
-                    showToast(data.message || '平台保存失败', false);
-                    if (mode === 'switch') rollbackPlatformSwitch(pid);
+                    showToast(data.message || '保存失败', false);
+                    block.querySelector('.platform-enabled').checked = !enabled;
                 }
             })
             .catch(() => {
-                showToast('网络错误，平台保存失败', false);
-                if (mode === 'switch') rollbackPlatformSwitch(pid);
+                showToast('网络错误', false);
+                block.querySelector('.platform-enabled').checked = !enabled;
             });
     }
 
-    // 启用开关保存失败回滚
-    function rollbackPlatformSwitch(pid) {
-        const row = getPlatformRow(pid);
-        if (!row) return;
-        const cb = row.querySelector('.platform-enabled');
-        const badge = document.getElementById('platEnabledBadge_' + pid);
-        // 回滚到徽章记录的旧状态
-        const wasEnabled = badge && badge.textContent.indexOf('已停用') < 0;
-        if (cb) cb.checked = wasEnabled;
+    // 保存平台 Base URL（单独按钮，不触碰 Key 池）
+    function savePlatformBase(pid) {
+        const block = getPlatBlock(pid);
+        if (!block) return;
+        const baseUrl = block.querySelector('.platform-baseurl').value.trim();
+        postJSON('/admin/service-config/platform/save', { id: pid, base_url: baseUrl })
+            .then(data => {
+                if (data && data.success) {
+                    refreshPlatformBadges(pid, data.platform);
+                    showToast(`平台「${pid}」地址已保存`);
+                } else {
+                    showToast(data.message || '保存失败', false);
+                }
+            })
+            .catch(() => showToast('网络错误，保存失败', false));
     }
 
-    // 刷新平台 Key 徽章与输入框占位符（保存成功后按服务端脱敏回显刷新）
+    // 刷新平台徽章（启用状态 + Key 池汇总）
     function refreshPlatformBadges(pid, plat) {
         if (!plat) return;
-        const kb = document.getElementById('platKeyBadge_' + pid);
-        if (kb) {
-            kb.textContent = plat.key_set ? ('Key ' + plat.key_masked) : '访客模式';
-            kb.className = 'badge ' + (plat.key_set ? 'bg-primary-subtle text-primary border' : 'bg-warning-subtle text-warning border');
-            kb.title = plat.key_set ? 'Key 已配置（脱敏回显，仅末 4 位）' : '未配置 Key（访客模式）';
-        }
         const eb = document.getElementById('platEnabledBadge_' + pid);
         if (eb) {
             eb.textContent = plat.enabled ? '已启用' : '已停用';
-            eb.className = 'badge ' + (plat.enabled ? 'bg-success-subtle text-success border' : 'bg-secondary-subtle text-secondary border');
+            eb.className = 'badge ' + (plat.enabled ? 'bg-success-subtle text-success border' : 'bg-secondary-subtle text-secondary border') + ' plat-enabled-badge';
         }
-        const row = getPlatformRow(pid);
-        if (row) {
-            const keyInput = row.querySelector('.platform-apikey');
-            if (keyInput) keyInput.placeholder = plat.key_set
-                ? ('已配置：' + plat.key_masked + '（留空保持不变）')
-                : '未配置（访客模式可用，可选填 Key）';
+        const kb = document.getElementById('platKeyBadge_' + pid);
+        if (kb) {
+            kb.textContent = plat.key_count
+                ? `${plat.key_count} 个 Key · 启用 ${plat.key_enabled_count}`
+                : '访客模式（无 Key）';
+            kb.className = 'badge ' + (plat.key_count ? 'bg-primary-subtle text-primary border' : 'bg-warning-subtle text-warning border') + ' plat-keysum-badge';
         }
     }
 
-    // 点击「清除 Key」：标记待清空（下次点「保存平台」提交空串生效）
-    function clearPlatformKey(pid) {
-        clearKeyFlags[pid] = true;
-        const row = getPlatformRow(pid);
+    // ===== Key 行构造 =====
+    function makePkeyRow(label, keyMasked, keySet, enabled, uid) {
+        const row = document.createElement('div');
+        row.className = 'input-group input-group-sm mb-2 pkey-row';
+        row.dataset.keyset = keySet ? '1' : '';   // 注意：data-keyset 无连字符，dataset 属性名为全小写 keyset（写成 keySet 会变成 data-key-set 导致读不到）
+        row.dataset.uid = uid || '';
+        row.dataset.origLabel = label || '';
+        label = label || ('Key ' + (document.querySelectorAll('.pkey-row').length + 1));
+        row.innerHTML = `
+            <span class="input-group-text" style="min-width:120px" title="Key 标签（备注用途）"><span class="pkey-label text-truncate">${esc(label)}</span><input type="text" class="pkey-label-input d-none bg-transparent border-0 p-0 flex-grow-1" style="min-width:0;width:112px" value="${esc(label)}" maxlength="30" placeholder="标签（备注）" aria-label="Key 标签"></span>
+            <input type="password" class="form-control pkey-input" autocomplete="new-password" readonly
+                   value="${keySet ? '已保存' : ''}"
+                   placeholder="${keySet ? (esc(keyMasked || '****') + '（点「编辑」修改）') : '新 Key（点「编辑」填写）'}" aria-label="API Key">
+            <span class="input-group-text d-flex align-items-center" title="启用该 Key（停用则不参与轮换；保存后即时生效）"><div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input pkey-enabled" role="switch" ${enabled !== false ? 'checked' : ''}></div></span>
+            <button class="btn btn-outline-success btn-icon" type="button" title="测试该 Key（免费接口验证有效性）" onclick="testPlatformKey(this)"><i class="fa-solid fa-vial"></i></button>
+            <button class="btn btn-outline-secondary btn-icon btn-pkey-up" type="button" title="上移（轮换优先级提前）" onclick="movePkeyRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
+            <button class="btn btn-outline-secondary btn-icon btn-pkey-down" type="button" title="下移" onclick="movePkeyRow(this, 1)"><i class="fa-solid fa-arrow-down"></i></button>
+            <button class="btn btn-outline-primary btn-icon btn-pkey-edit" type="button" title="编辑此 Key（解锁输入框）" onclick="editPkeyRow(this)"><i class="fa-solid fa-pen-to-square"></i></button>
+            <button class="btn btn-outline-danger btn-icon btn-pkey-del" type="button" title="删除此 Key" onclick="delPkeyRow(this)"><i class="fa-solid fa-trash-can"></i></button>
+            <button class="btn btn-success btn-icon btn-pkey-save d-none text-nowrap" type="button" title="保存 Key 池（整池提交）" onclick="savePlatformKeysOf(this)"><i class="fa-solid fa-floppy-disk"></i></button>
+            <button class="btn btn-outline-danger btn-icon btn-pkey-cancel d-none" type="button" title="取消编辑（还原）" onclick="resetPkeyRow(this)"><i class="fa-solid fa-xmark"></i></button>`;
+        return row;
+    }
+
+    // 添加 Key 行（新行直接进入编辑态）
+    function addPlatformKeyRow(pid) {
+        const list = document.getElementById('platKeys_' + pid);
+        const empty = document.getElementById('platKeysEmpty_' + pid);
+        if (empty) empty.remove();
+        const row = makePkeyRow('', '', false, true);
+        list.appendChild(row);
+        refreshPkeyMoveButtons(list);
+        row.querySelector('.btn-pkey-edit').click();
+        showToast('已添加 Key 行，请填写标签与 Key 后点行内「保存」提交 Key 池');
+    }
+
+    // Key 编辑态切换（只读锁定 ↔ 解锁；标签同步切换为行内输入框）
+    function setPkeyEditMode(row, editing) {
+        const input = row.querySelector('.pkey-input');
+        const labelSpan = row.querySelector('.pkey-label');
+        const labelInput = row.querySelector('.pkey-label-input');
+        if (editing) {
+            if (row.dataset.keyset) { input.value = ''; input.placeholder = '输入新 Key（覆盖已保存值）'; }
+            input.removeAttribute('readonly');
+            if (labelSpan) labelSpan.classList.add('d-none');
+            if (labelInput) { labelInput.classList.remove('d-none'); labelInput.focus(); labelInput.select(); }
+        } else {
+            input.setAttribute('readonly', 'readonly');
+            if (labelSpan) labelSpan.classList.remove('d-none');
+            if (labelInput) labelInput.classList.add('d-none');
+        }
+        const btnMap = { '.btn-pkey-edit': editing, '.btn-pkey-del': editing, '.btn-pkey-save': !editing, '.btn-pkey-cancel': !editing };
+        Object.keys(btnMap).forEach(sel => {
+            const b = row.querySelector(sel);
+            if (b) b.classList.toggle('d-none', btnMap[sel]);
+        });
+    }
+
+    function editPkeyRow(btn) {
+        const row = btn.closest('.pkey-row');
         if (!row) return;
-        const keyInput = row.querySelector('.platform-apikey');
-        keyInput.value = '';
-        keyInput.placeholder = '将清除已保存的 Key（点击「保存平台」后切回访客模式）';
-        showToast('已标记清除 Key：点击「保存平台」后生效（切回访客模式）', true, true);
+        if (row.dataset.origLabel === undefined) {   // 新行 makePkeyRow 已置 ''，此处仅回填服务端渲染行
+            row.dataset.origLabel = (row.querySelector('.pkey-label').textContent || '').trim();
+        }
+        setPkeyEditMode(row, true);   // 焦点由 setPkeyEditMode 定位到标签输入框
     }
 
-    // 平台连通性测试：调用永久免费接口（一言）验证地址可达与认证模式
-    function testPlatform() {
-        const box = document.getElementById('platformTestResult');
-        box.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在调用平台免费接口（一言 /saying）测试连通性...</span>';
-        postJSON('/admin/service-config/platform/test', {})
+    // 取消编辑：还原该行（标签/输入框/开关恢复编辑前状态）
+    function resetPkeyRow(btn) {
+        const row = btn.closest('.pkey-row');
+        if (!row) return;
+        if (!row.dataset.keyset && !row.dataset.origLabel) {
+            // 未保存的新空行：直接移除
+            const list = row.parentElement;
+            const block = row.closest('.platform-block');
+            row.remove();
+            if (list && !list.querySelectorAll('.pkey-row').length && block) {
+                list.insertAdjacentHTML('afterbegin',
+                    `<div class="small text-muted mb-2" id="platKeysEmpty_${block.dataset.pid}"><i class="fa-solid fa-user-ninja me-1"></i>未配置 Key（访客模式可直接调用；点「添加 Key」接入账号额度）</div>`);
+            }
+            showToast('已放弃该新增 Key 行');
+            return;
+        }
+        const labelSpan = row.querySelector('.pkey-label');
+        labelSpan.textContent = row.dataset.origLabel || labelSpan.textContent;
+        const input = row.querySelector('.pkey-input');
+        input.value = row.dataset.keyset ? '已保存' : '';
+        input.placeholder = row.dataset.keyset ? '已保存 Key（点「编辑」修改）' : '新 Key（点「编辑」填写）';
+        const labelInput = row.querySelector('.pkey-label-input');
+        if (labelInput) labelInput.value = row.dataset.origLabel || labelInput.value;
+        delete row.dataset.origLabel;
+        setPkeyEditMode(row, false);
+        showToast('已取消编辑');
+    }
+
+    // 删除 Key 行（点保存后从池中移除）
+    function delPkeyRow(btn) {
+        const row = btn.closest('.pkey-row');
+        const list = row.parentElement;
+        const block = row.closest('.platform-block');
+        if (list.querySelectorAll('.pkey-row').length <= 1 && row.dataset.keyset) {
+            // 最后一个已保存 Key：确认清空（等价切回访客模式）
+            if (!confirm('这是最后一个已保存的 Key，删除并保存后平台将切回访客模式，确定吗？')) return;
+        }
+        row.remove();
+        if (!list.querySelectorAll('.pkey-row').length && block) {
+            list.insertAdjacentHTML('afterbegin',
+                `<div class="small text-muted mb-2" id="platKeysEmpty_${block.dataset.pid}"><i class="fa-solid fa-user-ninja me-1"></i>未配置 Key（访客模式可直接调用；点「添加 Key」接入账号额度）</div>`);
+        }
+        refreshPkeyMoveButtons(list);
+        showToast('已移除该 Key 行：点任意 Key 行的「保存」提交 Key 池生效', true, true);
+    }
+
+    // 上移/下移 Key 行（轮换优先级 = 行顺序）
+    function movePkeyRow(btn, delta) {
+        const row = btn.closest('.pkey-row');
+        const list = row.parentElement;
+        const rows = Array.from(list.querySelectorAll('.pkey-row'));
+        const idx = rows.indexOf(row);
+        const target = idx + delta;
+        if (target < 0 || target >= rows.length) return;
+        if (delta < 0) list.insertBefore(row, rows[target]);
+        else list.insertBefore(rows[target], row);
+        refreshPkeyMoveButtons(list);
+        showToast('已移动 Key 顺序：点任意 Key 行的「保存」提交 Key 池生效', true, true);
+    }
+
+    function refreshPkeyMoveButtons(list) {
+        if (!list) return;
+        const rows = list.querySelectorAll('.pkey-row');
+        rows.forEach((r, i) => {
+            const up = r.querySelector('.btn-pkey-up');
+            const down = r.querySelector('.btn-pkey-down');
+            if (up) up.disabled = (i === 0);
+            if (down) down.disabled = (i === rows.length - 1);
+        });
+    }
+
+    // 读取 Key 行当前标签（编辑态读输入框，锁定态读静态 span）
+    function getPkeyLabel(row) {
+        const li = row.querySelector('.pkey-label-input');
+        const raw = (li && !li.classList.contains('d-none')) ? li.value : (row.querySelector('.pkey-label') || {}).textContent;
+        return (raw || '').trim() || 'Key';
+    }
+
+    // 保存平台 Key 池（整池提交：行顺序 = 轮换顺序）
+    // 明文不回传协议：已保存行未编辑 → 提交 key='__KEEP__'+uid（后端按 uid 回填原值）；
+    // 编辑后 → 提交新明文；新行 → 提交明文
+    function savePlatformKeys(pid) {
+        const list = document.getElementById('platKeys_' + pid);
+        if (!list) return;
+        const keys = [];
+        list.querySelectorAll('.pkey-row').forEach(row => {
+            const label = getPkeyLabel(row);
+            const input = row.querySelector('.pkey-input');
+            const raw = input.value.trim();
+            const enabled = row.querySelector('.pkey-enabled').checked;
+            const uid = row.dataset.uid || '';
+            if (row.dataset.keyset) {
+                if (raw && raw !== '已保存') {
+                    keys.push({ key: raw, label, enabled, uid });       // 覆盖更新（明文更新）
+                } else {
+                    keys.push({ key: '__KEEP__', label, enabled, uid }); // 保持原值（uid 回填）
+                }
+            } else if (raw) {
+                keys.push({ key: raw, label, enabled });                  // 新增 Key
+            }
+        });
+        postJSON('/admin/service-config/platform/save', { id: pid, api_keys: keys })
             .then(data => {
-                box.innerHTML = (data && data.success)
+                if (data && data.success) {
+                    showToast(`平台「${pid}」Key 池已保存（${(data.platform && data.platform.key_count) || 0} 个 Key，启用 ${data.platform ? data.platform.key_enabled_count : 0} 个）`);
+                    setTimeout(() => window.location.reload(), 600);   // 重载刷新脱敏回显与 uid
+                } else {
+                    showToast(data.message || '保存失败', false);
+                }
+            })
+            .catch(() => showToast('网络错误，保存失败', false));
+    }
+
+    function savePlatformKeysOf(btn) {
+        const block = btn.closest('.platform-block');
+        if (block) savePlatformKeys(block.dataset.pid);
+    }
+
+    // Key 启停开关即时保存（整池提交）
+    document.addEventListener('change', function (e) {
+        const cb = e.target;
+        if (!cb || !cb.classList || !cb.classList.contains('pkey-enabled')) return;
+        const block = cb.closest('.platform-block');
+        if (block) savePlatformKeys(block.dataset.pid);
+    });
+
+    // 单 Key 行内测试（明文输入框有值测新值；已保存未编辑 Key 提示用平台级测试验证）
+    function testPlatformKey(btn, pid) {
+        const row = btn.closest('.pkey-row');
+        const block = row.closest('.platform-block');
+        const realPid = pid || block.dataset.pid;
+        const key = row.querySelector('.pkey-input').value.trim();
+        const label = getPkeyLabel(row);
+        if (!key || key === '已保存') {
+            showRowResult(btn, false, '请先编辑填入 Key 明文再测（已保存原 Key 由「测试平台」按钮按池验证）', null);
+            return;
+        }
+        const oldHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+        postJSON('/admin/service-config/platform/test', { platform_id: realPid, test_key: key, key_label: label })
+            .then(data => {
+                btn.disabled = false; btn.innerHTML = oldHtml;
+                showRowResult(btn, !!(data && data.success),
+                    (data && data.message) || '测试失败', data ? data.latency_ms : null);
+            })
+            .catch(() => { btn.disabled = false; btn.innerHTML = oldHtml; showRowResult(btn, false, '网络错误', null); });
+    }
+
+    // 平台级测试（Key 池轮换，展示成功所用 Key 标签）
+    function testPlatform(pid) {
+        const box = document.getElementById('platTestResult_' + (pid || 'uapis'));
+        if (box) box.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在按 Key 池轮换测试（免费接口）...</span>';
+        postJSON('/admin/service-config/platform/test', { platform_id: pid || 'uapis' })
+            .then(data => {
+                if (box) box.innerHTML = (data && data.success)
                     ? `<span class="text-success"><i class="fa-solid fa-circle-check me-1"></i>${esc(data.message)}${data.sample ? ' —— "' + esc(data.sample) + '"' : ''}</span>`
                     : `<span class="text-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>${esc((data && data.message) || '测试失败')}</span>`;
+                showToast(((data && data.message) || '测试失败'), !!(data && data.success));
             })
-            .catch(() => { box.innerHTML = '<span class="text-danger">测试请求失败（网络错误）</span>'; });
+            .catch(() => { if (box) box.innerHTML = '<span class="text-danger">测试请求失败</span>'; });
     }
 
-    // 平台保存成功后清除未保存标记（平台区独立保存，不计入组配置 dirty 状态）
-    function markCleanAfterPlatformSave() { /* 平台区即时保存，无需联动组配置 dirty 状态 */ }
+    // 测试全部平台
+    function testPlatformAll() {
+        document.querySelectorAll('.platform-block').forEach(b => testPlatform(b.dataset.pid));
+    }
 
-    // ===================== V10.11.47 uapis.cn API 目录 =====================
+    // ===== 添加自定义平台 =====
+    function showAddPlatformModal() {
+        ['npId', 'npName', 'npBaseUrl', 'npAuthKeyName', 'npApiKey'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        const sel = document.getElementById('npAuthType'); if (sel) sel.value = 'bearer';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('addPlatformModal')).show();
+    }
+
+    function submitAddPlatform() {
+        const pid = document.getElementById('npId').value.trim();
+        const name = document.getElementById('npName').value.trim();
+        const baseUrl = document.getElementById('npBaseUrl').value.trim();
+        const authType = document.getElementById('npAuthType').value;
+        const authKeyName = document.getElementById('npAuthKeyName').value.trim();
+        const apiKey = document.getElementById('npApiKey').value.trim();
+        if (!/^[a-z][a-z0-9-]{1,29}$/.test(pid)) { showToast('平台 ID 需 2~30 位小写字母/数字/连字符，且以字母开头', false); return; }
+        if (!name) { showToast('平台名称不能为空', false); return; }
+        if (!/^https?:\/\//.test(baseUrl)) { showToast('Base URL 必须以 http:// 或 https:// 开头', false); return; }
+        if ((authType === 'header' || authType === 'query') && !authKeyName) { showToast('自定义头/参数名不能为空（当前认证方式必填）', false); return; }
+        const body = { id: pid, name, base_url: baseUrl, auth_type: authType, auth_key_name: authKeyName };
+        if (apiKey) body.api_keys = [{ key: apiKey, label: '初始Key', enabled: true }];
+        postJSON('/admin/service-config/platform/add', body)
+            .then(data => {
+                if (data && data.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('addPlatformModal')).hide();
+                    showToast('自定义平台已添加，页面即将刷新');
+                    setTimeout(() => window.location.reload(), 600);
+                } else {
+                    showToast(data.message || '添加失败', false);
+                }
+            })
+            .catch(() => showToast('网络错误，添加失败', false));
+    }
+
+    // ===== 删除自定义平台（二次确认）=====
+    let delPlatformPending = null;
+    function deletePlatform(pid, name) {
+        document.getElementById('delPlatformBody').innerHTML =
+            `确定删除自定义平台 <b>【${esc(name || pid)}】</b>（${esc(pid)}）吗？<br>` +
+            `<span class="text-muted small">引用该平台的端点将回落为无认证直连语义；内置 UApiPro 平台不可删除。</span>`;
+        delPlatformPending = pid;
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('delPlatformModal')).show();
+    }
+
+    document.getElementById('delPlatformBtn').addEventListener('click', function () {
+        const pid = delPlatformPending;
+        delPlatformPending = null;
+        const inst = bootstrap.Modal.getInstance(document.getElementById('delPlatformModal'));
+        if (inst) inst.hide();
+        if (pid) {
+            postJSON('/admin/service-config/platform/delete', { id: pid })
+                .then(data => {
+                    if (data && data.success) {
+                        showToast('平台已删除，页面即将刷新');
+                        setTimeout(() => window.location.reload(), 600);
+                    } else showToast(data.message || '删除失败', false);
+                })
+                .catch(() => showToast('网络错误，删除失败', false));
+        }
+    });
+
+    // 页面加载：初始化各平台 Key 行的上移/下移按钮态
+    (function initPkeyViews() {
+        document.querySelectorAll('.platform-key-list').forEach(refreshPkeyMoveButtons);
+    })();
+
+    // ===================== V10.11.47/48 uapis.cn API 目录 =====================
 
     const UAPI_CATALOG = {{ uapi_catalog|tojson }};
     const UAPI_SUMMARY = {{ uapi_summary|tojson }};
+
+    // 哨兵参数前端解析（与后端 resolve_test_params 同步）：预填日历控件/当前值
+    function resolveSentry(v) {
+        if (v === '__TODAY__') {
+            const t = new Date();
+            return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+        }
+        if (v === '__NOW_MS__' || v === '__NOW_S__' || v === '__NOW__') {
+            // NOW_MS/NOW_S 均为日历预填用（提交时按 convert 各自转毫秒/秒级时间戳）
+            const t = new Date();
+            return t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0') +
+                'T' + String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+        }
+        if (v === '__YEAR__') return String(new Date().getFullYear());
+        return v;
+    }
+
+    // 参数提交值转换（convert 协议）
+    function convertParamValue(pdef, value) {
+        if (!value) return value;
+        if (pdef.convert === 'timestamp_ms') {
+            const d = new Date(value);
+            return isNaN(d.getTime()) ? value : String(d.getTime());   // datetime-local → 毫秒时间戳
+        }
+        if (pdef.convert === 'timestamp_s') {
+            const d = new Date(value);
+            return isNaN(d.getTime()) ? value : String(Math.floor(d.getTime() / 1000));   // datetime-local → 秒级时间戳（lunartime 实测）
+        }
+        return value;
+    }
 
     function toggleAllCatalog(expand) {
         document.querySelectorAll('#uapiCatalogAcc .accordion-collapse').forEach(el => {
@@ -1241,10 +1634,16 @@
                 .then(data => {
                     btn.disabled = false; btn.innerHTML = oldHtml;
                     let msg = (data && data.message) || ((data && data.success) ? '成功' : '失败');
-                    if (data && data.success && data.data_keys && data.data_keys.length) {
-                        msg += '，响应字段：' + data.data_keys.join('、');
+                    if (data && data.success) {
+                        // V10.11.48 优先展示人类可读格式化结果；无格式化器时列响应字段
+                        if (data.formatted) {
+                            msg += '\n「' + String(data.formatted).split('\n').join(' / ') + '」';
+                        } else if (data.data_keys && data.data_keys.length) {
+                            msg += '，响应字段：' + data.data_keys.join('、');
+                        }
+                        if (data.key_label) msg += '\n（经 Key：「' + data.key_label + '」）';
                     }
-                    showToast(`【${api.name}】${msg}`, !!(data && data.success));
+                    showToast(`【${api.name}】${msg}`, !!(data && data.success), !!(data && data.success));
                 })
                 .catch(() => { btn.disabled = false; btn.innerHTML = oldHtml; showToast('测试请求失败（网络错误）', false); });
         };
@@ -1297,7 +1696,7 @@
         bootstrap.Modal.getOrCreateInstance(document.getElementById('uapiPlaygroundModal')).show();
     }
 
-    // 切换 API：刷新说明与动态参数表单（预置 test_params 预填）
+    // 切换 API：刷新说明与动态参数表单（预置 test_params 预填，哨兵解析为当前日期/时间）
     function onPlaygroundApiChange() {
         const sel = document.getElementById('pgApiSelect');
         const api = findApiById(sel.value);
@@ -1313,19 +1712,26 @@
         (api.params || []).forEach(p => {
             const col = document.createElement('div');
             col.className = 'col-6 col-md-3';
-            const prefill = (api.test_params || {})[p.name];
+            const prefillRaw = (api.test_params || {})[p.name];
+            const prefill = prefillRaw != null ? resolveSentry(String(prefillRaw)) : '';
             let input;
             if (p.type === 'select' && p.options && p.options.length) {
-                input = `<select class="form-select form-select-sm pg-param" data-pname="${esc(p.name)}">` +
+                input = `<select class="form-select form-select-sm pg-param" data-pname="${esc(p.name)}" data-convert="${esc(p.convert || '')}">` +
                     `<option value="">（${p.required ? '必填' : '可选'}）</option>` +
-                    p.options.map(o => `<option value="${esc(String(o))}"${String(prefill) === String(o) ? ' selected' : ''}>${esc(String(o))}</option>`).join('') +
+                    p.options.map(o => `<option value="${esc(String(o))}"${prefill === String(o) ? ' selected' : ''}>${esc(String(o))}</option>`).join('') +
                     '</select>';
             } else if (p.type === 'bool') {
-                input = `<select class="form-select form-select-sm pg-param" data-pname="${esc(p.name)}">` +
+                input = `<select class="form-select form-select-sm pg-param" data-pname="${esc(p.name)}" data-convert="">` +
                     `<option value="">不传</option><option value="true"${prefill === 'true' ? ' selected' : ''}>true</option>` +
                     `<option value="false"${prefill === 'false' ? ' selected' : ''}>false</option></select>`;
+            } else if (p.type === 'date') {
+                // 日历选择器（V10.11.48：人类友好输入，替代手填日期串）
+                input = `<input type="date" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-convert="${esc(p.convert || '')}" value="${esc(prefill)}">`;
+            } else if (p.type === 'datetime') {
+                // 日期时间选择器（提交时按 convert 自动转毫秒时间戳）
+                input = `<input type="datetime-local" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-convert="${esc(p.convert || '')}" value="${esc(prefill)}">`;
             } else {
-                input = `<input type="${p.type === 'number' ? 'number' : 'text'}" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}"` +
+                input = `<input type="${p.type === 'number' ? 'number' : 'text'}" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-convert=""` +
                     ` value="${esc(prefill != null ? String(prefill) : '')}" placeholder="${esc(p.label)}${p.required ? '（必填）' : ''}">`;
             }
             col.innerHTML = `<label class="form-label small text-muted mb-1 text-truncate" title="${esc(p.label)}">${esc(p.name)}${p.required ? ' <span class="text-danger">*</span>' : ''}</label>` + input;
@@ -1341,10 +1747,18 @@
         const api = findApiById(sel.value);
         if (!api) { showToast('请先选择 API', false); return; }
         const params = {};
+        let convertErr = '';
         document.querySelectorAll('#pgParamsBox .pg-param').forEach(el => {
             const v = (el.value || '').trim();
-            if (v !== '') params[el.dataset.pname] = v;
+            if (v === '') return;
+            const pdef = (api.params || []).find(p => p.name === el.dataset.pname) || {};
+            const final = convertParamValue(pdef, v);
+            if ((pdef.convert === 'timestamp_ms' || pdef.convert === 'timestamp_s') && final === v && !/^\d+$/.test(v)) {
+                convertErr = `参数 ${el.dataset.pname} 的日期时间格式无法解析`;
+            }
+            params[el.dataset.pname] = final;
         });
+        if (convertErr) { showToast(convertErr, false); return; }
         for (const p of (api.params || [])) {
             if (p.required && !params[p.name]) { showToast(`参数 ${p.name} 为必填项`, false); return; }
         }
@@ -1364,15 +1778,22 @@
             `<i class="fa-solid fa-${okStatus ? 'circle-check' : 'triangle-exclamation'} me-1"></i>` +
             `HTTP ${r.status}${r.content_type ? ' · ' + esc(r.content_type) : ''}` +
             (!okStatus ? ' — ' + esc(r.message || '调用失败') : '') + '</div>';
+        // V10.11.48 人类可读结果区（格式化器输出）
+        let friendly = '';
+        if (data.formatted) {
+            friendly = `<div class="alert alert-success border-success-subtle py-2 px-3 mb-2 small" style="white-space:pre-wrap">` +
+                `<i class="fa-solid fa-wand-magic-sparkles me-1"></i><b>可读结果：</b>\n${esc(data.formatted)}</div>`;
+        }
         let body = '';
         if (r.is_image) {
             body = `<img src="data:${esc(r.content_type)};base64,${r.image_b64}" class="img-fluid rounded-3 border" style="max-height:340px" alt="响应图片">`;
         } else if (r.is_json) {
-            body = `<pre class="bg-light border rounded-3 p-2 mb-0" style="max-height:340px;overflow:auto;font-size:.72rem">${esc(JSON.stringify(r.json, null, 2))}</pre>`;
+            body = `<details class="small"><summary class="text-muted cursor-pointer" style="cursor:pointer">展开原始 JSON 响应</summary>` +
+                `<pre class="bg-light border rounded-3 p-2 mb-0 mt-1" style="max-height:340px;overflow:auto;font-size:.72rem">${esc(JSON.stringify(r.json, null, 2))}</pre></details>`;
         } else {
             body = `<pre class="bg-light border rounded-3 p-2 mb-0" style="max-height:200px;overflow:auto;font-size:.72rem">${esc(r.body_text || '（空响应体）')}</pre>`;
         }
-        box.innerHTML = head + body;
+        box.innerHTML = head + friendly + body;
     }
 
     // V10.11.26 页面加载：初始化各组状态徽标、停用行样式与批量按钮态

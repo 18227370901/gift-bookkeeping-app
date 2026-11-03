@@ -3282,12 +3282,15 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     continue
                 if not (u.startswith('http://') or u.startswith('https://') or u.startswith('wss://') or u.startswith('ws://')):
                     return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」地址必须以 http/https/wss 开头：{u}'}), 400
-                # V10.11.47 平台字段白名单校验（空串=无认证直连）
+                # V10.11.48 平台字段动态校验（注册表存在即可：内置+自定义平台；空串=无认证直连）
+                # 平台端点仅限「天气预报/法定节假日」两组（协议适配器绑定范围）
                 platform = str(item.get('platform', '') or '').strip()
-                if platform and platform not in KNOWN_PLATFORM_IDS:
-                    return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」端点平台标识非法：{platform}'}), 400
                 if platform and gname in ('wecom_ws', 'ai_search', 'geocoding', 'air_quality'):
                     return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」组暂不支持平台端点（仅天气/节假日支持双协议混排）'}), 400
+                if platform:
+                    from services.service_config import get_platform as _gp
+                    if not _gp(platform):
+                        return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」端点引用的平台不存在：{platform}（请先在「API 平台」卡片中添加）'}), 400
                 if gname == 'holiday':
                     # 管理员只需填到 .../year/，系统自动补全 {年份} 变量
                     u = normalize_holiday_url(u)
@@ -3311,25 +3314,19 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         ai_enabled = payload.get('ai_search_enabled')
         if ai_enabled is not None:
             save_group_config('ai_search', None, ai_search_enabled=bool(ai_enabled))
-        # V10.11.47 平台配置同步保存（同一表单一并提交）
-        platforms_payload = payload.get('platforms')
-        if isinstance(platforms_payload, dict):
-            for pid, pdata in platforms_payload.items():
-                if not isinstance(pdata, dict):
-                    continue
-                from services.service_config import save_platform
-                save_platform(pid,
-                              base_url=str(pdata.get('base_url') or '').strip() or None,
-                              api_key=(str(pdata.get('api_key')).strip()
-                                       if pdata.get('api_key') is not None else None),
-                              enabled=pdata.get('enabled'))
-        # 保存后清理调用引擎进程缓存（避免旧认证/旧地址结果混存）
-        try:
-            from services import uapi_client
-            uapi_client.clear_cache()
-        except Exception:
-            pass
         safe_log('更新外部接口服务配置', f'操作人：{current_user.username} | 更新分组数：{saved}')
+        # V10.11.48 联动：外部接口端点组保存推送 Webhook system 事件（含平台端点分布）
+        if saved:
+            try:
+                grp_desc = '、'.join(
+                    f'{DEFAULT_GROUPS[g]["label"]}({sum(1 for u in groups.get(g, {}).get("urls", []) if isinstance(u, dict) and u.get("platform"))}平台端)'
+                    for g in DEFAULT_GROUPS if isinstance(groups.get(g), dict) and groups[g].get('urls'))
+                _push_service_config_webhook(
+                    '%s 更新外部接口服务配置' % current_user.username,
+                    '操作人：%s | 页面：外部接口服务配置 | 操作：保存 %d 组端点配置（%s）' % (
+                        current_user.username, saved, grp_desc or '无变更分组'))
+            except Exception:
+                pass
         return jsonify({'success': True, 'message': f'外部接口配置已保存（{saved} 组）'})
 
     @app.route('/admin/service-config/test', methods=['POST'])
@@ -6013,18 +6010,30 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             db.session.rollback()
             return jsonify({'code': 500, 'message': str(e)}), 500
 
-    # ==================== V10.11.47 API 平台注册表管理（管理员） ====================
+    # ==================== V10.11.47/48 API 平台注册表管理（管理员，多平台多 Key） ====================
+
+    def _push_service_config_webhook(title, detail):
+        """外部接口/API 平台配置变更的 Webhook 推送（V10.11.48 联动：system 事件通道）"""
+        try:
+            from services.models import WebhookConfig
+            from services.webhook_utils import trigger_webhook_event
+            trigger_webhook_event(
+                WebhookConfig.query.filter_by(is_enabled=True).all(), 'system', title, detail,
+                page_key='index', user_name=current_user.username, operator_id=current_user.id
+            )
+        except Exception:
+            pass
 
     @app.route('/admin/service-config/platform/save', methods=['POST'])
     @login_required
     def admin_service_config_platform_save():
-        """保存 API 平台档案（UApiPro base_url / 平台级 API Key / 启用开关）
-        - api_key 语义：None=保持不变（前端未改动）；''=清空 Key 切回访客模式
-        - Key 明文仅存 system_settings（DB 已被 .gitignore 保护不入库 Git）；
-          页面回显走 mask_platform_key 脱敏（仅末 4 位）"""
+        """保存 API 平台档案（多 Key 池）：base_url / 认证方式 / Key 池整池提交（行式管理与端点组同构）/ 启用开关
+        - api_keys 语义：None=保持不变（未提交）；列表=整池覆盖（空列表=清空池切回访客模式）
+        - Key 明文仅存 system_settings（DB 已被 .gitignore 保护不入库 Git）；回显走脱敏
+        - V10.11.48 联动：变更推送 Webhook system 事件 + 审计日志（含 Key 增删数量，不记明文）"""
         if not getattr(current_user, 'is_admin', False):
             return jsonify({'success': False, 'message': '权限不足'}), 403
-        from services.service_config import save_platform, mask_platform_key, get_platforms_for_display
+        from services.service_config import save_platform, get_platforms_for_display, MAX_KEYS_PER_PLATFORM
         data = request.get_json(silent=True) or {}
         pid = str(data.get('id') or '').strip()
         if not pid:
@@ -6032,13 +6041,22 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         base_url = str(data.get('base_url') or '').strip()
         if base_url and not (base_url.startswith('http://') or base_url.startswith('https://')):
             return jsonify({'success': False, 'message': '平台地址必须以 http:// 或 https:// 开头'}), 400
-        api_key = data.get('api_key')
-        if api_key is not None and len(str(api_key)) > 256:
-            return jsonify({'success': False, 'message': 'API Key 过长（最多 256 字符）'}), 400
+        api_keys = data.get('api_keys')
+        if api_keys is not None:
+            if not isinstance(api_keys, list):
+                return jsonify({'success': False, 'message': 'Key 池格式不正确'}), 400
+            if len(api_keys) > MAX_KEYS_PER_PLATFORM:
+                return jsonify({'success': False, 'message': 'Key 池最多 %d 个 Key' % MAX_KEYS_PER_PLATFORM}), 400
+            for item in api_keys:
+                if not isinstance(item, dict):
+                    return jsonify({'success': False, 'message': 'Key 记录格式不正确'}), 400
+                k = str(item.get('key') or '').strip()
+                if k and len(k) > 256:
+                    return jsonify({'success': False, 'message': 'API Key 过长（最多 256 字符）'}), 400
         enabled = data.get('enabled')
         if enabled is not None and not isinstance(enabled, bool):
             enabled = None
-        ok = save_platform(pid, base_url=base_url or None, api_key=api_key, enabled=enabled)
+        ok = save_platform(pid, base_url=base_url or None, api_keys=api_keys, enabled=enabled)
         if not ok:
             return jsonify({'success': False, 'message': '未知平台或参数非法'}), 400
         # 平台配置变更后清理调用引擎进程缓存（避免旧认证结果混存）
@@ -6047,48 +6065,149 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             uapi_client.clear_cache()
         except Exception:
             pass
-        # 回显脱敏后的最新平台状态
         plat = next((p for p in get_platforms_for_display() if p['id'] == pid), None)
+        key_desc = ''
+        if plat:
+            key_desc = '（%d 个 Key，启用 %d 个）' % (plat.get('key_count', 0), plat.get('key_enabled_count', 0))
         safe_log('更新 API 平台配置',
-                 f'操作人：{current_user.username} | 平台：{pid} | Key：'
-                 f'{"已配置(" + mask_platform_key(str(api_key)) + ")" if api_key else ("清空" if api_key == "" else "未改动")}',
+                 f'操作人：{current_user.username} | 平台：{pid} | Key 池{key_desc}',
                  user=current_user)
-        return jsonify({'success': True, 'message': '平台配置已保存',
-                        'platform': plat})
+        _push_service_config_webhook(
+            '%s 更新 API 平台「%s」配置' % (current_user.username, pid),
+            '操作人：%s | 页面：外部接口服务配置 | 操作：更新 API 平台 %s 配置 %s' % (
+                current_user.username, pid, key_desc))
+        return jsonify({'success': True, 'message': '平台配置已保存', 'platform': plat})
+
+    @app.route('/admin/service-config/platform/add', methods=['POST'])
+    @login_required
+    def admin_service_config_platform_add():
+        """新增自定义 API 平台（V10.11.48）：接入任意自有平台（须 UApiPro 协议兼容
+        才能用于天气/节假日端点组；仅注册表登记认证信息亦可，供端点引用）"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from services.service_config import add_custom_platform
+        data = request.get_json(silent=True) or {}
+        ok, err = add_custom_platform(
+            pid=str(data.get('id') or ''),
+            name=str(data.get('name') or ''),
+            base_url=str(data.get('base_url') or ''),
+            auth_type=str(data.get('auth_type') or 'bearer'),
+            auth_key_name=str(data.get('auth_key_name') or ''),
+            api_keys=data.get('api_keys') if isinstance(data.get('api_keys'), list) else [])
+        if not ok:
+            return jsonify({'success': False, 'message': err}), 400
+        safe_log('新增 API 平台', f'操作人：{current_user.username} | 平台：{data.get("id")} | 名称：{data.get("name")}', user=current_user)
+        _push_service_config_webhook(
+            '%s 新增 API 平台「%s」' % (current_user.username, data.get('name') or data.get('id')),
+            '操作人：%s | 页面：外部接口服务配置 | 操作：新增自定义 API 平台 %s（%s）' % (
+                current_user.username, data.get('id'), data.get('base_url')))
+        return jsonify({'success': True, 'message': '自定义平台已添加'})
+
+    @app.route('/admin/service-config/platform/delete', methods=['POST'])
+    @login_required
+    def admin_service_config_platform_delete():
+        """删除自定义 API 平台（内置 UApiPro 不允许删除；前置二次确认由前端完成）"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from services.service_config import delete_platform
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get('id') or '').strip()
+        if not pid:
+            return jsonify({'success': False, 'message': '平台 ID 不能为空'}), 400
+        ok, err = delete_platform(pid)
+        if not ok:
+            return jsonify({'success': False, 'message': err}), 400
+        try:
+            from services import uapi_client
+            uapi_client.clear_cache()
+        except Exception:
+            pass
+        safe_log('删除 API 平台', f'操作人：{current_user.username} | 平台：{pid}', user=current_user)
+        _push_service_config_webhook(
+            '%s 删除 API 平台「%s」' % (current_user.username, pid),
+            '操作人：%s | 页面：外部接口服务配置 | 操作：删除自定义 API 平台 %s' % (
+                current_user.username, pid))
+        return jsonify({'success': True, 'message': '平台已删除'})
 
     @app.route('/admin/service-config/platform/test', methods=['POST'])
     @login_required
     def admin_service_config_platform_test():
         """平台连通性测试：调用 UApiPro 永久免费接口（一言 /saying）验证
-        base_url 可达性与认证模式（访客/Key），并回显限流响应头余量信息"""
+        base_url 可达性与认证模式（访客/Key），并回显 Key 轮换与余量信息
+        V10.11.48：test_key 非空时指定测试某个具体 Key（前端 Key 行内测试按钮）；
+        未指定时按 Key 池轮换（展示成功所用 Key 标签）"""
         if not getattr(current_user, 'is_admin', False):
             return jsonify({'success': False, 'message': '权限不足'}), 403
         from services import uapi_client
         import time as _t
+        data = request.get_json(silent=True) or {}
+        platform_id = str(data.get('platform_id') or 'uapis').strip()
+        test_key = str(data.get('test_key') or '').strip() or None
         start = _t.time()
-        ok, payload, status, message = uapi_client.call_uapi('saying', timeout=(5, 8))
+
+        if test_key:
+            # Key 行内单测：不走轮换，直接用该 Key 注入认证调用免费接口（一言）
+            from services import service_config as _sc
+            from services import uapi_catalog as _uc
+            base = _sc.get_platform(platform_id)
+            if not base or not base.get('enabled'):
+                return jsonify({'success': False, 'message': '平台不存在或已停用'})
+            url = _uc.build_full_url('saying', base_url=base.get('base_url') or _uc.UAPI_DEFAULT_BASE_URL)
+            headers = _sc.get_auth_headers(platform_id, key=test_key)
+            headers.setdefault('Accept', 'application/json')
+            try:
+                resp = uapi_client._http_request('GET', url, timeout=(5, 8), headers=headers)
+                latency = int((_t.time() - start) * 1000)
+                if 200 <= resp.status_code < 300:
+                    text = ''
+                    try:
+                        text = str((resp.json() or {}).get('text') or '')[:40]
+                    except Exception:
+                        pass
+                    return jsonify({'success': True, 'latency_ms': latency, 'status': resp.status_code,
+                                    'key_label': data.get('key_label') or '',
+                                    'message': 'Key 有效（HTTP %s，%dms）' % (resp.status_code, latency),
+                                    'sample': text})
+                msg = ''
+                try:
+                    msg = uapi_client.extract_error_message(resp.status_code, resp.json())
+                except Exception:
+                    msg = uapi_client.extract_error_message(resp.status_code, None)
+                return jsonify({'success': False, 'latency_ms': latency, 'status': resp.status_code,
+                                'key_label': data.get('key_label') or '',
+                                'message': 'Key 不可用：%s（HTTP %s）' % (msg, resp.status_code)})
+            except Exception as e:
+                return jsonify({'success': False, 'status': 0,
+                                'key_label': data.get('key_label') or '',
+                                'message': '请求失败：%s' % str(e)[:120]})
+
+        # 平台级测试：走 Key 池轮换，展示成功所用 Key
+        ok5, payload, status, message, key_label = uapi_client.call_uapi(
+            'saying', timeout=(5, 8), platform_id=platform_id, return_key=True)
         latency = int((_t.time() - start) * 1000)
-        plat = None
-        try:
-            from services.service_config import get_platform
-            plat = get_platform('uapis')
-        except Exception:
-            pass
-        auth_mode = 'API Key 认证' if (plat or {}).get('api_key') else '访客模式（无 Key）'
-        if ok:
+        from services.service_config import get_platform
+        plat = get_platform(platform_id)
+        if plat:
+            pool = plat.get('api_keys') or []
+            auth_mode = ('Key 池轮换（%d 个 Key，首个可用：「%s」）' % (len(pool), key_label)
+                         if pool else '访客模式（无 Key）')
+        else:
+            auth_mode = str(key_label or '')
+        if ok5:
             text = str((payload or {}).get('text') or '')[:40]
             return jsonify({'success': True, 'latency_ms': latency, 'status': status,
-                            'auth_mode': auth_mode,
+                            'auth_mode': auth_mode, 'key_label': key_label,
                             'message': f'平台连通正常（{auth_mode}，HTTP {status}，{latency}ms）',
                             'sample': text})
         return jsonify({'success': False, 'latency_ms': latency, 'status': status,
-                        'auth_mode': auth_mode,
+                        'auth_mode': auth_mode, 'key_label': key_label,
                         'message': f'{message or "连接失败"}（{auth_mode}，HTTP {status}）'})
 
     @app.route('/admin/service-config/uapi/test', methods=['POST'])
     @login_required
     def admin_service_config_uapi_test():
-        """uapis.cn API 目录一键测试：按目录预置参数真实调用（高积分接口前端已二次确认）"""
+        """uapis.cn API 目录一键测试：按目录预置参数真实调用（哨兵参数自动替换为当前
+        日期/时间），高积分接口前端已二次确认；响应经 V10.11.48 美化层转为人类可读摘要"""
         if not getattr(current_user, 'is_admin', False):
             return jsonify({'success': False, 'message': '权限不足'}), 403
         from services import uapi_catalog, uapi_client
@@ -6103,18 +6222,21 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return jsonify({'success': False, 'message': '流式响应接口暂不支持在线测试'}), 400
         if api.get('test_params') is None:
             return jsonify({'success': False, 'message': '该接口无预置测试参数，请通过「API 试验台」手动填参调用'}), 400
-        # 允许覆盖预置参数（管理员微调）
-        params = api['test_params']
+        # V10.11.48：哨兵参数解析（今天日期/当前时间戳/年份）+ 允许覆盖
+        params = uapi_catalog.resolve_test_params(api)
         if isinstance(data.get('params'), dict) and data['params']:
-            params = {**api['test_params'], **{k: v for k, v in data['params'].items() if v not in (None, '')}}
+            params.update({k: v for k, v in data['params'].items() if v not in (None, '')})
         import time as _t
         start = _t.time()
-        ok, payload, status, message = uapi_client.call_uapi(api_id, params=params, timeout=(5, 20))
+        ok, payload, status, message, key_label = uapi_client.call_uapi(
+            api_id, params=params, timeout=(5, 20), return_key=True)
         latency = int((_t.time() - start) * 1000)
         if ok:
+            formatted = uapi_client.format_uapi_result(api_id, payload)
             keys = list(payload.keys())[:8] if isinstance(payload, dict) else []
             return jsonify({'success': True, 'status': status, 'latency_ms': latency,
                             'message': f'调用成功（HTTP {status}，{latency}ms）',
+                            'key_label': key_label, 'formatted': formatted,
                             'data_keys': keys, 'data': payload})
         return jsonify({'success': False, 'status': status, 'latency_ms': latency,
                         'message': message or f'调用失败（HTTP {status}）', 'data': payload})
@@ -6123,8 +6245,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_service_config_uapi_playground():
         """API 试验台：任意目录 API 动态填参实时调用，返回原始响应元信息
-        （JSON 结构化 / 图片 base64 / 其他文本）。仅固定平台 base_url + 目录 path，
-        不接受任意 URL，无 SSRF 面；参数值限长 2000 字符防滥用"""
+        （JSON 结构化 / 图片 base64 / 其他文本）+ V10.11.48 人类可读格式化摘要。
+        仅固定平台 base_url + 目录 path，不接受任意 URL，无 SSRF 面；参数值限长 2000 字符"""
         if not getattr(current_user, 'is_admin', False):
             return jsonify({'success': False, 'message': '权限不足'}), 403
         from services import uapi_catalog, uapi_client
@@ -6147,8 +6269,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             if sv != '':
                 params[k] = sv
         result = uapi_client.call_uapi_raw(api_id, params=params, timeout=(5, 20))
+        formatted = None
+        if result.get('is_json') and 200 <= (result.get('status') or 0) < 300:
+            formatted = uapi_client.format_uapi_result(api_id, result.get('json'))
         return jsonify({'success': 200 <= (result.get('status') or 0) < 300,
-                        'api_id': api_id, 'result': result})
+                        'api_id': api_id, 'result': result, 'formatted': formatted})
 
     # ==================== V10.11.47 实用工具页（快递跟踪 / 手机归属地） ====================
 

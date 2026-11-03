@@ -842,9 +842,11 @@ def _uapi_payload_to_open_meteo(payload, days):
     }
 
 
-def _fetch_uapi_forecast(city_name, days, urls):
-    """UApiPro 天气数据拉取：按端点顺序遍历（故障转移语义与 Open-Meteo 通路一致），
-    成功后写内存/磁盘缓存并返回 Open-Meteo 结构；全部失败返回 None（调用方走原降级链路）。
+def _fetch_uapi_forecast(city_name, days, endpoints):
+    """平台天气数据拉取（V10.11.48 多平台：endpoints = [(url, platform_id)]，
+    认证按端点绑定的平台 Key 池注入、协议按 UApiPro 兼容解析），按端点顺序遍历（故障转移
+    语义与 Open-Meteo 通路一致），成功后写内存/磁盘缓存并返回 Open-Meteo 结构；
+    全部失败返回 None（调用方走原降级链路）。
     二级缓存与 fetch_forecast 同款：内存 30 分钟 + 磁盘永久留存（key 前缀 uapi: 区分）"""
     from services import uapi_client  # 延迟导入：uapi_client 依赖 service_config，避免任何初始化顺序问题
 
@@ -856,10 +858,11 @@ def _fetch_uapi_forecast(city_name, days, urls):
             return hit[1]
 
     params = {'city': city_name, 'extended': 'true', 'forecast': 'true'}
-    for url in urls:
+    for url, platform_id in endpoints:
         ok, payload, status, message = uapi_client.call_uapi(
             'misc_weather', params=params,
-            timeout=(5, max(service_config.get_timeout('forecast'), 8)), full_url=url or None)
+            timeout=(5, max(service_config.get_timeout('forecast'), 8)),
+            full_url=url or None, platform_id=platform_id or None)
         if not ok or not isinstance(payload, dict):
             continue
         converted = _uapi_payload_to_open_meteo(payload, days)
@@ -877,11 +880,12 @@ def _fetch_uapi_forecast(city_name, days, urls):
     return None
 
 
-def _query_via_uapi(city_name, days, urls):
-    """UApiPro 完整查询通路：拉取 + 城市信息组装 + extended 空气质量提取 + _build_result。
+def _query_via_uapi(city_name, days, endpoints):
+    """平台完整查询通路（V10.11.48 多平台 endpoints=[(url, platform_id)]）：拉取 + 城市信息组装
+    + extended 空气质量提取 + _build_result。
     城市信息与 PM2.5/PM10 随首次响应一并转换缓存，零二次请求（不重复消耗积分）。
     返回与 query_weather 完全同构的结果 dict；失败返回 None（调用方回落原链路）"""
-    converted = _fetch_uapi_forecast(city_name, days, urls)
+    converted = _fetch_uapi_forecast(city_name, days, endpoints)
     if not converted:
         return None
     uapi_city = converted.get('_uapi_city') or {}
@@ -1226,14 +1230,14 @@ def query_weather(city_name, province=None, district_city=None, days=DEFAULT_FOR
     Open-Meteo 主路；主路离线合成兑底时若组内有平台端点再做抢救尝试。
     失败: 抛出 WeatherError（message 为中文提示，status_code 为建议 HTTP 状态码）
     """
-    # V10.11.47 协议优先级分发：UApiPro 端点排首位 → 平台通路优先
-    uapi_eps = service_config.get_enabled_uapi_endpoints('forecast')
+    # V10.11.47/48 协议优先级分发：组内第一个启用端点为平台端点（任意平台）时优先走平台通路
+    platform_eps = service_config.get_enabled_platform_endpoints('forecast')
     first_platform = service_config.get_first_enabled_platform('forecast')
-    if uapi_eps and first_platform == 'uapis':
-        result = _query_via_uapi(city_name, days, uapi_eps)
+    if platform_eps and first_platform:
+        result = _query_via_uapi(city_name, days, platform_eps)
         if result:
             return result
-        # UApiPro 平台通路失败 → 回落 Open-Meteo 主路（含缓存/离线合成兑底）
+        # 平台通路失败 → 回落 Open-Meteo 主路（含缓存/离线合成兑底）
 
     # 1. 城市名 → 经纬度/时区（级联模式下按省/市智能匹配候选）
     city = geocode_city(city_name, province=province, district_city=district_city)
@@ -1243,10 +1247,10 @@ def query_weather(city_name, province=None, district_city=None, days=DEFAULT_FOR
     air = fetch_air_quality(city['latitude'], city['longitude'])
     result = _build_result(city, data, air_quality=air)
 
-    # V10.11.47 平台通路抢救：Open-Meteo 不可达走了离线合成兑底，且组内配置了
-    # UApiPro 端点（排位靠后）→ 用平台真实数据替换合成数据
-    if result.get('offline_fallback') and uapi_eps:
-        rescued = _query_via_uapi(city_name, days, uapi_eps)
+    # V10.11.47/48 平台通路抢救：Open-Meteo 不可达走了离线合成兑底，且组内配置了
+    # 平台端点（排位靠后）→ 用平台真实数据替换合成数据
+    if result.get('offline_fallback') and platform_eps:
+        rescued = _query_via_uapi(city_name, days, platform_eps)
         if rescued:
             return rescued
     return result
@@ -1271,12 +1275,12 @@ def query_weather_by_coords(latitude, longitude, days=DEFAULT_FORECAST_DAYS, lab
     if not (3 <= lat <= 54 and 73 <= lon <= 136):
         raise WeatherError('坐标超出中国行政区划范围', 400)
 
-    # V10.11.47 协议优先级分发：UApiPro 端点排首位时，从级联标签提取末级地名走平台通路
-    uapi_eps = service_config.get_enabled_uapi_endpoints('forecast')
+    # V10.11.47/48 协议优先级分发：平台端点排首位时，从级联标签提取末级地名走平台通路
+    platform_eps = service_config.get_enabled_platform_endpoints('forecast')
     first_platform = service_config.get_first_enabled_platform('forecast')
-    uapi_city = _extract_city_from_label(label) if (uapi_eps and first_platform == 'uapis') else ''
-    if uapi_eps and first_platform == 'uapis' and uapi_city:
-        result = _query_via_uapi(uapi_city, days, uapi_eps)
+    uapi_city = _extract_city_from_label(label) if (platform_eps and first_platform) else ''
+    if platform_eps and first_platform and uapi_city:
+        result = _query_via_uapi(uapi_city, days, platform_eps)
         if result:
             return result
         # 平台通路失败 → 回落坐标主路
@@ -1295,11 +1299,11 @@ def query_weather_by_coords(latitude, longitude, days=DEFAULT_FORECAST_DAYS, lab
     air = fetch_air_quality(lat, lon)
     result = _build_result(city, data, air_quality=air)
 
-    # V10.11.47 平台通路抢救：离线合成兑底时用平台真实数据替换（能提取出城市名才可用）
-    if result.get('offline_fallback') and uapi_eps:
+    # V10.11.47/48 平台通路抢救：离线合成兑底时用平台真实数据替换（能提取出城市名才可用）
+    if result.get('offline_fallback') and platform_eps:
         rescue_city = uapi_city or _extract_city_from_label(label)
         if rescue_city:
-            rescued = _query_via_uapi(rescue_city, days, uapi_eps)
+            rescued = _query_via_uapi(rescue_city, days, platform_eps)
             if rescued:
                 return rescued
     return result

@@ -2468,3 +2468,24 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   - `py_compile` 7 文件 + Jinja 编译校验 5 模板全过（连带修复 base.html 导航 if/endif 配对缺陷）；冒烟断言（目录 110/分类 21/免费 27/城市名提取/图标映射/Key 脱敏）全过；
   - 真实调用验证：平台连通（访客 HTTP 200 742ms）、57 个接口预置参数批量校验、试验台（13900139000→广东·东莞·移动·0769）、/tools 手机归属地（13800138000→北京·移动·010）、天气组平台端点协议测试（北京：晴 16°C，697ms）、节假日组平台端点协议测试（HTTP 200，668ms）；
   - 兼容性实测：未保存测试行刷新即丢弃，6 组端点与用户原值逐字节一致（零污染）；老配置无 platform 字段自动补空，全部既有链路行为不变。
+
+### ADR-78：多平台多 Key 池轮换架构、参数日历选择器与响应可读化——兼修 dataset 属性名缺陷与占位符防线（V10.11.48 落地）
+- **背景与痛点**：
+  1. **单平台单 Key 局限**：V10.11.47 平台注册表仅支持「每平台一份 api_key」，无法配置多个 Key 按序容灾（额度耗尽/失效时整站降级），也无法同时接入多个 API 平台（自定义平台仅有蓝图未落地）；
+  2. **输入与展示不友好**：时间类参数需手填时间戳（lunartime 需秒级、weather_history 需日期串），普通管理员无法直观输入；多数接口返回原始 JSON，一键测试仅能看字段名，可用性差；
+  3. **官网文档与实际接口偏差**：worldtime 中文城市报 TIMEZONE_NOT_FOUND（仅英文）；lunartime 文档参数 timestamp 被 API 忽略（真实参数 ts 秒级）——不实测无法发现；
+  4. **`data-keyset` 的 dataset 访问陷阱**：`data-keyset`（无连字符）在 `element.dataset` 中映射为**全小写 `keyset`**，误写 `dataset.keySet` 读取恒为 undefined（对应的是不存在的 `data-key-set`）——导致已保存 Key 行被误判为新行，只读占位值「已保存」被当明文提交、uid 链路断裂，正式环境真实 Key 被覆盖且无备份可恢复（本轮测试实际发生后修复）。
+- **决策方案**：
+  1. **Key 池数据结构与轮换引擎**：
+     - `api_keys:[{key,label,enabled,uid}]`（MAX_KEYS_PER_PLATFORM=10）；V10.11.47 单 Key 读取时自动升级并补 uid，零迁移；`get_auth_headers(pid, key)` 支持指定具体 Key，`get_enabled_platform_endpoints` 返回 `(url, platform_id)` 元组供适配器携带平台认证；
+     - `_request_with_key_rotation`：按序尝试启用中的 Key，401/402/访客额度耗尽/网络错/5xx/429 切下一 Key，400/404 立即返回（不掩盖参数错误）；池空回退访客模式；返回实际成功 Key 标签供前端展示；
+  2. **明文不回传双保险**：
+     - 协议层：未编辑的已保存行提交 `key='__KEEP__'+uid`，后端按 uid 回填（label 兜底），明文仅存库；后端对提交值「已保存」亦按 __KEEP__ 语义处理（防前端异常提交覆盖真实 Key——V10.11.48b 防线）；
+     - 展示层：页面仅回显 `****`+末 4 位与 uid，编辑解锁后输入新值才提交明文；
+  3. **参数类型系统**：`_p()` 增加 `date/datetime` 渲染日历控件 + `convert` 协议（timestamp_ms/timestamp_s 提交转换）+ 哨兵 `__TODAY__/__NOW_MS__/__NOW_S__/__YEAR__` 双端解析（后端 resolve_test_params / 前端 resolveSentry），一键测试与试验台共用同一目录定义；
+  4. **响应可读化**：`uapi_client.FORMATTERS` 30 个格式化器（世界时间/农历/天气/热榜/手机归属/一言/翻译/万年历等），一键测试与试验台展示「可读摘要 + 可折叠原始 JSON」，未注册接口回退字段列表；
+  5. **多平台管理**：添加自定义平台（ID 白名单/认证四型/初始 Key 可选）、删除二次确认（内置不可删）；端点平台引用动态校验；平台变更推送 Webhook 系统事件；整库备份自动含平台配置（用户级备份剥离 system_settings 防管理员 Key 外泄）。
+- **验证与效果**：
+  - `py_compile` 全过 + 模板编译全过；浏览器实测：lunartime 日历→秒级 1767240000→农历冬月十三、worldtime 一键测试可读摘要+Key 标签、weather_history 哨兵预填；
+  - **HTTP 端到端断言**：明文入库/`data-uid|data-keyset` 渲染/__KEEP__（key+uid 不变、enabled 切换）/占位符防线（label 兜底不覆盖）/双 Key 排序/清空清理 全部通过；浏览器实抓第二次保存请求体为 `{"key":"__KEEP__","label":"UI冒烟","enabled":true,"uid":"2db73a1a8f5b"}`，协议闭环；
+  - **事故复盘**：测试中发现 `dataset.keySet` 缺陷曾覆盖真实 UApiPro Key（已写入「已保存」占位符），因每日自动备份停用（最后备份 10-27）且 Key 于 11-02 配置，无备份可恢复——已修复 7 处、加后端防线、清空污染池回访客模式，待管理员重新录入真实 Key。
