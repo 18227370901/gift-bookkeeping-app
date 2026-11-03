@@ -3236,15 +3236,27 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @app.route('/admin/service-config', methods=['GET'])
     @login_required
     def admin_service_config():
-        """管理员「外部接口服务配置」页面：天气/节假日/企微长连接/AI搜索 多端点 + 一键测试
-        V10.11.47 新增：API 平台注册表（UApiPro 平台级 Key 管理）+ uapis.cn 全量 API
-        目录（110 个分类展示/一键测试）+ API 试验台（任意目录 API 动态填参实时调用）"""
+        """管理员「系统核心服务」子页（V10.11.49 拆分）：地理编码/天气/空气质量/节假日/
+        企微长连接/AI 搜索 六组端点管理 + 一键测试；端点可绑定平台（下拉数据由 platforms 提供）"""
         if not getattr(current_user, 'is_admin', False):
             flash('权限不足', 'danger')
             return redirect(url_for('index'))
         from services.service_config import get_all_config, get_platforms_for_display
-        from services.uapi_catalog import get_catalog_for_frontend, summary as uapi_summary
         return render_template('admin_service_config.html', cfg=get_all_config(),
+                               platforms=get_platforms_for_display())
+
+    @app.route('/admin/service-config/platform', methods=['GET'])
+    @login_required
+    def admin_service_platform():
+        """管理员「多平台接口广场与可视化调试」子页（V10.11.49 从配置页拆分）：
+        API 平台注册表（多平台多 Key 池轮换管理）+ uapis.cn 全量 API 目录
+        （一键真实测试/搜索筛选）+ API 试验台（动态填参可视化调试）"""
+        if not getattr(current_user, 'is_admin', False):
+            flash('权限不足', 'danger')
+            return redirect(url_for('index'))
+        from services.service_config import get_platforms_for_display
+        from services.uapi_catalog import get_catalog_for_frontend, summary as uapi_summary
+        return render_template('admin_service_platform.html',
                                platforms=get_platforms_for_display(),
                                uapi_catalog=get_catalog_for_frontend(),
                                uapi_summary=uapi_summary())
