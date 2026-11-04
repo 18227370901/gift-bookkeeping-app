@@ -2578,3 +2578,17 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   - 布局实测：900px 窄窗 Key 行三元素同行（input 300px）、文字与开关 4px（Key 行 44px→4px、平台头部 -36px 叠字→4px）、垂直对齐；
   - 联动实测：双模态初始状态正确、header/query 显示、切回 none 隐藏并清空；worldtime 回归 200/564ms（经 Key「ghca」）；
   - 演练平台与临时脚本全清理，用户真实数据（ghca Key/三平台/forecast 端点）零污染。
+
+### ADR-84：Key 行单行紧凑布局与目录箭头动效——操作按钮并入输入框同行（窄屏自动降级）、aria-expanded 驱动箭头旋转（V10.11.54 落地）
+- **背景与痛点**：
+  1. **两行卡片浪费空间**：V10.11.51 的 Key 行两行设计（第一行 标签/Key/开关，第二行按钮组右对齐）在宽屏下垂直空间浪费且「测试等按钮与输入框不在同一行」（用户截图反馈）——按钮组与输入框视觉割裂；
+  2. **展开箭头不变向**：平台 API 目录按钮的 onclick 仅 `classList.toggle('fa-chevron-down')` 单个类，与初始 `fa-chevron-right` 共存（两个 FontAwesome content 规则冲突，渲染结果不确定）——点击展开后 `>` 未变为 `∨`（用户反馈）。
+- **决策方案**：
+  1. **单行 flex 布局**：按钮组整体移入 `.pkey-main` 行内（`ms-auto` 右对齐），删除两行虚线分隔与上边距；标签组收紧至 min 110/max 150px；输入框保持 300px 限宽；`.pkey-actions { gap:.25rem; margin-left:auto }`——宽屏一行完整显示「标签+输入框+开关+6 按钮」（1536 实测 main 1210px 内 363px 按钮组），窄屏 flex-wrap 自动降级为按钮组整体换行右对齐（900 实测 main 610px），开关组 flex:0 0 auto 永不与文字分离；只读态与编辑态按钮数均为 6（编辑/删除 ↔ 保存/取消），宽度一致布局不跳动；Jinja 渲染行与 JS makePkeyRow 双端同步改结构；
+  2. **aria-expanded + CSS 旋转**：按钮加 `.plat-api-toggle`，移除缺陷内联 onclick；Bootstrap collapse 自动维护 aria-expanded；`.plat-api-toggle[aria-expanded="true"] .arrow { transform: rotate(90deg) }` + 0.2s 过渡——展开 `>` 旋转 90° 为 `∨`、收起还原，零 JS 无类名冲突。
+- **验证与效果**：
+  - Jinja 全模板编译 0 失败；十六启平稳；
+  - 1536 宽屏：按钮组与输入框同一行（垂直区间重叠判定）；900 窄屏：按钮组整体换行右对齐（与 main 右缘偏差 <6px）、开关与输入框同行、「启用」文字与开关 4px 紧邻；
+  - 箭头实测：展开 aria="true" + transform matrix(0,1,-1,0,0,0)=旋转 90°；收起 aria="false" + transform none 还原；
+  - 编辑态实测：保存/取消与输入框同行、6 按钮不变、取消后输入框重新锁定；
+  - worldtime 回归 HTTP 200/637ms（经 Key「ghca」）。

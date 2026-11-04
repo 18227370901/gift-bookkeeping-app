@@ -10,15 +10,18 @@
     .uapi-item:hover { background-color: rgba(13, 110, 253, .04); border-radius: .4rem; }
     /* 目录搜索框聚焦微动效 */
     #uapiSearchInput:focus { box-shadow: 0 0 0 .2rem rgba(13, 110, 253, .12); }
-    /* V10.11.51 Key 行两行卡片布局：第一行标签/Key/开关，第二行操作按钮（图标+文字）
+    /* V10.11.51 Key 行卡片布局（V10.11.54：按钮组并入输入框同一行，窄屏 flex-wrap 自动换行降级）
        V10.11.53：Key 输入框限宽 420→300px（避免中窄窗口把启停开关挤成孤行），开关组不参与收缩 */
-    .pkey-row { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem .6rem .35rem; background: var(--bs-body-bg); }
+    .pkey-row { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem .6rem; background: var(--bs-body-bg); }
     .pkey-row .pkey-main { row-gap: .25rem; }
     .pkey-row .pkey-input { flex: 0 1 300px; min-width: 0; }
-    .pkey-row .pkey-actions { gap: .25rem; margin-top: .35rem; padding-top: .35rem; border-top: 1px dashed var(--bs-border-color-translucent, rgba(33,37,41,.15)); }
+    .pkey-row .pkey-actions { gap: .25rem; margin-left: auto; }   /* V10.11.54：行内右对齐（去掉两行虚线）；窄屏时随 flex-wrap 整体掉行不挤压开关 */
     .plat-switch, .pkey-switch { flex: 0 0 auto; }   /* 启停开关组永不压缩/换行断裂（文字与开关始终同列紧邻） */
     .plat-switch .form-check, .pkey-switch .form-check { padding-left: 0; margin: 0; }   /* 清除 Bootstrap 表单默认留白——文字与开关紧贴（修复「分隔距离较远」） */
     .plat-switch .form-check-input, .pkey-switch .form-check-input { margin-left: 0; }   /* 配对清除 form-switch 负 margin（删 padding 后不再回拉，防止开关叠到文字上） */
+    /* V10.11.54 平台 API 目录展开箭头：aria-expanded 驱动旋转（向右 → 向下 90°） */
+    .plat-api-toggle .arrow { transition: transform .2s ease; }
+    .plat-api-toggle[aria-expanded="true"] .arrow { transform: rotate(90deg); }
     .btn-act { padding: .12rem .5rem; font-size: .78rem; white-space: nowrap; }
     .btn-act i { font-size: .72rem; }
     .pkey-row .row-select-cb, .pkey-row .pkey-enabled { margin: 0; }
@@ -154,10 +157,10 @@
             </div>
             <div class="platform-key-list" id="platKeys_{{ p.id }}">
                 {% for k in p['keys'] %}
-                {# V10.11.51 两行卡片：第一行标签/Key（限宽）/启停，第二行操作按钮（图标+文字；「查看」明文仅管理员） #}
+                {# V10.11.54 单行卡片：标签/Key/启停/操作按钮同行（宽屏一行，窄屏按钮组自动掉行；「查看」明文仅管理员） #}
                 <div class="pkey-row mb-2" data-uid="{{ k.uid }}" data-keyset="{{ '1' if k.key_set else '' }}">
                     <div class="d-flex align-items-center flex-wrap gap-2 pkey-main">
-                        <span class="input-group input-group-sm" style="min-width:150px;max-width:180px" title="Key 标签（备注用途）">
+                        <span class="input-group input-group-sm" style="min-width:110px;max-width:150px" title="Key 标签（备注用途）">
                             <span class="input-group-text bg-transparent border-0 ps-1"><i class="fa-solid fa-tag text-muted"></i></span>
                             <span class="pkey-label text-truncate form-control bg-transparent border-0 ps-0">{{ k.label }}</span>
                             <input type="text" class="pkey-label-input d-none form-control bg-transparent border-0 ps-0" style="min-width:0" value="{{ k.label }}" maxlength="30" placeholder="标签（备注）" aria-label="Key 标签">
@@ -171,21 +174,21 @@
                                 <input type="checkbox" class="form-check-input pkey-enabled" role="switch" {% if k.enabled %}checked{% endif %} {% if not current_user.is_admin %}disabled{% endif %}>
                             </div>
                         </span>
-                    </div>
-                    {% if current_user.is_admin %}
-                    <div class="d-flex justify-content-end flex-wrap pkey-actions">
-                        <button class="btn btn-outline-success btn-act" type="button" title="测试该 Key（免费接口验证有效性）" onclick="testPlatformKey(this, '{{ p.id }}')"><i class="fa-solid fa-vial me-1"></i>测试</button>
-                        {% if k.key_set %}
-                        <button class="btn btn-outline-warning btn-act btn-pkey-reveal" type="button" title="查看该 Key 明文（二次确认，30 秒后自动遮蔽，操作记入审计）" onclick="revealPlatformKey(this, '{{ p.id }}')"><i class="fa-solid fa-eye me-1"></i>查看</button>
+                        {% if current_user.is_admin %}
+                        <div class="d-flex flex-wrap gap-1 pkey-actions ms-auto">
+                            <button class="btn btn-outline-success btn-act" type="button" title="测试该 Key（免费接口验证有效性）" onclick="testPlatformKey(this, '{{ p.id }}')"><i class="fa-solid fa-vial me-1"></i>测试</button>
+                            {% if k.key_set %}
+                            <button class="btn btn-outline-warning btn-act btn-pkey-reveal" type="button" title="查看该 Key 明文（二次确认，30 秒后自动遮蔽，操作记入审计）" onclick="revealPlatformKey(this, '{{ p.id }}')"><i class="fa-solid fa-eye me-1"></i>查看</button>
+                            {% endif %}
+                            <button class="btn btn-outline-secondary btn-act btn-pkey-up" type="button" title="上移（轮换优先级提前）" onclick="movePkeyRow(this, -1)"><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
+                            <button class="btn btn-outline-secondary btn-act btn-pkey-down" type="button" title="下移" onclick="movePkeyRow(this, 1)"><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
+                            <button class="btn btn-outline-primary btn-act btn-pkey-edit" type="button" title="编辑此 Key（解锁输入框）" onclick="editPkeyRow(this)"><i class="fa-solid fa-pen-to-square me-1"></i>编辑</button>
+                            <button class="btn btn-outline-danger btn-act btn-pkey-del" type="button" title="删除此 Key" onclick="delPkeyRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
+                            <button class="btn btn-success btn-act btn-pkey-save d-none text-nowrap" type="button" title="保存 Key 池（整池提交）" onclick="savePlatformKeys('{{ p.id }}')"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
+                            <button class="btn btn-outline-danger btn-act btn-pkey-cancel d-none" type="button" title="取消编辑（还原）" onclick="resetPkeyRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>
+                        </div>
                         {% endif %}
-                        <button class="btn btn-outline-secondary btn-act btn-pkey-up" type="button" title="上移（轮换优先级提前）" onclick="movePkeyRow(this, -1)"><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
-                        <button class="btn btn-outline-secondary btn-act btn-pkey-down" type="button" title="下移" onclick="movePkeyRow(this, 1)"><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
-                        <button class="btn btn-outline-primary btn-act btn-pkey-edit" type="button" title="编辑此 Key（解锁输入框）" onclick="editPkeyRow(this)"><i class="fa-solid fa-pen-to-square me-1"></i>编辑</button>
-                        <button class="btn btn-outline-danger btn-act btn-pkey-del" type="button" title="删除此 Key" onclick="delPkeyRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
-                        <button class="btn btn-success btn-act btn-pkey-save d-none text-nowrap" type="button" title="保存 Key 池（整池提交）" onclick="savePlatformKeys('{{ p.id }}')"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
-                        <button class="btn btn-outline-danger btn-act btn-pkey-cancel d-none" type="button" title="取消编辑（还原）" onclick="resetPkeyRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>
                     </div>
-                    {% endif %}
                 </div>
                 {% endfor %}
                 {% if not p['keys'] %}
@@ -196,9 +199,8 @@
             {# ===== V10.11.51/52 平台 API 目录（归属平台：自定义条目 + 内置平台官方目录） ===== #}
             <div class="border-top pt-2 mt-2">
                 <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
-                    <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" type="button"
-                            data-bs-toggle="collapse" data-bs-target="#platApis_{{ p.id }}"
-                            onclick="this.querySelector('i.arrow').classList.toggle('fa-chevron-down')">
+                    <button class="btn btn-sm btn-outline-secondary rounded-pill px-3 plat-api-toggle" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#platApis_{{ p.id }}">
                         <i class="fa-solid fa-bars-staggered me-1"></i>平台 API 目录
                         {# V10.11.52 计数按合计显示（官方 + 自定义），不再出现「平台显示 0、目录孤悬页底」的割裂 #}
                         <span class="badge bg-primary-subtle text-primary border ms-1" id="platCatalogTotal_{{ p.id }}">{{ p.catalog_count_total }} 个</span>
@@ -820,7 +822,7 @@
         row.dataset.origLabel = label || '';
         label = label || ('Key ' + (document.querySelectorAll('.pkey-row').length + 1));
         const actionsHtml = `
-            <div class="d-flex justify-content-end flex-wrap pkey-actions">
+            <div class="d-flex flex-wrap gap-1 pkey-actions ms-auto">
                 <button class="btn btn-outline-success btn-act" type="button" title="测试该 Key（免费接口验证有效性）" onclick="testPlatformKey(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
                 ${keySet ? '<button class="btn btn-outline-warning btn-act btn-pkey-reveal" type="button" title="查看该 Key 明文（二次确认，30 秒后自动遮蔽，操作记入审计）" onclick="revealPlatformKey(this)"><i class="fa-solid fa-eye me-1"></i>查看</button>' : ''}
                 <button class="btn btn-outline-secondary btn-act btn-pkey-up" type="button" title="上移（轮换优先级提前）" onclick="movePkeyRow(this, -1)"><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
@@ -832,7 +834,7 @@
             </div>`;
         row.innerHTML = `
             <div class="d-flex align-items-center flex-wrap gap-2 pkey-main">
-                <span class="input-group input-group-sm" style="min-width:150px;max-width:180px" title="Key 标签（备注用途）">
+                <span class="input-group input-group-sm" style="min-width:110px;max-width:150px" title="Key 标签（备注用途）">
                     <span class="input-group-text bg-transparent border-0 ps-1"><i class="fa-solid fa-tag text-muted"></i></span>
                     <span class="pkey-label text-truncate form-control bg-transparent border-0 ps-0">${esc(label)}</span>
                     <input type="text" class="pkey-label-input d-none form-control bg-transparent border-0 ps-0" style="min-width:0" value="${esc(label)}" maxlength="30" placeholder="标签（备注）" aria-label="Key 标签">
@@ -844,7 +846,8 @@
                     <span class="small text-muted pkey-enabled-label">${enabled !== false ? '启用' : '停用'}</span>
                     <div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input pkey-enabled" role="switch" ${enabled !== false ? 'checked' : ''}></div>
                 </span>
-            </div>${actionsHtml}`;
+                ${actionsHtml}
+            </div>`;
         return row;
     }
 
