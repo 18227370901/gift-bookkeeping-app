@@ -1030,9 +1030,20 @@ def get_auth_headers(pid, key=None):
     return {}
 
 
+def uapi_catalog_total():
+    """内置 UApiPro 静态目录可见条目数（延迟导入避免模块级循环依赖；异常时返回 0）"""
+    try:
+        from services import uapi_catalog as _uc
+        return int(_uc.summary().get('total') or 0)
+    except Exception:
+        return 0
+
+
 def get_platforms_for_display():
     """供配置页面渲染：平台列表（Key 池脱敏回显 + 状态汇总），V10.11.48 含 Key 明细与 uid
-    （uid 供前端「保持原值」提交协议使用，不含明文）"""
+    （uid 供前端「保持原值」提交协议使用，不含明文）
+    V10.11.52 目录归属平台化：增加 builtin_catalog_count / custom_api_count /
+    catalog_count_total 三个计数字段（官方目录归入平台卡后徽章按合计显示）"""
     out = []
     for p in get_platforms():
         pool = p.get('api_keys') or []
@@ -1047,6 +1058,12 @@ def get_platforms_for_display():
             'key_enabled_count': sum(1 for k in pool if k.get('enabled')),
             'apis': [dict(a) for a in (p.get('apis') or [])],
             'api_count': len(p.get('apis') or []),
+            # V10.11.52 目录归属平台化：目录计数三口径——官方内置目录数（仅内置平台）、
+            # 自定义/导入条目数、合计（平台卡「平台 API 目录」徽章按合计显示）
+            'builtin_catalog_count': (uapi_catalog_total() if p.get('builtin') else 0),
+            'custom_api_count': len(p.get('apis') or []),
+            'catalog_count_total': ((uapi_catalog_total() if p.get('builtin') else 0)
+                                     + len(p.get('apis') or [])),
             'enabled': p['enabled'], 'builtin': p.get('builtin', False),
         })
     return out

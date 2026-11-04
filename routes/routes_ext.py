@@ -3264,12 +3264,15 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         V10.11.51：改由 menu_map 门控（管理员或被授权普通用户；后者只读渲染）"""
         from services.service_config import get_platforms_for_display
         from services.uapi_catalog import get_catalog_for_frontend, summary as uapi_summary
-        from services.uapi_client import FORMATTERS
+        from services.uapi_client import FORMATTERS, FORMATTER_LABELS
+        # V10.11.52：格式化器下拉改结构化列表（键 + 中文说明）
+        uapi_formatters = [{'key': k, 'label': FORMATTER_LABELS.get(k, '（未说明）')}
+                           for k in sorted(FORMATTERS.keys())]
         return render_template('admin_service_platform.html',
                                platforms=get_platforms_for_display(),
                                uapi_catalog=get_catalog_for_frontend(),
                                uapi_summary=uapi_summary(),
-                               uapi_formatters=sorted(FORMATTERS.keys()))
+                               uapi_formatters=uapi_formatters)
 
     @app.route('/admin/service-config/save', methods=['POST'])
     @login_required
@@ -6330,11 +6333,16 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return jsonify({'success': False, 'message': '平台地址未配置（需以 http:// 或 https:// 开头）'}), 400
         from services.uapi_openapi import discover, parse_pasted
         pasted = str(data.get('pasted') or '').strip()
-        result = parse_pasted(pasted, base_url=base_url) if pasted else discover(base_url)
+        # V10.11.52：支持管理员指定规范地址（平台文档站提供的 openapi/swagger 下载链接）
+        spec_url = str(data.get('spec_url') or '').strip()
+        result = parse_pasted(pasted, base_url=base_url) if pasted else discover(base_url, spec_url=spec_url)
         if not result['ok']:
-            hint = '；可改用「手动粘贴 OpenAPI JSON」或「新增 API」' if not pasted else ''
+            hint = '；可尝试：① 在平台文档站找 openapi/swagger 下载链接填入「规范地址」；② 粘贴规范 JSON；③ 用「新增 API」单条录入' if not pasted else ''
             return jsonify({'success': False, 'apis': [],
-                            'message': result['message'] + hint}), 200
+                            'message': result['message'] + hint,
+                            'attempts': result.get('attempts', []),
+                            'hint': ('国内多数 API 商城（天行/聚合/showapi 等）仅提供网页版文档、无标准规范文件。' + hint)
+                                     if not pasted else ''}), 200
         apis = []
         for a in result['apis']:
             key = (a['method'], a['path'])

@@ -46,6 +46,8 @@
     <h4 class="mb-0"><i class="fa-solid fa-plug-circle-bolt me-2 text-primary"></i>多平台接口广场与可视化调试</h4>
     <div class="d-flex gap-2">
         {% if current_user.is_admin %}
+        {# V10.11.52：试验台入口挪至顶部全局区（下拉含官方目录 + 各平台自定义 API，对全部平台通用） #}
+        <button class="btn btn-primary rounded-pill px-3 shadow-sm" onclick="openPlayground('')"><i class="fa-solid fa-flask me-1"></i>API 试验台</button>
         <button class="btn btn-outline-info rounded-pill px-3" onclick="testPlatformAll()"><i class="fa-solid fa-vial me-1"></i>测试全部平台</button>
         <button class="btn btn-success rounded-pill px-3 shadow-sm" onclick="showAddPlatformModal()"><i class="fa-solid fa-plus me-1"></i>添加自定义平台</button>
         {% else %}
@@ -187,14 +189,17 @@
                 {% endif %}
             </div>
 
-            {# ===== V10.11.51 平台 API 目录（自定义/导入条目管理） ===== #}
+            {# ===== V10.11.51/52 平台 API 目录（归属平台：自定义条目 + 内置平台官方目录） ===== #}
             <div class="border-top pt-2 mt-2">
                 <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
                     <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" type="button"
                             data-bs-toggle="collapse" data-bs-target="#platApis_{{ p.id }}"
                             onclick="this.querySelector('i.arrow').classList.toggle('fa-chevron-down')">
                         <i class="fa-solid fa-bars-staggered me-1"></i>平台 API 目录
-                        <span class="badge bg-secondary-subtle text-secondary border ms-1">{{ p.api_count }} 个</span>
+                        {# V10.11.52 计数按合计显示（官方 + 自定义），不再出现「平台显示 0、目录孤悬页底」的割裂 #}
+                        <span class="badge bg-primary-subtle text-primary border ms-1">{{ p.catalog_count_total }} 个</span>
+                        {% if p.builtin %}<span class="badge bg-success-subtle text-success border">官方 {{ p.builtin_catalog_count }}</span>{% endif %}
+                        <span class="badge bg-secondary-subtle text-secondary border">{{ '自定义 ' + p.custom_api_count|string }}</span>
                         <i class="fa-solid fa-chevron-right arrow ms-1 small"></i>
                     </button>
                     {% if current_user.is_admin %}
@@ -204,7 +209,7 @@
                 </div>
                 <div class="collapse" id="platApis_{{ p.id }}">
                     <div class="small text-muted mb-2"><i class="fa-solid fa-circle-info me-1"></i>
-                        管理本平台的扩展接口（官方目录之外手动补充，或从 OpenAPI 规范一键导入）；条目与平台同生命周期，删除平台时自动清理。</div>
+                        自定义/导入条目与平台同生命周期（删除平台自动清理）；获取目录支持自动探测 OpenAPI 规范、指定规范地址与粘贴 JSON。</div>
                     <div class="platform-api-list" id="platApiList_{{ p.id }}">
                         {% for a in p['apis'] %}
                         <div class="d-flex align-items-center flex-wrap gap-2 border-bottom py-2 pcapi-row" data-api-id="{{ a.id }}">
@@ -224,9 +229,87 @@
                         </div>
                         {% endfor %}
                         {% if not p['apis'] %}
-                        <div class="small text-muted py-2" id="platApiEmpty_{{ p.id }}"><i class="fa-solid fa-inbox me-1"></i>暂无自定义 API（内置 UApiPro 的 108 个官方目录见下方「uapis.cn API 目录」卡片）</div>
+                        <div class="small text-muted py-2" id="platApiEmpty_{{ p.id }}"><i class="fa-solid fa-inbox me-1"></i>暂无自定义/导入条目{% if not p.builtin %}；点「获取目录」自动探测，或用「新增 API」单条录入{% endif %}</div>
                         {% endif %}
                     </div>
+                    {% if p.builtin %}
+                    {# ===== V10.11.52 官方目录归属平台：原页面底部独立目录卡整体挪入此处（搜索/筛选/分类折叠/测试/试验台/文档全保留） ===== #}
+                    <hr class="my-3">
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                        <span>
+                            <i class="fa-solid fa-bars-staggered me-2 text-primary"></i><b>官方 API 目录</b>
+                            <span class="badge bg-primary-subtle text-primary border ms-1">共 {{ uapi_summary.total }} 个</span>
+                            <span class="badge bg-success-subtle text-success border ms-1">{{ uapi_summary.free }} 个永久免费</span>
+                            <span class="badge bg-info-subtle text-info border ms-1">{{ uapi_summary.testable }} 个可一键测试</span>
+                        </span>
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="toggleAllCatalog(true)"><i class="fa-solid fa-angles-down me-1"></i>展开全部</button>
+                            <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="toggleAllCatalog(false)"><i class="fa-solid fa-angles-up me-1"></i>折叠全部</button>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
+                        <div class="input-group input-group-sm" style="max-width:340px">
+                            <span class="input-group-text"><i class="fa-solid fa-magnifying-glass"></i></span>
+                            <input type="text" class="form-control" id="uapiSearchInput" placeholder="搜索接口名称 / 路径 / 说明…" oninput="filterCatalog()">
+                        </div>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="uapiFreeOnly" onchange="filterCatalog()">
+                            <label class="form-check-label small" for="uapiFreeOnly">只看免费接口</label>
+                        </div>
+                        <span class="badge bg-secondary-subtle text-secondary border" id="uapiFilterCount">{{ uapi_summary.total }} 个</span>
+                    </div>
+                    <div class="accordion" id="uapiCatalogAcc">
+                        {% for cat in uapi_catalog %}
+                        <div class="accordion-item">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button {{ 'collapsed' if not loop.first }}" type="button"
+                                        data-bs-toggle="collapse" data-bs-target="#ucat_{{ cat.key }}">
+                                    <i class="fa-solid {{ cat.icon }} me-2 text-primary"></i><b>{{ cat.name }}</b>
+                                    <span class="badge bg-secondary-subtle text-secondary border ms-2">{{ cat.apis|length }} 个</span>
+                                    {% if cat.free_count %}<span class="badge bg-success-subtle text-success border ms-1">{{ cat.free_count }} 免费</span>{% endif %}
+                                </button>
+                            </h2>
+                            <div id="ucat_{{ cat.key }}" class="accordion-collapse collapse {{ 'show' if loop.first }}">
+                                <div class="accordion-body py-2 px-2">
+                                    {% for api in cat.apis %}
+                                    <div class="d-flex align-items-center flex-wrap gap-2 border-bottom py-2 uapi-item"
+                                         data-api-id="{{ api.id }}" data-free="{{ '1' if api.credits == 0 else '' }}">
+                                        <span class="badge {{ 'bg-dark' if api.method == 'POST' else 'bg-primary' }} text-white method-badge">{{ api.method }}</span>
+                                        <span class="fw-semibold text-nowrap" style="min-width:150px">{{ api.name }}</span>
+                                        <code class="small text-muted text-truncate" style="max-width:280px" title="{{ api.path }}">{{ api.path }}</code>
+                                        {% if api.credits == 0 %}
+                                        <span class="badge bg-success-subtle text-success border" title="永久免费，不消耗积分">免费</span>
+                                        {% elif api.credits %}
+                                        <span class="badge bg-warning-subtle text-warning-emphasis border" title="每次调用消耗的积分">{{ api.credits }} 积分</span>
+                                        {% else %}
+                                        <span class="badge bg-secondary-subtle text-secondary border" title="官方未公示价格">未公示</span>
+                                        {% endif %}
+                                        {% if api.file_type %}<span class="badge bg-secondary-subtle text-secondary border" title="文件上传型接口，暂不支持在线调用">文件型</span>{% endif %}
+                                        {% if api.stream %}<span class="badge bg-secondary-subtle text-secondary border" title="流式响应，暂不支持在线调用">流式</span>{% endif %}
+                                        {% if api.sensitive %}<span class="badge bg-danger-subtle text-danger border" title="安全敏感接口，谨慎调用">敏感</span>{% endif %}
+                                        <span class="ms-auto d-flex gap-1">
+                                            {% if current_user.is_admin %}
+                                            <button class="btn btn-outline-success btn-sm rounded-pill px-2" type="button"
+                                                    title="按预置参数真实调用测试" onclick="testUapiApi('{{ api.id }}', this)">
+                                                <i class="fa-solid fa-vial"></i> 测试</button>
+                                            <button class="btn btn-outline-primary btn-sm rounded-pill px-2" type="button"
+                                                    title="试验台动态填参调用" onclick="openPlayground('{{ api.id }}')">
+                                                <i class="fa-solid fa-flask"></i> 试验台</button>
+                                            {% endif %}
+                                            <a class="btn btn-outline-secondary btn-sm rounded-pill px-2" href="{{ api.doc }}" target="_blank" rel="noopener"
+                                               title="查看官方文档"><i class="fa-solid fa-book"></i> 文档</a>
+                                        </span>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                    <div class="small text-muted mt-2" id="uapiCatalogEmptyTip" style="display:none">
+                        <i class="fa-solid fa-magnifying-glass me-1"></i>没有匹配的接口，请调整搜索关键词或筛选条件。
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>
@@ -392,7 +475,7 @@
     </div>
 </div>
 
-<!-- V10.11.51 获取 API 目录（探测/粘贴 + 预览勾选导入） -->
+<!-- V10.11.51/52 获取 API 目录（规范地址指定 / 自动探测 / 粘贴导入 + 失败明细与引导） -->
 <div class="modal fade" id="discoverModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered modal-lg">
         <div class="modal-content">
@@ -401,9 +484,16 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
             </div>
             <div class="modal-body">
-                <div class="small text-muted mb-2">自动探测平台是否提供标准 OpenAPI/Swagger 规范（<code>{域名}/openapi.json</code> 等常见地址）；未探测到时可粘贴规范 JSON 手动导入。重复（同方法+同路径）条目自动跳过。</div>
+                <div class="small text-muted mb-2">
+                    自动探测平台是否提供标准 OpenAPI/Swagger 规范（13 个常见地址：openapi.json / swagger.json / v3 api-docs / v2 api-docs 等）；
+                    未探测到时可<b>指定规范地址</b>（平台文档站提供的 openapi/swagger 下载链接）或<b>粘贴规范 JSON</b>；重复（同方法+同路径）条目自动跳过。
+                </div>
                 <div class="mb-2">
-                    <label class="form-label small text-muted mb-1">手动粘贴 OpenAPI JSON（可选，留空则走自动探测）</label>
+                    <label class="form-label small text-muted mb-1">规范文件地址（可选——优先拉取，支持文档站任意域名的直链）</label>
+                    <input type="text" class="form-control form-control-sm" id="discoverSpecUrl" placeholder="如：https://docs.example.com/openapi.json（留空则自动探测）">
+                </div>
+                <div class="mb-2">
+                    <label class="form-label small text-muted mb-1">手动粘贴 OpenAPI JSON（可选，留空则按上面两种方式获取）</label>
                     <textarea class="form-control form-control-sm" id="discoverPasted" rows="3" placeholder='粘贴含 "paths" 字段的 OpenAPI/Swagger JSON…'></textarea>
                 </div>
                 <div id="discoverResultBox">
@@ -436,89 +526,8 @@
     </div>
 </div>
 
-<!-- ==================== V10.11.47 uapis.cn 全量 API 目录（110 个，分类折叠 + 搜索/免费筛选） ==================== -->
-<div class="card shadow-sm rounded-4 mb-4" id="uapiCatalogCard">
-    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 rounded-top-4">
-        <span>
-            <i class="fa-solid fa-bars-staggered me-2 text-primary"></i><b>uapis.cn API 目录</b>
-            <span class="badge bg-primary-subtle text-primary border ms-1">共 {{ uapi_summary.total }} 个</span>
-            <span class="badge bg-success-subtle text-success border ms-1">{{ uapi_summary.free }} 个永久免费</span>
-            <span class="badge bg-info-subtle text-info border ms-1">{{ uapi_summary.testable }} 个可一键测试</span>
-        </span>
-        <div class="d-flex gap-2">
-            <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="toggleAllCatalog(true)"><i class="fa-solid fa-angles-down me-1"></i>展开全部</button>
-            <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="toggleAllCatalog(false)"><i class="fa-solid fa-angles-up me-1"></i>折叠全部</button>
-            {% if current_user.is_admin %}
-            <button class="btn btn-primary btn-sm rounded-pill" onclick="openPlayground('')"><i class="fa-solid fa-flask me-1"></i>API 试验台</button>
-            {% endif %}
-        </div>
-    </div>
-    <div class="card-body">
-        {# V10.11.49 布局优化：目录搜索框 + 免费筛选 + 匹配计数（输入即时过滤） #}
-        <div class="d-flex align-items-center flex-wrap gap-2 mb-3">
-            <div class="input-group input-group-sm" style="max-width:340px">
-                <span class="input-group-text"><i class="fa-solid fa-magnifying-glass"></i></span>
-                <input type="text" class="form-control" id="uapiSearchInput" placeholder="搜索接口名称 / 路径 / 说明…" oninput="filterCatalog()">
-            </div>
-            <div class="form-check form-switch mb-0">
-                <input class="form-check-input" type="checkbox" role="switch" id="uapiFreeOnly" onchange="filterCatalog()">
-                <label class="form-check-label small" for="uapiFreeOnly">只看免费接口</label>
-            </div>
-            <span class="badge bg-secondary-subtle text-secondary border" id="uapiFilterCount">{{ uapi_summary.total }} 个</span>
-        </div>
-        <div class="accordion" id="uapiCatalogAcc">
-            {% for cat in uapi_catalog %}
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button {{ 'collapsed' if not loop.first }}" type="button"
-                            data-bs-toggle="collapse" data-bs-target="#ucat_{{ cat.key }}">
-                        <i class="fa-solid {{ cat.icon }} me-2 text-primary"></i><b>{{ cat.name }}</b>
-                        <span class="badge bg-secondary-subtle text-secondary border ms-2">{{ cat.apis|length }} 个</span>
-                        {% if cat.free_count %}<span class="badge bg-success-subtle text-success border ms-1">{{ cat.free_count }} 免费</span>{% endif %}
-                    </button>
-                </h2>
-                <div id="ucat_{{ cat.key }}" class="accordion-collapse collapse {{ 'show' if loop.first }}">
-                    <div class="accordion-body py-2 px-2">
-                        {% for api in cat.apis %}
-                        <div class="d-flex align-items-center flex-wrap gap-2 border-bottom py-2 uapi-item"
-                             data-api-id="{{ api.id }}" data-free="{{ '1' if api.credits == 0 else '' }}">
-                            <span class="badge {{ 'bg-dark' if api.method == 'POST' else 'bg-primary' }} text-white method-badge">{{ api.method }}</span>
-                            <span class="fw-semibold text-nowrap" style="min-width:150px">{{ api.name }}</span>
-                            <code class="small text-muted text-truncate" style="max-width:280px" title="{{ api.path }}">{{ api.path }}</code>
-                            {% if api.credits == 0 %}
-                            <span class="badge bg-success-subtle text-success border" title="永久免费，不消耗积分">免费</span>
-                            {% elif api.credits %}
-                            <span class="badge bg-warning-subtle text-warning-emphasis border" title="每次调用消耗的积分">{{ api.credits }} 积分</span>
-                            {% else %}
-                            <span class="badge bg-secondary-subtle text-secondary border" title="官方未公示价格">未公示</span>
-                            {% endif %}
-                            {% if api.file_type %}<span class="badge bg-secondary-subtle text-secondary border" title="文件上传型接口，暂不支持在线调用">文件型</span>{% endif %}
-                            {% if api.stream %}<span class="badge bg-secondary-subtle text-secondary border" title="流式响应，暂不支持在线调用">流式</span>{% endif %}
-                            {% if api.sensitive %}<span class="badge bg-danger-subtle text-danger border" title="安全敏感接口，谨慎调用">敏感</span>{% endif %}
-                            <span class="ms-auto d-flex gap-1">
-                                {% if current_user.is_admin %}
-                                <button class="btn btn-outline-success btn-sm rounded-pill px-2" type="button"
-                                        title="按预置参数真实调用测试" onclick="testUapiApi('{{ api.id }}', this)">
-                                    <i class="fa-solid fa-vial"></i> 测试</button>
-                                <button class="btn btn-outline-primary btn-sm rounded-pill px-2" type="button"
-                                        title="试验台动态填参调用" onclick="openPlayground('{{ api.id }}')">
-                                    <i class="fa-solid fa-flask"></i> 试验台</button>
-                                {% endif %}
-                                <a class="btn btn-outline-secondary btn-sm rounded-pill px-2" href="{{ api.doc }}" target="_blank" rel="noopener"
-                                   title="查看官方文档"><i class="fa-solid fa-book"></i> 文档</a>
-                            </span>
-                        </div>
-                        {% endfor %}
-                    </div>
-                </div>
-            </div>
-            {% endfor %}
-        </div>
-        <div class="small text-muted mt-2" id="uapiCatalogEmptyTip" style="display:none">
-            <i class="fa-solid fa-magnifying-glass me-1"></i>没有匹配的接口，请调整搜索关键词或筛选条件。
-        </div>
-    </div>
-</div>
+{# V10.11.52：原页面底部独立「uapis.cn API 目录」大卡片已整体挪入上方 UApiPro 平台卡的
+   「平台 API 目录」折叠区内（目录归属平台化：计数统一、不再出现"平台显示 0、目录孤悬页底"的割裂）#}
 
 <!-- V10.11.47 高积分接口测试二次确认（模态） -->
 <div class="modal fade" id="uapiConfirmModal" tabindex="-1" aria-hidden="true">
@@ -1116,7 +1125,7 @@
 
     // ===== 平台 API 管理（新增/编辑/删除）=====
 
-    const UAPI_FORMATTERS = {{ (uapi_formatters or [])|tojson }};
+    const UAPI_FORMATTERS = {{ (uapi_formatters or [])|tojson }};   // V10.11.52 结构化：[{key, label}]（键 + 中文说明）
     let apiEditCtx = { pid: '', originalId: null };   // 当前编辑上下文
 
     function showApiEditModal(pid, apiId) {
@@ -1133,8 +1142,9 @@
         document.getElementById('aeDesc').value = api ? (api.desc || '') : '';
         document.getElementById('aeCredits').value = (api && api.credits != null) ? api.credits : '';
         const fmtSel = document.getElementById('aeFormatter');
+        // V10.11.52：下拉显示「键（中文说明）」——说明该格式化器把响应转成什么可读摘要
         fmtSel.innerHTML = '<option value="">（不格式化，展示原始 JSON）</option>' +
-            UAPI_FORMATTERS.map(f => `<option value="${esc(f)}"${api && api.formatter === f ? ' selected' : ''}>${esc(f)}</option>`).join('');
+            UAPI_FORMATTERS.map(f => `<option value="${esc(f.key)}"${api && api.formatter === f.key ? ' selected' : ''}>${esc(f.key)}（${esc(f.label)}）</option>`).join('');
         renderApiParamRows(api ? (api.params || []) : []);
         bootstrap.Modal.getOrCreateInstance(document.getElementById('apiEditModal')).show();
     }
@@ -1240,10 +1250,10 @@
 
     function discoverPlatformApis(pid) {
         discoverCtx = { pid, apis: [] };
-        const p = PLATFORMS_DATA.find(x => x.id === pid);
         document.getElementById('discoverPasted').value = '';
+        document.getElementById('discoverSpecUrl').value = '';
         document.getElementById('discoverResultBox').innerHTML =
-            `<div class="small text-muted py-3 text-center">平台 <b>${esc(pid)}</b>：点击「开始获取」探测 OpenAPI 规范…</div>`;
+            `<div class="small text-muted py-3 text-center">平台 <b>${esc(pid)}</b>：填写「规范地址」或直接点「开始获取」自动探测…</div>`;
         document.getElementById('discoverImportBtn').classList.add('d-none');
         document.getElementById('discoverGoBtn').classList.remove('d-none');
         bootstrap.Modal.getOrCreateInstance(document.getElementById('discoverModal')).show();
@@ -1252,17 +1262,18 @@
     function doDiscover() {
         const pid = discoverCtx.pid;
         const pasted = document.getElementById('discoverPasted').value.trim();
+        const specUrl = (document.getElementById('discoverSpecUrl') || {}).value?.trim() || '';
         const btn = document.getElementById('discoverGoBtn');
         const box = document.getElementById('discoverResultBox');
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>获取中…';
         box.innerHTML = '<div class="small text-muted py-3 text-center"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在探测/解析，请稍候（最多约 30 秒）…</div>';
-        postJSON('/admin/service-config/platform/apis/discover', { platform_id: pid, pasted })
+        postJSON('/admin/service-config/platform/apis/discover', { platform_id: pid, pasted, spec_url: specUrl })
             .then(data => {
                 btn.disabled = false;
                 btn.innerHTML = '<i class="fa-solid fa-magnifying-glass me-1"></i>开始获取';
                 if (!data || !data.success) {
-                    box.innerHTML = `<div class="alert alert-warning py-2 small mb-0"><i class="fa-solid fa-triangle-exclamation me-1"></i>${esc((data && data.message) || '获取失败')}</div>`;
+                    renderDiscoverFailure(data);
                     return;
                 }
                 if (data.builtin) {
@@ -1277,6 +1288,24 @@
                 btn.innerHTML = '<i class="fa-solid fa-magnifying-glass me-1"></i>开始获取';
                 box.innerHTML = '<div class="alert alert-danger py-2 small mb-0">网络错误，获取失败</div>';
             });
+    }
+
+    // V10.11.52 失败渲染：逐地址原因明细 + 三条出路引导（国内 API 商城多为网页文档站、无标准规范文件）
+    function renderDiscoverFailure(data) {
+        const box = document.getElementById('discoverResultBox');
+        let html = `<div class="alert alert-warning py-2 small mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>${esc((data && data.message) || '获取失败')}</div>`;
+        const attempts = (data && data.attempts) || [];
+        if (attempts.length) {
+            html += '<div class="small text-muted mb-1 fw-semibold">探测明细（最多显示 13 条）：</div>' +
+                '<div class="border rounded-3 p-2 mb-2" style="max-height:170px;overflow-y:auto">' +
+                attempts.map(a => `<div class="small text-muted text-truncate"><code>${esc(a.url)}</code> —— ${esc(a.reason)}</div>`).join('') +
+                '</div>';
+        }
+        const hint = (data && data.hint) || '';
+        if (hint) {
+            html += `<div class="alert alert-info py-2 px-3 small mb-0"><i class="fa-solid fa-lightbulb me-1"></i>${esc(hint)}</div>`;
+        }
+        box.innerHTML = html;
     }
 
     function renderDiscoverResults(data) {

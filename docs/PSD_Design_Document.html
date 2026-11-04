@@ -1885,6 +1885,18 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== ADR-82 ==================== -->
+<div class="section">
+<h1>第 11 部分补充二十五：ADR-82 API 目录归属平台化重组与获取目录三层增强——官方目录挪入平台卡、13 候选探测与失败明细引导、格式化器中文说明（V10.11.52 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与痛点</td><td>① <strong>目录归属割裂</strong>：V10.11.49 拆分双子页时官方 108 条目录作为页面级独立卡片置于平台注册表下方，UApiPro 平台卡内「平台 API 目录」按钮恒显 0 个——同一平台的目录信息与平台档案分居两处，管理员无法在平台卡内感知「该平台有哪些 API」；V10.11.51 引入平台 API 管理后割裂加剧（自定义 API 在平台卡、官方目录孤悬页底）。② <strong>获取目录能力不足</strong>：自动探测仅 6 个候选地址，落空时只返回一句「未发现可用文档」，管理员无从判断是「网站没有」还是「地址没找对」；实测用户点名接入的 4 个国内平台（wzapi.com/tianapi.com/api.kuleu.com/showapi.com）均无标准 OpenAPI 规范——单纯扩充候选无法根治，需要「失败可见 + 人工指定地址」的逃生通道。③ <strong>格式化器无中文说明</strong>：「新增 API」编辑模态的「可读格式化器」下拉仅显示英文键名（如 misc_tracking_detect），管理员无从判断选择。</td></tr>
+<tr><td>决策方案</td><td>① <strong>目录归属平台化</strong>：官方 108 条目录卡整体挪入 UApiPro 平台卡折叠区（搜索/免费筛选/分类 accordion/一键测试/试验台/文档链接全保留，默认收起），页底独立卡删除（留注释）；每平台卡「平台 API 目录」按钮徽章三口径（合计 = 官方 + 自定义），get_platforms_for_display() 新增 builtin_catalog_count/custom_api_count/catalog_count_total（内置平台官方计数由新增 uapi_catalog_total() 实时求值、自定义按平台档案 apis 数组长度）；「API 试验台」按钮挪页面顶部全局操作区（跨平台工具不再绑定 uapis 目录卡）。② <strong>获取目录三层增强</strong>（uapi_openapi.py）：candidate_urls 扩充 6→13（origin 级 /openapi.json 与 /swagger.json、SpringDoc /v3/api-docs、SpringFox /v2/api-docs、ASP.NET /swagger/v1/swagger.json、/api/openapi.json、/api/swagger.json、/v3/api-docs/swagger.json、/docs/*.json）；discover(base_url, spec_url='') 指定规范地址优先拉取（_fetch_spec 允许文档站子域/任意域名直链，安全边界不变：只读 GET/禁重定向/3MB/仅解析 JSON 结构不回传原始内容）；新增 _classify_attempt 失败原因归类（无法连接/重定向/403 拒绝/404 无文档/返回网页非 JSON/解析失败/不含 paths），全部落空返回 attempts 逐地址明细（截 13 条），前端 renderDiscoverFailure 渲染明细 + 三条出路引导（指定规范地址/粘贴 JSON/单条录入）；<strong>明确不做 HTML 网页文档爬取</strong>——国内 API 商城普遍为网页文档站、无机器可读规范，各站结构各异且反爬与改版脆弱，爬取不可维护。③ <strong>格式化器中文说明</strong>：uapi_client.FORMATTER_LABELS 30 项（与 FORMATTERS 逐键对应，未登记键回退「（未说明）」）；routes_ext 视图 uapi_formatters 改 [{key, label}] 结构，下拉显示「键（中文说明）」（如 misc_weather（查询天气：温度/湿度/风向中文摘要））。</td></tr>
+<tr><td>验证与效果</td><td>py_compile 4 个改动 Python 文件 + 全站 Jinja 编译 0 失败；十二启平稳。浏览器 9 项全过：① 顶部「API 试验台」按钮；② uapis 徽章三口径「108 个｜官方 108｜自定义 0」；③ free-api「0 个」与 test123 万站API「1 个｜自定义 1」；④ 页底独立目录卡已删除；⑤ 折叠区展开 108 条全在、搜索「农历」精确 1 条；⑥ 格式化器下拉 30 项全中文（含「不格式化」共 31 项）；⑦ wzapi 自动探测 13 候选逐条失败原因 + 引导提示；⑧ 指定 https://uapis.cn/openapi.json 成功预览 105 接口（仅预览未导入、测试数据零落库）；⑨ worldtime 一键测试回归 HTTP 200/560ms（经用户 Key「ghca」——静态目录与既有调用链路零破坏）。<strong>实测结论沉淀</strong>：wzapi /api/openapi.json 返回 200 但内容为「接口不存在」JSON——地址在、内容非规范的假阳性最难排查，失败明细逐条归类后一眼可辨；tianapi/kuleu/showapi 全 404/HTML；4 平台均无标准规范为上游现状，新平台标准接入路径为「获取目录 → 看失败明细 → 文档站规范直链 / 粘贴 JSON 兜底」。</td></tr>
+<tr><td>连带影响</td><td>涉及 services/service_config.py（uapi_catalog_total + get_platforms_for_display 三计数字段）、services/uapi_client.py（FORMATTER_LABELS 30 项中文说明）、services/uapi_openapi.py（candidate_urls 6→13、_classify_attempt、_fetch_spec 跨域直链、discover spec_url 参数）、routes/routes_ext.py（discover 路由 spec_url/attempts、视图 uapi_formatters 改 [{key, label}] 结构）、templates/admin_service_platform.html（官方目录卡挪入平台卡折叠区/三口径徽章/试验台按钮挪顶部/发现模态「规范文件地址」输入框/renderDiscoverFailure/格式化器下拉中文）；docs/CHANGELOG.md 与本文档双格式同步；README 版本号更新。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>

@@ -732,6 +732,41 @@ FORMATTERS = {
     'misc_tracking_detect': _fmt_kv_wrapper('carrier_name', '📦 该单号快递公司：'),
 }
 
+# V10.11.52 格式化器中文说明：供「新增平台 API」编辑模态下拉展示（键（说明）形式）
+# 未在此登记的键在前端按「（未说明）」兜底显示
+FORMATTER_LABELS = {
+    'misc_worldtime': '世界时间：转目标时区中文时刻',
+    'misc_lunartime': '农历时间：转农历/干支/生肖',
+    'misc_weather': '查询天气：温度/湿度/风向中文摘要',
+    'misc_weather_history': '历史天气：同天气摘要',
+    'misc_hotboard': '热榜：取榜首平台与第一名标题',
+    'misc_phoneinfo': '手机归属地：省市区/运营商摘要',
+    'misc_date_diff': '日期差值：转相差天数中文',
+    'convert_unixtime': '时间戳转换：转日期时间',
+    'misc_timestamp': '时间戳转换（旧版）：转日期时间',
+    'misc_holiday_calendar': '节假日万年历：节日/班休摘要',
+    'daily_word': '每日单词：单词与释义',
+    'history_programmer': '程序员历史事件：事件摘要',
+    'history_programmer_today': '程序员历史上的今天：事件摘要',
+    'network_myip': '我的 IP：IP 与归属地摘要',
+    'network_ipinfo': 'IP 信息：IP 与归属地摘要',
+    'network_pingmyip': 'Ping IP：IP 摘要',
+    'translate_text': '翻译：译文摘要',
+    'saying': '一言：名句文本',
+    'saying_random': '一言（随机/每日/场景）：名句文本',
+    'answerbook_ask': '答案之书：答案文本',
+    'random_string': '随机字符串：生成结果',
+    'misc_randomnumber': '随机数：生成结果',
+    'text_md5': 'MD5 哈希：哈希值',
+    'text_md5_post': 'MD5 哈希（POST）：哈希值',
+    'text_base64_encode': 'Base64 编码：编码结果',
+    'text_base64_decode': 'Base64 解码：解码结果',
+    'github_repo': 'GitHub 仓库：星标/语言/简介摘要',
+    'game_epic_free': 'Epic 免费游戏：游戏名与领取期限',
+    'dictionary_lookup': '单词查询：释义摘要',
+    'misc_tracking_detect': '快递公司识别：公司名称',
+}
+
 
 def format_uapi_result(api_id, payload):
     """响应美化：把常用 API 的 JSON 响应转为人类可读中文摘要
