@@ -3,9 +3,6 @@
 
 {% block content %}
 <style>
-    /* 行内图标按钮紧凑化 */
-    .btn-icon { padding: .22rem .45rem; }
-    .btn-icon i { font-size: .8rem; }
     /* 子页签导航（系统核心服务 / 多平台接口广场） */
     .subnav-pills .nav-link { border-radius: 50rem; padding: .35rem 1rem; font-size: .92rem; }
     .subnav-pills .nav-link.active { font-weight: 600; }
@@ -13,6 +10,22 @@
     .uapi-item:hover { background-color: rgba(13, 110, 253, .04); border-radius: .4rem; }
     /* 目录搜索框聚焦微动效 */
     #uapiSearchInput:focus { box-shadow: 0 0 0 .2rem rgba(13, 110, 253, .12); }
+    /* V10.11.51 Key 行两行卡片布局：第一行标签/Key/开关，第二行操作按钮（图标+文字） */
+    .pkey-row { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem .6rem .35rem; background: var(--bs-body-bg); }
+    .pkey-row .pkey-main { row-gap: .25rem; }
+    .pkey-row .pkey-input { flex: 0 1 420px; min-width: 0; }
+    .pkey-row .pkey-actions { gap: .25rem; margin-top: .35rem; padding-top: .35rem; border-top: 1px dashed var(--bs-border-color-translucent, rgba(33,37,41,.15)); }
+    .btn-act { padding: .12rem .5rem; font-size: .78rem; white-space: nowrap; }
+    .btn-act i { font-size: .72rem; }
+    .pkey-row .row-select-cb, .pkey-row .pkey-enabled { margin: 0; }
+    .platform-enabled { margin: 0; }
+    /* 平台自定义 API 列表行 */
+    .pcapi-row:hover { background-color: rgba(13, 110, 253, .04); }
+    /* 只读模式提示条（非管理员） */
+    .ro-banner { border-left: 4px solid var(--bs-primary); }
+    .ro-banner b { color: var(--bs-primary); }
+    /* 导入预览表高度 */
+    #discoverResultBox { max-height: 380px; overflow-y: auto; }
 </style>
 
 {# V10.11.49 子页签导航：外部接口服务拆分为「系统核心服务」与「多平台接口广场与可视化调试」两个子页面 #}
@@ -32,10 +45,20 @@
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h4 class="mb-0"><i class="fa-solid fa-plug-circle-bolt me-2 text-primary"></i>多平台接口广场与可视化调试</h4>
     <div class="d-flex gap-2">
+        {% if current_user.is_admin %}
         <button class="btn btn-outline-info rounded-pill px-3" onclick="testPlatformAll()"><i class="fa-solid fa-vial me-1"></i>测试全部平台</button>
         <button class="btn btn-success rounded-pill px-3 shadow-sm" onclick="showAddPlatformModal()"><i class="fa-solid fa-plus me-1"></i>添加自定义平台</button>
+        {% else %}
+        <span class="badge bg-primary-subtle text-primary border px-3 py-2"><i class="fa-solid fa-user-shield me-1"></i>只读浏览模式</span>
+        {% endif %}
     </div>
 </div>
+{% if not current_user.is_admin %}
+<div class="alert alert-light border ro-banner small mb-3 rounded-3">
+    <i class="fa-solid fa-eye me-1 text-primary"></i>
+    <b>只读授权</b>：你被授权查看本页（平台档案、Key 池状态与 API 目录）；修改、测试、Key 管理与明文查看仅限管理员。
+</div>
+{% endif %}
 
 <!-- 轻量提示（toast，替代原生 alert，顶部居中显示） -->
 <div class="toast-container position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 2050;">
@@ -82,14 +105,23 @@
                 <span class="badge {{ 'bg-success-subtle text-success border' if p.enabled else 'bg-secondary-subtle text-secondary border' }} plat-enabled-badge" id="platEnabledBadge_{{ p.id }}">{{ '已启用' if p.enabled else '已停用' }}</span>
                 <span class="badge {{ 'bg-primary-subtle text-primary border' if p.key_count else 'bg-warning-subtle text-warning border' }} plat-keysum-badge" id="platKeyBadge_{{ p.id }}">
                     {{ ('%d 个 Key · 启用 %d' % (p.key_count, p.key_enabled_count)) if p.key_count else '访客模式（无 Key）' }}</span>
-                <div class="form-check form-switch mb-0 ms-1">
-                    <input type="checkbox" class="form-check-input platform-enabled" role="switch" {% if p.enabled %}checked{% endif %}
-                           id="platEnabled_{{ p.id }}" onchange="savePlatformSwitch('{{ p.id }}')" title="平台总开关（停用后全站该平台调用静默降级）">
+                <span class="badge bg-secondary-subtle text-secondary border" id="platApiBadge_{{ p.id }}">
+                    平台 API {{ p.api_count }} 个</span>
+                <div class="d-flex align-items-center gap-1 ms-1">
+                    <span class="small text-muted plat-enabled-label">{{ '启用' if p.enabled else '停用' }}：</span>
+                    <div class="form-check form-switch mb-0">
+                        <input type="checkbox" class="form-check-input platform-enabled" role="switch" {% if p.enabled %}checked{% endif %}
+                               id="platEnabled_{{ p.id }}" onchange="savePlatformSwitch('{{ p.id }}')"
+                               title="平台总开关（停用后全站该平台调用静默降级）" {% if not current_user.is_admin %}disabled{% endif %}>
+                    </div>
                 </div>
-                <span class="ms-auto d-flex gap-2">
+                <span class="ms-auto d-flex gap-2 flex-wrap">
+                    {% if current_user.is_admin %}
                     <button class="btn btn-outline-info btn-sm rounded-pill px-3" onclick="testPlatform('{{ p.id }}')"><i class="fa-solid fa-vial me-1"></i>测试平台</button>
+                    <button class="btn btn-outline-primary btn-sm rounded-pill px-3" onclick="showEditPlatformModal('{{ p.id }}')"><i class="fa-solid fa-pen-to-square me-1"></i>编辑平台</button>
                     {% if not p.builtin %}
                     <button class="btn btn-outline-danger btn-sm rounded-pill px-3" onclick="deletePlatform('{{ p.id }}', '{{ p.name }}')"><i class="fa-solid fa-trash-can me-1"></i>删除平台</button>
+                    {% endif %}
                     {% endif %}
                 </span>
             </div>
@@ -97,46 +129,105 @@
                 <div class="col-12 col-md-7">
                     <label class="form-label small text-muted mb-1">平台地址 Base URL{% if not p.builtin %}（认证方式：{{ {'none':'无认证','bearer':'Bearer 头','header':'自定义头','query':'URL 参数'}[p.auth_type] }}{% if p.auth_key_name %} · {{ p.auth_key_name }}{% endif %}）{% endif %}</label>
                     <div class="input-group input-group-sm">
-                        <input type="text" class="form-control platform-baseurl" value="{{ p.base_url }}" placeholder="https://uapis.cn/api/v1" aria-label="平台地址">
+                        <input type="text" class="form-control platform-baseurl" value="{{ p.base_url }}" placeholder="https://uapis.cn/api/v1" aria-label="平台地址" {% if not current_user.is_admin %}readonly{% endif %}>
+                        {% if current_user.is_admin %}
                         <button class="btn btn-outline-primary" type="button" onclick="savePlatformBase('{{ p.id }}')"><i class="fa-solid fa-floppy-disk me-1"></i>保存地址</button>
+                        {% endif %}
                     </div>
                 </div>
                 <div class="col-12 col-md-5 d-flex align-items-end">
                     <div class="small text-muted" id="platTestResult_{{ p.id }}"></div>
                 </div>
             </div>
-            <div class="d-flex align-items-center mb-1">
+            <div class="d-flex align-items-center mb-1 flex-wrap gap-2">
                 <b class="small">API Key 池</b>
-                <span class="small text-muted ms-2"><i class="fa-solid fa-arrows-rotate me-1"></i>按序轮换：Key 失效/额度不足自动切换下一个</span>
+                <span class="small text-muted ms-1"><i class="fa-solid fa-arrows-rotate me-1"></i>按序轮换：Key 失效/额度不足自动切换下一个</span>
+                {% if current_user.is_admin %}
                 <button class="btn btn-outline-success btn-sm rounded-pill ms-auto px-3" type="button" onclick="addPlatformKeyRow('{{ p.id }}')"><i class="fa-solid fa-plus me-1"></i>添加 Key</button>
+                {% endif %}
             </div>
             <div class="platform-key-list" id="platKeys_{{ p.id }}">
                 {% for k in p['keys'] %}
-                <div class="input-group input-group-sm mb-2 pkey-row" data-uid="{{ k.uid }}" data-keyset="{{ '1' if k.key_set else '' }}">
-                    <span class="input-group-text" style="min-width:120px" title="Key 标签（备注用途）">
-                        <span class="pkey-label text-truncate" title="{{ k.label }}">{{ k.label }}</span>
-                        <input type="text" class="pkey-label-input d-none bg-transparent border-0 p-0 flex-grow-1" style="min-width:0;width:112px" value="{{ k.label }}" maxlength="30" placeholder="标签（备注）" aria-label="Key 标签">
-                    </span>
-                    <input type="password" class="form-control pkey-input" autocomplete="new-password" readonly
-                           value="{{ '已保存' if k.key_set else '' }}"
-                           placeholder="{{ (k.key_masked ~ '（点「编辑」修改）') if k.key_set else '未保存（新 Key）' }}" aria-label="API Key">
-                    <span class="input-group-text d-flex align-items-center" title="启用该 Key（停用则不参与轮换；切换后即时保存生效）">
-                        <div class="form-check form-switch mb-0">
-                            <input type="checkbox" class="form-check-input pkey-enabled" role="switch" {% if k.enabled %}checked{% endif %}>
-                        </div>
-                    </span>
-                    <button class="btn btn-outline-success btn-icon" type="button" title="测试该 Key（免费接口验证有效性）" onclick="testPlatformKey(this, '{{ p.id }}')"><i class="fa-solid fa-vial"></i></button>
-                    <button class="btn btn-outline-secondary btn-icon btn-pkey-up" type="button" title="上移（轮换优先级提前）" onclick="movePkeyRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
-                    <button class="btn btn-outline-secondary btn-icon btn-pkey-down" type="button" title="下移" onclick="movePkeyRow(this, 1)"><i class="fa-solid fa-arrow-down"></i></button>
-                    <button class="btn btn-outline-primary btn-icon btn-pkey-edit" type="button" title="编辑此 Key（解锁输入框）" onclick="editPkeyRow(this)"><i class="fa-solid fa-pen-to-square"></i></button>
-                    <button class="btn btn-outline-danger btn-icon btn-pkey-del" type="button" title="删除此 Key" onclick="delPkeyRow(this)"><i class="fa-solid fa-trash-can"></i></button>
-                    <button class="btn btn-success btn-icon btn-pkey-save d-none text-nowrap" type="button" title="保存 Key 池（整池提交）" onclick="savePlatformKeys('{{ p.id }}')"><i class="fa-solid fa-floppy-disk"></i></button>
-                    <button class="btn btn-outline-danger btn-icon btn-pkey-cancel d-none" type="button" title="取消编辑（还原）" onclick="resetPkeyRow(this)"><i class="fa-solid fa-xmark"></i></button>
+                {# V10.11.51 两行卡片：第一行标签/Key（限宽）/启停，第二行操作按钮（图标+文字；「查看」明文仅管理员） #}
+                <div class="pkey-row mb-2" data-uid="{{ k.uid }}" data-keyset="{{ '1' if k.key_set else '' }}">
+                    <div class="d-flex align-items-center flex-wrap gap-2 pkey-main">
+                        <span class="input-group input-group-sm" style="min-width:150px;max-width:180px" title="Key 标签（备注用途）">
+                            <span class="input-group-text bg-transparent border-0 ps-1"><i class="fa-solid fa-tag text-muted"></i></span>
+                            <span class="pkey-label text-truncate form-control bg-transparent border-0 ps-0">{{ k.label }}</span>
+                            <input type="text" class="pkey-label-input d-none form-control bg-transparent border-0 ps-0" style="min-width:0" value="{{ k.label }}" maxlength="30" placeholder="标签（备注）" aria-label="Key 标签">
+                        </span>
+                        <input type="password" class="form-control form-control-sm pkey-input" autocomplete="new-password" readonly
+                               value="{{ '已保存' if k.key_set else '' }}"
+                               placeholder="{{ (k.key_masked ~ '（点「编辑」修改）') if k.key_set else '未保存（新 Key）' }}" aria-label="API Key">
+                        <span class="d-flex align-items-center gap-1" title="启用该 Key（停用则不参与轮换；切换后即时保存生效）">
+                            <span class="small text-muted pkey-enabled-label">{{ '启用' if k.enabled else '停用' }}</span>
+                            <div class="form-check form-switch mb-0">
+                                <input type="checkbox" class="form-check-input pkey-enabled" role="switch" {% if k.enabled %}checked{% endif %} {% if not current_user.is_admin %}disabled{% endif %}>
+                            </div>
+                        </span>
+                    </div>
+                    {% if current_user.is_admin %}
+                    <div class="d-flex justify-content-end flex-wrap pkey-actions">
+                        <button class="btn btn-outline-success btn-act" type="button" title="测试该 Key（免费接口验证有效性）" onclick="testPlatformKey(this, '{{ p.id }}')"><i class="fa-solid fa-vial me-1"></i>测试</button>
+                        {% if k.key_set %}
+                        <button class="btn btn-outline-warning btn-act btn-pkey-reveal" type="button" title="查看该 Key 明文（二次确认，30 秒后自动遮蔽，操作记入审计）" onclick="revealPlatformKey(this, '{{ p.id }}')"><i class="fa-solid fa-eye me-1"></i>查看</button>
+                        {% endif %}
+                        <button class="btn btn-outline-secondary btn-act btn-pkey-up" type="button" title="上移（轮换优先级提前）" onclick="movePkeyRow(this, -1)"><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
+                        <button class="btn btn-outline-secondary btn-act btn-pkey-down" type="button" title="下移" onclick="movePkeyRow(this, 1)"><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
+                        <button class="btn btn-outline-primary btn-act btn-pkey-edit" type="button" title="编辑此 Key（解锁输入框）" onclick="editPkeyRow(this)"><i class="fa-solid fa-pen-to-square me-1"></i>编辑</button>
+                        <button class="btn btn-outline-danger btn-act btn-pkey-del" type="button" title="删除此 Key" onclick="delPkeyRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
+                        <button class="btn btn-success btn-act btn-pkey-save d-none text-nowrap" type="button" title="保存 Key 池（整池提交）" onclick="savePlatformKeys('{{ p.id }}')"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
+                        <button class="btn btn-outline-danger btn-act btn-pkey-cancel d-none" type="button" title="取消编辑（还原）" onclick="resetPkeyRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>
+                    </div>
+                    {% endif %}
                 </div>
                 {% endfor %}
                 {% if not p['keys'] %}
-                <div class="small text-muted mb-2" id="platKeysEmpty_{{ p.id }}"><i class="fa-solid fa-user-ninja me-1"></i>未配置 Key（访客模式可直接调用；点「添加 Key」接入账号额度）</div>
+                <div class="small text-muted mb-2" id="platKeysEmpty_{{ p.id }}"><i class="fa-solid fa-user-ninja me-1"></i>未配置 Key（访客模式可直接调用{% if current_user.is_admin %}；点「添加 Key」接入账号额度{% endif %}）</div>
                 {% endif %}
+            </div>
+
+            {# ===== V10.11.51 平台 API 目录（自定义/导入条目管理） ===== #}
+            <div class="border-top pt-2 mt-2">
+                <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
+                    <button class="btn btn-sm btn-outline-secondary rounded-pill px-3" type="button"
+                            data-bs-toggle="collapse" data-bs-target="#platApis_{{ p.id }}"
+                            onclick="this.querySelector('i.arrow').classList.toggle('fa-chevron-down')">
+                        <i class="fa-solid fa-bars-staggered me-1"></i>平台 API 目录
+                        <span class="badge bg-secondary-subtle text-secondary border ms-1">{{ p.api_count }} 个</span>
+                        <i class="fa-solid fa-chevron-right arrow ms-1 small"></i>
+                    </button>
+                    {% if current_user.is_admin %}
+                    <button class="btn btn-outline-primary btn-sm rounded-pill px-3" type="button" onclick="showApiEditModal('{{ p.id }}')"><i class="fa-solid fa-plus me-1"></i>新增 API</button>
+                    <button class="btn btn-outline-success btn-sm rounded-pill px-3" type="button" onclick="discoverPlatformApis('{{ p.id }}')"><i class="fa-solid fa-cloud-arrow-down me-1"></i>获取目录</button>
+                    {% endif %}
+                </div>
+                <div class="collapse" id="platApis_{{ p.id }}">
+                    <div class="small text-muted mb-2"><i class="fa-solid fa-circle-info me-1"></i>
+                        管理本平台的扩展接口（官方目录之外手动补充，或从 OpenAPI 规范一键导入）；条目与平台同生命周期，删除平台时自动清理。</div>
+                    <div class="platform-api-list" id="platApiList_{{ p.id }}">
+                        {% for a in p['apis'] %}
+                        <div class="d-flex align-items-center flex-wrap gap-2 border-bottom py-2 pcapi-row" data-api-id="{{ a.id }}">
+                            <span class="badge {{ 'bg-dark' if a.method == 'POST' else 'bg-primary' }} text-white method-badge">{{ a.method }}</span>
+                            <span class="fw-semibold text-nowrap">{{ a.name }}</span>
+                            <code class="small text-muted text-truncate" style="max-width:280px" title="{{ a.path }}">{{ a.path }}</code>
+                            {% if a.credits %}<span class="badge bg-warning-subtle text-warning-emphasis border">{{ a.credits }} 积分</span>{% endif %}
+                            {% if a.source == 'openapi' %}<span class="badge bg-info-subtle text-info border">导入</span>{% else %}<span class="badge bg-secondary-subtle text-secondary border">手动</span>{% endif %}
+                            {% if a.formatter %}<span class="badge bg-success-subtle text-success border" title="绑定可读格式化器：{{ a.formatter }}">可读化</span>{% endif %}
+                            <span class="ms-auto d-flex gap-1">
+                                {% if current_user.is_admin %}
+                                <button class="btn btn-outline-info btn-sm rounded-pill px-2" type="button" title="试验台动态填参调用" onclick="openPlayground('@{{ p.id }}|{{ a.id }}')"><i class="fa-solid fa-flask"></i> 试验台</button>
+                                <button class="btn btn-outline-primary btn-sm rounded-pill px-2" type="button" title="编辑此 API 定义" onclick="showApiEditModal('{{ p.id }}', '{{ a.id }}')"><i class="fa-solid fa-pen-to-square"></i> 编辑</button>
+                                <button class="btn btn-outline-danger btn-sm rounded-pill px-2" type="button" title="删除此 API" onclick="deletePlatformApi('{{ p.id }}', '{{ a.id }}', '{{ a.name }}')"><i class="fa-solid fa-trash-can"></i> 删除</button>
+                                {% endif %}
+                            </span>
+                        </div>
+                        {% endfor %}
+                        {% if not p['apis'] %}
+                        <div class="small text-muted py-2" id="platApiEmpty_{{ p.id }}"><i class="fa-solid fa-inbox me-1"></i>暂无自定义 API（内置 UApiPro 的 108 个官方目录见下方「uapis.cn API 目录」卡片）</div>
+                        {% endif %}
+                    </div>
+                </div>
             </div>
         </div>
         {% endfor %}
@@ -198,6 +289,153 @@
     </div>
 </div>
 
+<!-- V10.11.51 编辑平台模态（名称/地址/认证方式；平台 ID 只读） -->
+<div class="modal fade" id="editPlatformModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fa-solid fa-pen-to-square me-2 text-primary"></i>编辑 API 平台</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-2 small text-muted">平台 ID 是主键不可修改；名称、地址与认证方式可更新（Key 池请在平台卡片内管理）。</div>
+                <div class="row g-2">
+                    <div class="col-4"><label class="form-label small text-muted mb-1">平台 ID（只读）</label>
+                        <input type="text" class="form-control form-control-sm" id="epId" readonly></div>
+                    <div class="col-8"><label class="form-label small text-muted mb-1">平台名称</label>
+                        <input type="text" class="form-control form-control-sm" id="epName" maxlength="50"></div>
+                    <div class="col-12"><label class="form-label small text-muted mb-1">Base URL</label>
+                        <input type="text" class="form-control form-control-sm" id="epBaseUrl" placeholder="https://example.com/api/v1"></div>
+                    <div class="col-6"><label class="form-label small text-muted mb-1">认证方式</label>
+                        <select class="form-select form-select-sm" id="epAuthType">
+                            <option value="none">无认证</option>
+                            <option value="bearer">Bearer 头（Authorization: Bearer）</option>
+                            <option value="header">自定义请求头</option>
+                            <option value="query">URL 查询参数</option>
+                        </select></div>
+                    <div class="col-6"><label class="form-label small text-muted mb-1">自定义头/参数名（header/query 型必填）</label>
+                        <input type="text" class="form-control form-control-sm" id="epAuthKeyName" placeholder="X-API-Key" maxlength="50"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-primary rounded-pill px-3" onclick="submitEditPlatform()"><i class="fa-solid fa-check me-1"></i>保存修改</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- V10.11.51 Key 明文查看二次确认 -->
+<div class="modal fade" id="keyRevealModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fa-solid fa-shield-halved me-2 text-warning"></i>查看 Key 明文确认</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div id="keyRevealBody">确定查看该 Key 明文吗？</div>
+                <div class="small text-muted mt-2"><i class="fa-solid fa-circle-info me-1"></i>明文将显示在当前页面，<b>30 秒后自动遮蔽</b>；本次操作将记入审计日志（不记录明文内容）。请确认身边无他人围观。</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-warning rounded-pill px-3" id="keyRevealBtn"><i class="fa-solid fa-eye me-1"></i>确定查看</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- V10.11.51 平台 API 编辑模态（新增/编辑共用） -->
+<div class="modal fade" id="apiEditModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="apiEditTitle"><i class="fa-solid fa-plus me-2 text-success"></i>新增平台 API</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-2">
+                    <div class="col-12 col-md-6"><label class="form-label small text-muted mb-1">API 名称 <span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-sm" id="aeName" maxlength="50" placeholder="如：查询天气"></div>
+                    <div class="col-6 col-md-3"><label class="form-label small text-muted mb-1">请求方法 <span class="text-danger">*</span></label>
+                        <select class="form-select form-select-sm" id="aeMethod">
+                            <option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option><option>PATCH</option>
+                        </select></div>
+                    <div class="col-6 col-md-3"><label class="form-label small text-muted mb-1">积分/次（可选）</label>
+                        <input type="number" class="form-control form-control-sm" id="aeCredits" min="0" placeholder="留空=未知"></div>
+                    <div class="col-12"><label class="form-label small text-muted mb-1">接口路径（相对平台 Base URL）<span class="text-danger">*</span></label>
+                        <input type="text" class="form-control form-control-sm" id="aePath" maxlength="500" placeholder="如：/misc/weather（路径参数写 {id}）">
+                        <div class="form-text small">必须以 / 开头；仅允许字母/数字/下划线/连字符/点/斜杠/花括号占位符；不支持协议、上跳（..）与反斜杠。</div></div>
+                    <div class="col-12"><label class="form-label small text-muted mb-1">说明（可选）</label>
+                        <input type="text" class="form-control form-control-sm" id="aeDesc" maxlength="500" placeholder="接口用途说明"></div>
+                    <div class="col-12 col-md-6"><label class="form-label small text-muted mb-1">可读格式化器（可选）</label>
+                        <select class="form-select form-select-sm" id="aeFormatter">
+                            <option value="">（不格式化，展示原始 JSON）</option>
+                        </select>
+                        <div class="form-text small">复用系统内置的 30 个响应美化器（如 misc_weather），响应结构匹配时显示中文可读摘要。</div></div>
+                    <div class="col-12">
+                        <div class="d-flex align-items-center mb-1">
+                            <label class="form-label small text-muted mb-0">参数定义</label>
+                            <button class="btn btn-outline-success btn-sm rounded-pill px-2 ms-auto" type="button" onclick="apiParamAddRow()"><i class="fa-solid fa-plus me-1"></i>添加参数</button>
+                        </div>
+                        <div id="aeParamsBox" class="border rounded-3 p-2" style="max-height:220px;overflow-y:auto">
+                            <div class="small text-muted mb-1">定义参数名/类型后，API 试验台会自动渲染对应输入控件（支持文本/数字/布尔/下拉/日历）。</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-success rounded-pill px-3" onclick="submitApiEdit()"><i class="fa-solid fa-check me-1"></i>保存 API</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- V10.11.51 获取 API 目录（探测/粘贴 + 预览勾选导入） -->
+<div class="modal fade" id="discoverModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fa-solid fa-cloud-arrow-down me-2 text-success"></i>获取平台 API 目录</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body">
+                <div class="small text-muted mb-2">自动探测平台是否提供标准 OpenAPI/Swagger 规范（<code>{域名}/openapi.json</code> 等常见地址）；未探测到时可粘贴规范 JSON 手动导入。重复（同方法+同路径）条目自动跳过。</div>
+                <div class="mb-2">
+                    <label class="form-label small text-muted mb-1">手动粘贴 OpenAPI JSON（可选，留空则走自动探测）</label>
+                    <textarea class="form-control form-control-sm" id="discoverPasted" rows="3" placeholder='粘贴含 "paths" 字段的 OpenAPI/Swagger JSON…'></textarea>
+                </div>
+                <div id="discoverResultBox">
+                    <div class="small text-muted py-3 text-center"><i class="fa-solid fa-cloud me-1"></i>点击下方「开始获取」…</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-outline-success rounded-pill px-3" id="discoverGoBtn" onclick="doDiscover()"><i class="fa-solid fa-magnifying-glass me-1"></i>开始获取</button>
+                <button type="button" class="btn btn-success rounded-pill px-3 d-none" id="discoverImportBtn" onclick="doImportDiscovered()"><i class="fa-solid fa-file-import me-1"></i>导入选中 (<span id="discoverSelCount">0</span>)</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- V10.11.51 删除平台 API 二次确认 -->
+<div class="modal fade" id="delApiModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="fa-solid fa-triangle-exclamation me-2 text-warning"></i>删除平台 API</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
+            </div>
+            <div class="modal-body" id="delApiBody">确定删除该 API 吗？</div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">取消</button>
+                <button type="button" class="btn btn-danger rounded-pill px-3" id="delApiBtn">确定删除</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ==================== V10.11.47 uapis.cn 全量 API 目录（110 个，分类折叠 + 搜索/免费筛选） ==================== -->
 <div class="card shadow-sm rounded-4 mb-4" id="uapiCatalogCard">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2 rounded-top-4">
@@ -210,7 +448,9 @@
         <div class="d-flex gap-2">
             <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="toggleAllCatalog(true)"><i class="fa-solid fa-angles-down me-1"></i>展开全部</button>
             <button class="btn btn-outline-secondary btn-sm rounded-pill" onclick="toggleAllCatalog(false)"><i class="fa-solid fa-angles-up me-1"></i>折叠全部</button>
+            {% if current_user.is_admin %}
             <button class="btn btn-primary btn-sm rounded-pill" onclick="openPlayground('')"><i class="fa-solid fa-flask me-1"></i>API 试验台</button>
+            {% endif %}
         </div>
     </div>
     <div class="card-body">
@@ -256,14 +496,16 @@
                             {% if api.stream %}<span class="badge bg-secondary-subtle text-secondary border" title="流式响应，暂不支持在线调用">流式</span>{% endif %}
                             {% if api.sensitive %}<span class="badge bg-danger-subtle text-danger border" title="安全敏感接口，谨慎调用">敏感</span>{% endif %}
                             <span class="ms-auto d-flex gap-1">
+                                {% if current_user.is_admin %}
                                 <button class="btn btn-outline-success btn-sm rounded-pill px-2" type="button"
                                         title="按预置参数真实调用测试" onclick="testUapiApi('{{ api.id }}', this)">
                                     <i class="fa-solid fa-vial"></i> 测试</button>
                                 <button class="btn btn-outline-primary btn-sm rounded-pill px-2" type="button"
                                         title="试验台动态填参调用" onclick="openPlayground('{{ api.id }}')">
                                     <i class="fa-solid fa-flask"></i> 试验台</button>
+                                {% endif %}
                                 <a class="btn btn-outline-secondary btn-sm rounded-pill px-2" href="{{ api.doc }}" target="_blank" rel="noopener"
-                                   title="查看官方文档"><i class="fa-solid fa-book"></i></a>
+                                   title="查看官方文档"><i class="fa-solid fa-book"></i> 文档</a>
                             </span>
                         </div>
                         {% endfor %}
@@ -367,7 +609,7 @@
         }
     }
 
-    // 行内结果显示（Key 行单测等）
+    // 行内结果显示（Key 行单测等；V10.11.51 保留按钮文字，仅换图标）
     function showRowResult(btn, ok, msg, ms) {
         let badge = btn.parentElement.querySelector('.row-result');
         if (!badge) {
@@ -377,7 +619,7 @@
         }
         badge.className = 'row-result small ms-1 ' + (ok ? 'text-success' : 'text-danger');
         badge.innerHTML = (ok ? '✓ ' : '✗ ') + esc(msg) + (ms != null ? `（${ms}ms）` : '');
-        btn.innerHTML = ok ? '<i class="fa-solid fa-circle-check"></i>' : '<i class="fa-solid fa-triangle-exclamation"></i>';
+        btn.innerHTML = ok ? '<i class="fa-solid fa-circle-check me-1"></i>测试' : '<i class="fa-solid fa-triangle-exclamation me-1"></i>测试';
         btn.classList.remove('btn-outline-success', 'btn-outline-danger');
         btn.classList.add(ok ? 'btn-outline-success' : 'btn-outline-danger');
     }
@@ -394,6 +636,9 @@
         const block = getPlatBlock(pid);
         if (!block) return;
         const enabled = block.querySelector('.platform-enabled').checked;
+        // V10.11.51：同步开关旁「启用/停用」可见文字
+        const lab = block.querySelector('.plat-enabled-label');
+        if (lab) lab.textContent = enabled ? '启用' : '停用';
         postJSON('/admin/service-config/platform/save', { id: pid, enabled })
             .then(data => {
                 if (data && data.success) {
@@ -402,11 +647,15 @@
                 } else {
                     showToast(data.message || '保存失败', false);
                     block.querySelector('.platform-enabled').checked = !enabled;
+                    const lab = block.querySelector('.plat-enabled-label');
+                    if (lab) lab.textContent = !enabled ? '启用' : '停用';
                 }
             })
             .catch(() => {
                 showToast('网络错误', false);
                 block.querySelector('.platform-enabled').checked = !enabled;
+                const lab2 = block.querySelector('.plat-enabled-label');
+                if (lab2) lab2.textContent = !enabled ? '启用' : '停用';
             });
     }
 
@@ -445,26 +694,41 @@
     }
 
     // ===== Key 行构造 =====
+    // V10.11.51 两行卡片：第一行标签/Key（限宽 420px）/启停，第二行操作按钮（图标+文字）；
+    // 已保存 Key 额外提供「查看」明文按钮（后端二次确认 + 审计 + 30 秒自动遮蔽）
     function makePkeyRow(label, keyMasked, keySet, enabled, uid) {
         const row = document.createElement('div');
-        row.className = 'input-group input-group-sm mb-2 pkey-row';
+        row.className = 'pkey-row mb-2';
         row.dataset.keyset = keySet ? '1' : '';   // 注意：data-keyset 无连字符，dataset 属性名为全小写 keyset（写成 keySet 会变成 data-key-set 导致读不到）
         row.dataset.uid = uid || '';
         row.dataset.origLabel = label || '';
         label = label || ('Key ' + (document.querySelectorAll('.pkey-row').length + 1));
+        const actionsHtml = `
+            <div class="d-flex justify-content-end flex-wrap pkey-actions">
+                <button class="btn btn-outline-success btn-act" type="button" title="测试该 Key（免费接口验证有效性）" onclick="testPlatformKey(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
+                ${keySet ? '<button class="btn btn-outline-warning btn-act btn-pkey-reveal" type="button" title="查看该 Key 明文（二次确认，30 秒后自动遮蔽，操作记入审计）" onclick="revealPlatformKey(this)"><i class="fa-solid fa-eye me-1"></i>查看</button>' : ''}
+                <button class="btn btn-outline-secondary btn-act btn-pkey-up" type="button" title="上移（轮换优先级提前）" onclick="movePkeyRow(this, -1)"><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
+                <button class="btn btn-outline-secondary btn-act btn-pkey-down" type="button" title="下移" onclick="movePkeyRow(this, 1)"><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
+                <button class="btn btn-outline-primary btn-act btn-pkey-edit" type="button" title="编辑此 Key（解锁输入框）" onclick="editPkeyRow(this)"><i class="fa-solid fa-pen-to-square me-1"></i>编辑</button>
+                <button class="btn btn-outline-danger btn-act btn-pkey-del" type="button" title="删除此 Key" onclick="delPkeyRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
+                <button class="btn btn-success btn-act btn-pkey-save d-none text-nowrap" type="button" title="保存 Key 池（整池提交）" onclick="savePlatformKeysOf(this)"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
+                <button class="btn btn-outline-danger btn-act btn-pkey-cancel d-none" type="button" title="取消编辑（还原）" onclick="resetPkeyRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>
+            </div>`;
         row.innerHTML = `
-            <span class="input-group-text" style="min-width:120px" title="Key 标签（备注用途）"><span class="pkey-label text-truncate">${esc(label)}</span><input type="text" class="pkey-label-input d-none bg-transparent border-0 p-0 flex-grow-1" style="min-width:0;width:112px" value="${esc(label)}" maxlength="30" placeholder="标签（备注）" aria-label="Key 标签"></span>
-            <input type="password" class="form-control pkey-input" autocomplete="new-password" readonly
-                   value="${keySet ? '已保存' : ''}"
-                   placeholder="${keySet ? (esc(keyMasked || '****') + '（点「编辑」修改）') : '新 Key（点「编辑」填写）'}" aria-label="API Key">
-            <span class="input-group-text d-flex align-items-center" title="启用该 Key（停用则不参与轮换；保存后即时生效）"><div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input pkey-enabled" role="switch" ${enabled !== false ? 'checked' : ''}></div></span>
-            <button class="btn btn-outline-success btn-icon" type="button" title="测试该 Key（免费接口验证有效性）" onclick="testPlatformKey(this)"><i class="fa-solid fa-vial"></i></button>
-            <button class="btn btn-outline-secondary btn-icon btn-pkey-up" type="button" title="上移（轮换优先级提前）" onclick="movePkeyRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
-            <button class="btn btn-outline-secondary btn-icon btn-pkey-down" type="button" title="下移" onclick="movePkeyRow(this, 1)"><i class="fa-solid fa-arrow-down"></i></button>
-            <button class="btn btn-outline-primary btn-icon btn-pkey-edit" type="button" title="编辑此 Key（解锁输入框）" onclick="editPkeyRow(this)"><i class="fa-solid fa-pen-to-square"></i></button>
-            <button class="btn btn-outline-danger btn-icon btn-pkey-del" type="button" title="删除此 Key" onclick="delPkeyRow(this)"><i class="fa-solid fa-trash-can"></i></button>
-            <button class="btn btn-success btn-icon btn-pkey-save d-none text-nowrap" type="button" title="保存 Key 池（整池提交）" onclick="savePlatformKeysOf(this)"><i class="fa-solid fa-floppy-disk"></i></button>
-            <button class="btn btn-outline-danger btn-icon btn-pkey-cancel d-none" type="button" title="取消编辑（还原）" onclick="resetPkeyRow(this)"><i class="fa-solid fa-xmark"></i></button>`;
+            <div class="d-flex align-items-center flex-wrap gap-2 pkey-main">
+                <span class="input-group input-group-sm" style="min-width:150px;max-width:180px" title="Key 标签（备注用途）">
+                    <span class="input-group-text bg-transparent border-0 ps-1"><i class="fa-solid fa-tag text-muted"></i></span>
+                    <span class="pkey-label text-truncate form-control bg-transparent border-0 ps-0">${esc(label)}</span>
+                    <input type="text" class="pkey-label-input d-none form-control bg-transparent border-0 ps-0" style="min-width:0" value="${esc(label)}" maxlength="30" placeholder="标签（备注）" aria-label="Key 标签">
+                </span>
+                <input type="password" class="form-control form-control-sm pkey-input" autocomplete="new-password" readonly
+                       value="${keySet ? '已保存' : ''}"
+                       placeholder="${keySet ? (esc(keyMasked || '****') + '（点「编辑」修改）') : '新 Key（点「编辑」填写）'}" aria-label="API Key">
+                <span class="d-flex align-items-center gap-1" title="启用该 Key（停用则不参与轮换；保存后即时生效）">
+                    <span class="small text-muted pkey-enabled-label">${enabled !== false ? '启用' : '停用'}</span>
+                    <div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input pkey-enabled" role="switch" ${enabled !== false ? 'checked' : ''}></div>
+                </span>
+            </div>${actionsHtml}`;
         return row;
     }
 
@@ -629,10 +893,15 @@
         if (block) savePlatformKeys(block.dataset.pid);
     }
 
-    // Key 启停开关即时保存（整池提交）
+    // Key 启停开关即时保存（整池提交）；V10.11.51 同步行内「启用/停用」文字
     document.addEventListener('change', function (e) {
         const cb = e.target;
         if (!cb || !cb.classList || !cb.classList.contains('pkey-enabled')) return;
+        const row = cb.closest('.pkey-row');
+        if (row) {
+            const lab = row.querySelector('.pkey-enabled-label');
+            if (lab) lab.textContent = cb.checked ? '启用' : '停用';
+        }
         const block = cb.closest('.platform-block');
         if (block) savePlatformKeys(block.dataset.pid);
     });
@@ -744,6 +1013,328 @@
         document.querySelectorAll('.platform-key-list').forEach(refreshPkeyMoveButtons);
     })();
 
+    // ===================== V10.11.51 编辑平台 / Key 明文查看 / 平台 API 管理 =====================
+
+    const IS_ADMIN = {{ 'true' if current_user.is_admin else 'false' }};
+
+    // ===== 编辑平台（名称/地址/认证方式；ID 只读）=====
+    function showEditPlatformModal(pid) {
+        const p = PLATFORMS_DATA.find(x => x.id === pid);
+        if (!p) { showToast('平台不存在', false); return; }
+        document.getElementById('epId').value = pid;
+        document.getElementById('epName').value = p.name || '';
+        document.getElementById('epBaseUrl').value = p.base_url || '';
+        document.getElementById('epAuthType').value = p.auth_type || 'none';
+        document.getElementById('epAuthKeyName').value = p.auth_key_name || '';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('editPlatformModal')).show();
+    }
+
+    function submitEditPlatform() {
+        const pid = document.getElementById('epId').value.trim();
+        const name = document.getElementById('epName').value.trim();
+        const baseUrl = document.getElementById('epBaseUrl').value.trim();
+        const authType = document.getElementById('epAuthType').value;
+        const authKeyName = document.getElementById('epAuthKeyName').value.trim();
+        if (!name) { showToast('平台名称不能为空', false); return; }
+        if (baseUrl && !/^https?:\/\//.test(baseUrl)) { showToast('Base URL 必须以 http:// 或 https:// 开头', false); return; }
+        if ((authType === 'header' || authType === 'query') && !authKeyName) { showToast('自定义头/参数名不能为空（当前认证方式必填）', false); return; }
+        const body = { id: pid, name, auth_type: authType, auth_key_name: authKeyName };
+        if (baseUrl) body.base_url = baseUrl;
+        postJSON('/admin/service-config/platform/save', body)
+            .then(data => {
+                if (data && data.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('editPlatformModal')).hide();
+                    showToast('平台信息已更新，页面即将刷新');
+                    setTimeout(() => window.location.reload(), 600);
+                } else {
+                    showToast(data.message || '保存失败', false);
+                }
+            })
+            .catch(() => showToast('网络错误，保存失败', false));
+    }
+
+    // ===== Key 明文查看（二次确认 → 后端取明文 → 明文显示 30 秒自动遮蔽）=====
+    let keyRevealPending = null;   // {btn, pid, uid, label}
+    let keyRevealTimer = null;
+
+    function revealPlatformKey(btn, pid) {
+        const row = btn.closest('.pkey-row');
+        const block = btn.closest('.platform-block');
+        const realPid = pid || (block ? block.dataset.pid : '');
+        if (!row || !realPid) return;
+        const label = getPkeyLabel(row);
+        keyRevealPending = { btn, pid: realPid, uid: row.dataset.uid || '', label };
+        document.getElementById('keyRevealBody').innerHTML =
+            `确定查看平台 <b>【${esc(realPid)}】</b> 中标签为 <b>【${esc(label)}】</b> 的 Key 明文吗？`;
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('keyRevealModal')).show();
+    }
+
+    document.getElementById('keyRevealBtn').addEventListener('click', function () {
+        const ctx = keyRevealPending;
+        if (!ctx) return;
+        const inst = bootstrap.Modal.getInstance(document.getElementById('keyRevealModal'));
+        if (inst) inst.hide();
+        const btn = ctx.btn;
+        btn.disabled = true;
+        const oldHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>查看';
+        postJSON('/admin/service-config/platform/key/reveal', { id: ctx.pid, uid: ctx.uid })
+            .then(data => {
+                btn.disabled = false; btn.innerHTML = oldHtml;
+                if (!data || !data.success) { showToast((data && data.message) || '查看失败', false); return; }
+                showKeyPlaintext(ctx, data.key || '');
+            })
+            .catch(() => { btn.disabled = false; btn.innerHTML = oldHtml; showToast('网络错误', false); });
+    });
+
+    // 明文显示 + 30 秒自动遮蔽（遮蔽后恢复「已保存」脱敏占位）
+    function showKeyPlaintext(ctx, plainKey) {
+        const row = ctx.btn.closest('.pkey-row');
+        if (!row) return;
+        const input = row.querySelector('.pkey-input');
+        input.type = 'text';
+        input.value = plainKey;
+        input.classList.add('border-warning');
+        ctx.btn.innerHTML = '<i class="fa-solid fa-eye-slash me-1"></i>隐藏';
+        ctx.btn.onclick = function () { hideKeyPlaintext(ctx); };
+        if (keyRevealTimer) clearTimeout(keyRevealTimer);
+        keyRevealTimer = setTimeout(function () { hideKeyPlaintext(ctx); }, 30000);
+        showToast('明文已显示（30 秒后自动遮蔽），操作已记入审计日志', true, true);
+    }
+
+    function hideKeyPlaintext(ctx) {
+        const row = ctx.btn.closest('.pkey-row');
+        if (!row) return;
+        if (keyRevealTimer) { clearTimeout(keyRevealTimer); keyRevealTimer = null; }
+        const input = row.querySelector('.pkey-input');
+        input.type = 'password';
+        input.value = row.dataset.keyset ? '已保存' : '';
+        input.classList.remove('border-warning');
+        ctx.btn.innerHTML = '<i class="fa-solid fa-eye me-1"></i>查看';
+        ctx.btn.onclick = function () { revealPlatformKey(ctx.btn, ctx.pid); };
+    }
+
+    // ===== 平台 API 管理（新增/编辑/删除）=====
+
+    const UAPI_FORMATTERS = {{ (uapi_formatters or [])|tojson }};
+    let apiEditCtx = { pid: '', originalId: null };   // 当前编辑上下文
+
+    function showApiEditModal(pid, apiId) {
+        const p = PLATFORMS_DATA.find(x => x.id === pid);
+        if (!p) { showToast('平台不存在', false); return; }
+        apiEditCtx = { pid, originalId: apiId || null };
+        const api = apiId ? ((p.apis || []).find(a => a.id === apiId)) : null;
+        document.getElementById('apiEditTitle').innerHTML = api
+            ? '<i class="fa-solid fa-pen-to-square me-2 text-primary"></i>编辑平台 API'
+            : '<i class="fa-solid fa-plus me-2 text-success"></i>新增平台 API';
+        document.getElementById('aeName').value = api ? (api.name || '') : '';
+        document.getElementById('aeMethod').value = api ? (api.method || 'GET') : 'GET';
+        document.getElementById('aePath').value = api ? (api.path || '') : '';
+        document.getElementById('aeDesc').value = api ? (api.desc || '') : '';
+        document.getElementById('aeCredits').value = (api && api.credits != null) ? api.credits : '';
+        const fmtSel = document.getElementById('aeFormatter');
+        fmtSel.innerHTML = '<option value="">（不格式化，展示原始 JSON）</option>' +
+            UAPI_FORMATTERS.map(f => `<option value="${esc(f)}"${api && api.formatter === f ? ' selected' : ''}>${esc(f)}</option>`).join('');
+        renderApiParamRows(api ? (api.params || []) : []);
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('apiEditModal')).show();
+    }
+
+    // 参数定义行动态渲染（新增/编辑共用）
+    function renderApiParamRows(params) {
+        const box = document.getElementById('aeParamsBox');
+        box.querySelectorAll('.ae-param-row').forEach(r => r.remove());
+        (params || []).forEach(p => apiParamAddRow(p));
+    }
+
+    function apiParamAddRow(p) {
+        p = p || {};
+        const box = document.getElementById('aeParamsBox');
+        const empty = box.querySelector('.small.text-muted');
+        if (empty) empty.remove();
+        const row = document.createElement('div');
+        row.className = 'd-flex flex-wrap align-items-center gap-1 mb-1 ae-param-row';
+        row.innerHTML = `
+            <input type="text" class="form-control form-control-sm ae-p-name" style="width:130px" placeholder="参数名（如 city）" value="${esc(p.name || '')}" maxlength="50">
+            <input type="text" class="form-control form-control-sm ae-p-label" style="width:130px" placeholder="显示标签（如 城市）" value="${esc(p.label || '')}" maxlength="60">
+            <select class="form-select form-select-sm ae-p-type" style="width:96px">
+                ${['text', 'number', 'bool', 'select', 'date', 'datetime'].map(t =>
+                    `<option value="${t}"${(p.type || 'text') === t ? ' selected' : ''}>${t}</option>`).join('')}
+            </select>
+            <input type="text" class="form-control form-control-sm ae-p-example" style="width:110px" placeholder="示例/预填值" value="${esc(p.example || '')}" maxlength="200">
+            <div class="form-check" title="必填"><input type="checkbox" class="form-check-input ae-p-required"${p.required ? ' checked' : ''}></div>
+            <button class="btn btn-outline-danger btn-sm rounded-pill px-2" type="button" title="移除该参数" onclick="this.closest('.ae-param-row').remove()"><i class="fa-solid fa-xmark"></i></button>`;
+        box.appendChild(row);
+    }
+
+    function collectApiParams() {
+        const out = [];
+        document.querySelectorAll('#aeParamsBox .ae-param-row').forEach(r => {
+            const name = r.querySelector('.ae-p-name').value.trim();
+            if (!name) return;
+            out.push({
+                name,
+                label: r.querySelector('.ae-p-label').value.trim() || name,
+                type: r.querySelector('.ae-p-type').value,
+                example: r.querySelector('.ae-p-example').value.trim(),
+                required: r.querySelector('.ae-p-required').checked,
+            });
+        });
+        return out;
+    }
+
+    function submitApiEdit() {
+        const name = document.getElementById('aeName').value.trim();
+        const method = document.getElementById('aeMethod').value;
+        const path = document.getElementById('aePath').value.trim();
+        if (!name) { showToast('API 名称不能为空', false); return; }
+        if (!path) { showToast('接口路径不能为空', false); return; }
+        const api = {
+            name, method, path,
+            desc: document.getElementById('aeDesc').value.trim(),
+            credits: document.getElementById('aeCredits').value || null,
+            params: collectApiParams(),
+            formatter: document.getElementById('aeFormatter').value,
+            source: 'manual',
+        };
+        const body = { platform_id: apiEditCtx.pid, api, original_id: apiEditCtx.originalId };
+        postJSON('/admin/service-config/platform/apis/save', body)
+            .then(data => {
+                if (data && data.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('apiEditModal')).hide();
+                    showToast('API 已保存，页面即将刷新');
+                    setTimeout(() => window.location.reload(), 600);
+                } else {
+                    showToast(data.message || '保存失败', false);
+                }
+            })
+            .catch(() => showToast('网络错误，保存失败', false));
+    }
+
+    // ===== 删除平台 API（二次确认）=====
+    let delApiPending = null;
+    function deletePlatformApi(pid, apiId, name) {
+        document.getElementById('delApiBody').innerHTML =
+            `确定删除平台 API <b>【${esc(name)}】</b> 吗？<br><span class="text-muted small">删除后不可恢复（如需恢复可重新手动新增或导入）。</span>`;
+        delApiPending = { pid, apiId };
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('delApiModal')).show();
+    }
+
+    document.getElementById('delApiBtn').addEventListener('click', function () {
+        const ctx = delApiPending;
+        delApiPending = null;
+        const inst = bootstrap.Modal.getInstance(document.getElementById('delApiModal'));
+        if (inst) inst.hide();
+        if (!ctx) return;
+        postJSON('/admin/service-config/platform/apis/delete', { platform_id: ctx.pid, api_id: ctx.apiId })
+            .then(data => {
+                if (data && data.success) {
+                    showToast('API 已删除，页面即将刷新');
+                    setTimeout(() => window.location.reload(), 600);
+                } else showToast(data.message || '删除失败', false);
+            })
+            .catch(() => showToast('网络错误，删除失败', false));
+    });
+
+    // ===== 一键获取 API 目录（探测 OpenAPI / 手动粘贴 + 预览勾选导入）=====
+    let discoverCtx = { pid: '', apis: [] };   // 本轮发现的条目缓存（导入提交用）
+
+    function discoverPlatformApis(pid) {
+        discoverCtx = { pid, apis: [] };
+        const p = PLATFORMS_DATA.find(x => x.id === pid);
+        document.getElementById('discoverPasted').value = '';
+        document.getElementById('discoverResultBox').innerHTML =
+            `<div class="small text-muted py-3 text-center">平台 <b>${esc(pid)}</b>：点击「开始获取」探测 OpenAPI 规范…</div>`;
+        document.getElementById('discoverImportBtn').classList.add('d-none');
+        document.getElementById('discoverGoBtn').classList.remove('d-none');
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('discoverModal')).show();
+    }
+
+    function doDiscover() {
+        const pid = discoverCtx.pid;
+        const pasted = document.getElementById('discoverPasted').value.trim();
+        const btn = document.getElementById('discoverGoBtn');
+        const box = document.getElementById('discoverResultBox');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin me-1"></i>获取中…';
+        box.innerHTML = '<div class="small text-muted py-3 text-center"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在探测/解析，请稍候（最多约 30 秒）…</div>';
+        postJSON('/admin/service-config/platform/apis/discover', { platform_id: pid, pasted })
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-magnifying-glass me-1"></i>开始获取';
+                if (!data || !data.success) {
+                    box.innerHTML = `<div class="alert alert-warning py-2 small mb-0"><i class="fa-solid fa-triangle-exclamation me-1"></i>${esc((data && data.message) || '获取失败')}</div>`;
+                    return;
+                }
+                if (data.builtin) {
+                    box.innerHTML = `<div class="alert alert-success py-2 small mb-0"><i class="fa-solid fa-circle-check me-1"></i>${esc(data.message)}</div>`;
+                    return;
+                }
+                discoverCtx.apis = data.apis || [];
+                renderDiscoverResults(data);
+            })
+            .catch(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-magnifying-glass me-1"></i>开始获取';
+                box.innerHTML = '<div class="alert alert-danger py-2 small mb-0">网络错误，获取失败</div>';
+            });
+    }
+
+    function renderDiscoverResults(data) {
+        const box = document.getElementById('discoverResultBox');
+        const apis = data.apis || [];
+        const existsCount = apis.filter(a => a.exists).length;
+        let html = `<div class="small text-muted mb-2">${esc(data.message || '')}` +
+            (data.source_url ? ` · <code class="text-muted">${esc(data.source_url)}</code>` : '') +
+            (existsCount ? ` · 已存在 ${existsCount} 条（不可勾选）` : '') + '</div>';
+        html += '<div class="list-group">';
+        apis.forEach((a, i) => {
+            html += `
+                <label class="list-group-item d-flex align-items-center gap-2 py-1 px-2 ${a.exists ? 'opacity-50' : ''}">
+                    <input type="checkbox" class="form-check-input mt-0 disc-cb" data-idx="${i}" ${a.exists ? 'disabled' : 'checked'}
+                           onchange="updateDiscoverCount()">
+                    <span class="badge ${a.method === 'POST' ? 'bg-dark' : 'bg-primary'} text-white">${esc(a.method)}</span>
+                    <span class="fw-semibold text-nowrap">${esc(a.name)}</span>
+                    <code class="small text-muted text-truncate">${esc(a.path)}</code>
+                    ${a.credits ? `<span class="badge bg-warning-subtle text-warning-emphasis border">${a.credits} 积分</span>` : ''}
+                    ${a.exists ? '<span class="badge bg-secondary-subtle text-secondary border ms-auto">已存在</span>' : ''}
+                </label>`;
+        });
+        html += '</div>';
+        box.innerHTML = html;
+        document.getElementById('discoverGoBtn').classList.remove('d-none');
+        document.getElementById('discoverImportBtn').classList.remove('d-none');
+        updateDiscoverCount();
+    }
+
+    function updateDiscoverCount() {
+        const sel = document.querySelectorAll('.disc-cb:checked').length;
+        document.getElementById('discoverSelCount').textContent = sel;
+        document.getElementById('discoverImportBtn').disabled = sel === 0;
+    }
+
+    function doImportDiscovered() {
+        const picked = [];
+        document.querySelectorAll('.disc-cb:checked').forEach(cb => {
+            const a = discoverCtx.apis[parseInt(cb.dataset.idx, 10)];
+            if (a) picked.push(a);
+        });
+        if (!picked.length) { showToast('请先勾选要导入的接口', false); return; }
+        const btn = document.getElementById('discoverImportBtn');
+        btn.disabled = true;
+        postJSON('/admin/service-config/platform/apis/import', { platform_id: discoverCtx.pid, apis: picked })
+            .then(data => {
+                if (data && data.success) {
+                    bootstrap.Modal.getInstance(document.getElementById('discoverModal')).hide();
+                    showToast(`${data.message}，页面即将刷新`);
+                    setTimeout(() => window.location.reload(), 900);
+                } else {
+                    btn.disabled = false;
+                    showToast(data.message || '导入失败', false);
+                }
+            })
+            .catch(() => { btn.disabled = false; showToast('网络错误，导入失败', false); });
+    }
+
     // ===================== V10.11.47/48 uapis.cn API 目录 =====================
 
     const UAPI_CATALOG = {{ uapi_catalog|tojson }};
@@ -820,6 +1411,20 @@
         return null;
     }
 
+    // V10.11.51 统一解析：静态目录 API（value=api_id，平台 uapis）与平台自定义 API（value='@pid|aid'）
+    function findApiDef(val) {
+        if (val && val.startsWith('@')) {
+            const sep = val.indexOf('|');
+            const pid = val.slice(1, sep);
+            const aid = val.slice(sep + 1);
+            const p = PLATFORMS_DATA.find(x => x.id === pid);
+            const a = p ? ((p.apis || []).find(x => x.id === aid)) : null;
+            return a ? { api: a, platformId: pid, apiId: aid, isCustom: true } : null;
+        }
+        const api = findApiById(val);
+        return api ? { api, platformId: 'uapis', apiId: val, isCustom: false } : null;
+    }
+
     // 目录一键测试：高积分（>4）或敏感接口先二次确认
     let uapiTestPending = null;
     function testUapiApi(apiId, btn) {
@@ -888,6 +1493,19 @@
             });
             if (og.children.length) sel.appendChild(og);
         });
+        // V10.11.51 平台自定义/导入 API（含内置平台的扩展条目）：value 编码 '@平台ID|API ID'
+        PLATFORMS_DATA.forEach(p => {
+            if (!(p.apis || []).length) return;
+            const og = document.createElement('optgroup');
+            og.label = `平台自定义 · ${p.name}`;
+            p.apis.forEach(a => {
+                const op = document.createElement('option');
+                op.value = '@' + p.id + '|' + a.id;
+                op.textContent = `${a.name}（${a.method} ${a.path}）`;
+                og.appendChild(op);
+            });
+            sel.appendChild(og);
+        });
         if (selectedId) sel.value = selectedId;
         onPlaygroundApiChange();
     }
@@ -900,7 +1518,8 @@
     // 切换 API：刷新说明与动态参数表单（预置 test_params 预填，哨兵解析为当前日期/时间）
     function onPlaygroundApiChange() {
         const sel = document.getElementById('pgApiSelect');
-        const api = findApiById(sel.value);
+        const def = findApiDef(sel.value);
+        const api = def ? def.api : null;
         const desc = document.getElementById('pgApiDesc');
         const box = document.getElementById('pgParamsBox');
         document.getElementById('pgResultBox').innerHTML = '';
@@ -908,6 +1527,7 @@
         const creditTxt = api.credits === 0 ? '永久免费' : ((api.credits != null) ? `${api.credits} 积分/次` : '价格未公示');
         desc.innerHTML = `<b>${esc(api.name)}</b> · ${api.method} <code>${esc(api.path)}</code> · ` +
             `<span class="badge bg-warning-subtle text-warning-emphasis border">${creditTxt}</span>` +
+            (def.isCustom ? ` <span class="badge bg-info-subtle text-info border">平台：${esc(def.platformId)}</span>` : '') +
             (api.desc ? `<br><span class="text-muted">${esc(api.desc)}</span>` : '');
         box.innerHTML = '';
         (api.params || []).forEach(p => {
@@ -945,8 +1565,9 @@
 
     function runPlayground() {
         const sel = document.getElementById('pgApiSelect');
-        const api = findApiById(sel.value);
-        if (!api) { showToast('请先选择 API', false); return; }
+        const def = findApiDef(sel.value);
+        if (!def) { showToast('请先选择 API', false); return; }
+        const api = def.api;
         const params = {};
         let convertErr = '';
         document.querySelectorAll('#pgParamsBox .pg-param').forEach(el => {
@@ -965,7 +1586,7 @@
         }
         const resultBox = document.getElementById('pgResultBox');
         resultBox.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在调用，请稍候...</span>';
-        postJSON('/admin/service-config/uapi/playground', { api_id: api.id, params })
+        postJSON('/admin/service-config/uapi/playground', { api_id: def.apiId, platform_id: def.platformId, params })
             .then(data => { renderPlaygroundResult(data); })
             .catch(() => { resultBox.innerHTML = '<span class="text-danger">调用失败（网络错误）</span>'; });
     }

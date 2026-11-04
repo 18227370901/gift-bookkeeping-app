@@ -130,9 +130,13 @@ def _platform_headers(platform_id=uapi_catalog.UAPI_PLATFORM_ID, key=None):
 
 
 def _platform_base_url(platform_id=uapi_catalog.UAPI_PLATFORM_ID):
-    """平台 base_url：注册表优先，缺省回落官方默认"""
+    """平台 base_url：注册表优先；内置平台缺省回落官方默认，自定义平台无地址返回空串（由调用方报错）"""
     p = service_config.get_platform(platform_id)
-    return (p or {}).get('base_url') or uapi_catalog.UAPI_DEFAULT_BASE_URL
+    if p and str(p.get('base_url') or '').strip():
+        return str(p['base_url']).strip()
+    if platform_id == uapi_catalog.UAPI_PLATFORM_ID:
+        return uapi_catalog.UAPI_DEFAULT_BASE_URL
+    return ''
 
 
 def _platform_enabled(platform_id=uapi_catalog.UAPI_PLATFORM_ID):
@@ -287,10 +291,6 @@ def call_uapi(api_id, params=None, timeout=None, full_url=None,
         return result + (None,) if return_key else result
 
     method = (api.get('method') or 'GET').upper()
-    url = full_url or uapi_catalog.build_full_url(api_id, base_url=_platform_base_url(platform_id))
-    if not url:
-        result = (False, None, 500, 'API 地址构造失败（平台 base_url 未配置）')
-        return result + (None,) if return_key else result
 
     # 参数清洗：None/空串剔除，bool 转 'true'/'false'，其余转字符串
     clean = {}
@@ -304,6 +304,16 @@ def call_uapi(api_id, params=None, timeout=None, full_url=None,
                 clean[k] = v
         else:
             clean[k] = str(v)
+
+    # V10.11.51：路径占位符（/api/raw/{id} 等）先替换进 URL，再从 query 剔除
+    url = full_url or uapi_catalog.build_full_url(
+        api_id, base_url=_platform_base_url(platform_id), params=clean)
+    if not url:
+        result = (False, None, 500, 'API 地址构造失败（平台 base_url 未配置）')
+        return result + (None,) if return_key else result
+    path_params = uapi_catalog.path_param_names(api_id)
+    if path_params and not full_url:
+        clean = {k: v for k, v in clean.items() if k not in path_params}
 
     if method == 'POST':
         ok, payload, status, message, key_label = _request_with_key_rotation(
@@ -327,12 +337,16 @@ def call_uapi_raw(api_id, params=None, timeout=None, platform_id=None):
         return {'status': 503, 'message': 'API 平台已停用', 'is_json': False,
                 'is_image': False, 'content_type': '', 'json': None, 'image_b64': '', 'body_text': ''}
     method = (api.get('method') or 'GET').upper()
-    url = uapi_catalog.build_full_url(api_id, base_url=_platform_base_url(platform_id))
     clean = {}
     for k, v in (params or {}).items():
         if v is None or v == '':
             continue
         clean[k] = ('true' if v else 'false') if isinstance(v, bool) else str(v)
+    # V10.11.51：路径占位符替换（{id}/{task_id}）并从 query 剔除
+    url = uapi_catalog.build_full_url(api_id, base_url=_platform_base_url(platform_id), params=clean)
+    path_params = uapi_catalog.path_param_names(api_id)
+    if path_params:
+        clean = {k: v for k, v in clean.items() if k not in path_params}
     out = {'status': 0, 'content_type': '', 'is_json': False, 'json': None,
            'is_image': False, 'image_b64': '', 'body_text': '', 'message': ''}
     try:
@@ -348,6 +362,149 @@ def call_uapi_raw(api_id, params=None, timeout=None, platform_id=None):
             out['image_b64'] = base64.b64encode(resp.content or b'').decode('ascii')
         else:
             text = (resp.text or '')[:60000]  # 防超长响应撑爆页面
+            out['body_text'] = text
+            if 'json' in ctype:
+                try:
+                    out['is_json'] = True
+                    out['json'] = resp.json()
+                except ValueError:
+                    pass
+            elif not out['body_text']:
+                out['body_text'] = '（空响应体）'
+        if not (200 <= resp.status_code < 300):
+            out['message'] = extract_error_message(resp.status_code,
+                                                   out['json'] if out['is_json'] else None)
+    except Exception as e:
+        out['status'] = 0
+        out['message'] = '网络请求失败：%s' % str(e)[:150]
+    return out
+
+
+# ===================== V10.11.51 平台自定义 API 调用 =====================
+
+def resolve_api_def(platform_id, api_id):
+    """统一解析 API 定义：先查内置静态目录，再查平台自定义/导入条目
+    返回 API 定义 dict 或 None（供一键测试与试验台共用）"""
+    api = uapi_catalog.get_api(api_id)
+    if api:
+        return api
+    try:
+        return service_config.get_platform_api(platform_id, api_id)
+    except Exception:
+        return None
+
+
+def _join_platform_url(base_url, path, params=None):
+    """平台 base_url + 自定义 path 拼接（支持 {id} 类路径占位符）"""
+    import re as _re
+    base = str(base_url or '').rstrip('/')
+    p = str(path or '')
+    if not p.startswith('/'):
+        p = '/' + p
+    if params:
+        for ph in _re.findall(r'\{(\w+)\}', p):
+            if ph in params and params[ph] not in (None, ''):
+                p = p.replace('{' + ph + '}', str(params[ph]))
+    return base + p
+
+
+def _same_origin(url, base_url):
+    """SSRF 防线：最终 URL 的 scheme+host 必须与平台 base_url 完全一致"""
+    from urllib.parse import urlparse
+    u = urlparse(str(url or ''))
+    b = urlparse(str(base_url or ''))
+    return (u.scheme in ('http', 'https') and u.scheme == b.scheme and u.netloc == b.netloc)
+
+
+def call_platform_api(platform_id, api_def, params=None, timeout=None, return_key=False):
+    """调用平台自定义/导入的 API（脱离静态目录 api_id）
+    - 认证与 Key 轮换复用现有引擎（与 call_uapi 行为一致）
+    - 返回 (ok, payload, status, message[, key_label])；平台停用返回 503"""
+    platform_id = platform_id or uapi_catalog.UAPI_PLATFORM_ID
+    if not _platform_enabled(platform_id):
+        result = (False, None, 503, 'API 平台「%s」已停用，请先启用' % platform_id)
+        return result + (None,) if return_key else result
+    if not isinstance(api_def, dict):
+        result = (False, None, 400, '未知 API 定义')
+        return result + (None,) if return_key else result
+
+    method = str(api_def.get('method') or 'GET').upper()
+    clean = {}
+    for k, v in (params or {}).items():
+        if v is None:
+            continue
+        if isinstance(v, bool):
+            clean[k] = 'true' if v else 'false'
+        elif isinstance(v, str):
+            if v != '':
+                clean[k] = v
+        else:
+            clean[k] = str(v)
+
+    base_url = _platform_base_url(platform_id)
+    url = _join_platform_url(base_url, api_def.get('path'), clean)
+    if not _same_origin(url, base_url):
+        result = (False, None, 400, '接口地址越界（最终 URL 与平台地址不同源，已拦截）')
+        return result + (None,) if return_key else result
+    path_params = service_config_path_params(api_def.get('path'))
+    if path_params:
+        clean = {k: v for k, v in clean.items() if k not in path_params}
+
+    if method == 'POST':
+        ok, payload, status, message, key_label = _request_with_key_rotation(
+            'POST', url, params=None, json_body=clean, timeout=timeout, platform_id=platform_id)
+    else:
+        ok, payload, status, message, key_label = _request_with_key_rotation(
+            'GET', url, params=clean, timeout=timeout, platform_id=platform_id)
+    return (ok, payload, status, message, key_label) if return_key else (ok, payload, status, message)
+
+
+def service_config_path_params(path):
+    """提取 path 中的 {xxx} 占位符名（局部实现，避免循环依赖 service_config）"""
+    import re as _re
+    return set(_re.findall(r'\{(\w+)\}', str(path or '')))
+
+
+def call_platform_api_raw(platform_id, api_def, params=None, timeout=None):
+    """平台自定义 API 的试验台原始调用（单次、不轮换、不重试，便于定位真实错误）
+    返回结构与 call_uapi_raw 一致"""
+    platform_id = platform_id or uapi_catalog.UAPI_PLATFORM_ID
+    empty = {'status': 0, 'content_type': '', 'is_json': False, 'json': None,
+             'is_image': False, 'image_b64': '', 'body_text': '', 'message': ''}
+    if not _platform_enabled(platform_id):
+        empty.update({'status': 503, 'message': 'API 平台已停用'})
+        return empty
+    if not isinstance(api_def, dict):
+        empty.update({'status': 400, 'message': '未知 API 定义'})
+        return empty
+    method = str(api_def.get('method') or 'GET').upper()
+    clean = {}
+    for k, v in (params or {}).items():
+        if v is None or v == '':
+            continue
+        clean[k] = ('true' if v else 'false') if isinstance(v, bool) else str(v)
+    base_url = _platform_base_url(platform_id)
+    url = _join_platform_url(base_url, api_def.get('path'), clean)
+    if not _same_origin(url, base_url):
+        empty.update({'status': 400, 'message': '接口地址越界（最终 URL 与平台地址不同源，已拦截）'})
+        return empty
+    path_params = service_config_path_params(api_def.get('path'))
+    if path_params:
+        clean = {k: v for k, v in clean.items() if k not in path_params}
+    out = dict(empty)
+    try:
+        resp = _http_request(method, url, params=(clean if method == 'GET' else None),
+                             json_body=(clean if method == 'POST' else None),
+                             timeout=timeout or (5, 15),
+                             headers=_platform_headers(platform_id))
+        out['status'] = resp.status_code
+        ctype = (resp.headers.get('Content-Type') or '').lower()
+        out['content_type'] = ctype
+        if 'image/' in ctype:
+            out['is_image'] = True
+            out['image_b64'] = base64.b64encode(resp.content or b'').decode('ascii')
+        else:
+            text = (resp.text or '')[:60000]
             out['body_text'] = text
             if 'json' in ctype:
                 try:

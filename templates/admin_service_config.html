@@ -29,6 +29,18 @@
     /* 行内图标按钮紧凑化（F6） */
     .btn-icon { padding: .22rem .45rem; }
     .btn-icon i { font-size: .8rem; }
+    /* V10.11.51 端点行两行卡片布局：第一行地址与状态，第二行操作按钮（图标+文字，不依赖悬停） */
+    .endpoint-row { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem .6rem .35rem; background: var(--bs-body-bg); }
+    .endpoint-row .endpoint-main { row-gap: .25rem; }
+    .endpoint-row .endpoint-url { flex: 1 1 300px; min-width: 0; }
+    .endpoint-row .endpoint-actions { gap: .25rem; margin-top: .35rem; padding-top: .35rem; border-top: 1px dashed var(--bs-border-color-translucent, rgba(33,37,41,.15)); }
+    .btn-act { padding: .12rem .5rem; font-size: .78rem; white-space: nowrap; }
+    .btn-act i { font-size: .72rem; }
+    .endpoint-row .row-select-cb { margin: 0; }
+    .platform-badge, .endpoint-row .switch-wrap { flex: 0 0 auto; }
+    /* 只读模式提示条（非管理员） */
+    .ro-banner { border-left: 4px solid var(--bs-primary); }
+    .ro-banner b { color: var(--bs-primary); }
     /* 未保存更改时「保存配置」按钮的强调态（F3） */
     #saveAllBtn.has-unsaved { border-color: #fd7e14; color: #fd7e14; }
     #saveAllBtn.has-unsaved:hover { background-color: #fd7e14; color: #fff; }
@@ -51,13 +63,23 @@
     </li>
 </ul>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h4 class="mb-0"><i class="fa-solid fa-server me-2 text-primary"></i>系统核心服务</h4>
     <div>
+        {% if current_user.is_admin %}
         <button class="btn btn-outline-secondary rounded-pill px-3" onclick="restoreDefaults()"><i class="fa-solid fa-rotate-left me-1"></i>恢复默认值</button>
         <button class="btn btn-primary rounded-pill px-4 shadow-sm" id="saveAllBtn" onclick="saveAllConfig()"><i class="fa-solid fa-floppy-disk me-1"></i>保存配置</button>
+        {% else %}
+        <span class="badge bg-primary-subtle text-primary border px-3 py-2"><i class="fa-solid fa-user-shield me-1"></i>只读浏览模式</span>
+        {% endif %}
     </div>
 </div>
+{% if not current_user.is_admin %}
+<div class="alert alert-light border ro-banner small mb-3 rounded-3">
+    <i class="fa-solid fa-eye me-1 text-primary"></i>
+    <b>只读授权</b>：你被授权查看本页（端点组、启停状态与平台绑定）；修改、测试与增删操作仅限管理员。
+</div>
+{% endif %}
 
 <!-- 轻量提示（toast，替代原生 alert，顶部居中显示） -->
 <div class="toast-container position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 2050;">
@@ -121,7 +143,11 @@
 <div class="card shadow-sm rounded-4 mb-4" data-group="{{ gname }}">
     <div class="card-header d-flex justify-content-between align-items-center rounded-top-4">
         <span><i class="fa-solid {{ ICONS[gname] }} me-2 text-primary"></i><b>{{ gcfg.label }}</b><span class="group-status-badge ms-2"></span></span>
+        {% if current_user.is_admin %}
         <button class="btn btn-outline-info btn-sm rounded-pill" onclick="testGroup('{{ gname }}')"><i class="fa-solid fa-vial me-1"></i>测试全部启用</button>
+        {% else %}
+        <span class="small text-muted"><i class="fa-solid fa-eye me-1"></i>只读浏览</span>
+        {% endif %}
     </div>
     <div class="card-body">
         {% if gname == 'ai_search' %}
@@ -131,7 +157,8 @@
         </div>
         {% endif %}
 
-        {# V10.11.24 批量操作条：全选本组 + 批量启用/停用（勾选行级选择框后生效） #}
+        {# V10.11.24 批量操作条：全选本组 + 批量启用/停用（勾选行级选择框后生效；仅管理员） #}
+        {% if current_user.is_admin %}
         <div class="d-flex align-items-center flex-wrap gap-2 mb-2 endpoint-batch-bar">
             <div class="form-check mb-0">
                 <input type="checkbox" class="form-check-input group-select-all" id="selectAll_{{ gname }}" onchange="toggleGroupSelectAll('{{ gname }}', this)">
@@ -145,46 +172,56 @@
             </button>
             <span class="small text-muted"><i class="fa-solid fa-circle-info me-1"></i>勾选后批量切换开关并保存生效（全停用时该组服务将降级）；单行开关切换即即时保存入库</span>
         </div>
+        {% endif %}
 
         <div class="endpoint-list">
             {% for ep in gcfg.urls %}
             {# V10.11.23 行默认只读锁定：点「编辑」解锁地址输入框；启用开关可直接操作不受限 #}
-            {# V10.11.24 首列新增选择框（单选/多选）；启用开关升级为滑动开关图标（form-switch） #}
-            <div class="input-group input-group-sm mb-2 endpoint-row" data-platform="{{ ep.platform or '' }}">
-                <span class="input-group-text" title="勾选参与批量操作（可单选/多选）">
-                    <input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)">
-                </span>
-                <input type="text" class="form-control endpoint-url" value="{{ ep.url }}" placeholder="{{ gcfg.defaults[0].url if gcfg.defaults else '如：https://...' }}" readonly aria-label="端点地址" title="默认只读锁定，点击「编辑」解锁">
-                {# V10.11.48 平台端点徽章（只读态）：端点绑定平台自动附加该平台 Key 池认证 #}
-                {% if gname in PLATFORM_GROUPS %}
-                <span class="input-group-text platform-badge {{ '' if ep.platform else 'd-none' }}" title="平台端点（调用时自动附加该平台 Key 池认证并按 UApiPro 兼容协议解析）">
-                    <i class="fa-solid fa-cloud me-1 text-primary"></i><span class="small">{{ (platforms | selectattr('id', 'equalto', ep.platform) | list | first).name if (ep.platform and (platforms | selectattr('id', 'equalto', ep.platform) | list)) else '平台' }}</span>
-                </span>
-                {# 编辑态平台选择（与编辑按钮联动显隐）：动态列出全部已注册平台 #}
-                <span class="input-group-text p-0 platform-edit d-none" title="端点绑定的 API 平台（认证与协议）">
-                    <select class="form-select form-select-sm border-0 endpoint-platform" style="min-width:130px" aria-label="端点平台">
-                        <option value="" {% if not ep.platform %}selected{% endif %}>直连·无认证</option>
-                        {% for p in platforms %}
-                        <option value="{{ p.id }}" {% if ep.platform == p.id %}selected{% endif %}>{{ p.name }}</option>
-                        {% endfor %}
-                    </select>
-                </span>
+            {# V10.11.51 两行卡片布局：第一行地址/平台/开关，第二行操作按钮（图标+文字，移动端与触屏不再依赖悬停提示） #}
+            {# 非管理员只读渲染：隐藏全部操作按钮，开关不可切换 #}
+            <div class="endpoint-row mb-2" data-platform="{{ ep.platform or '' }}">
+                <div class="d-flex align-items-center flex-wrap gap-2 endpoint-main">
+                    {% if current_user.is_admin %}
+                    <input type="checkbox" class="form-check-input row-select-cb" aria-label="勾选参与批量操作" title="勾选参与批量操作（可单选/多选）" onchange="onRowSelectChange(this)">
+                    {% endif %}
+                    <input type="text" class="form-control form-control-sm endpoint-url" value="{{ ep.url }}" placeholder="{{ gcfg.defaults[0].url if gcfg.defaults else '如：https://...' }}" readonly aria-label="端点地址" title="默认只读锁定，点击「编辑」解锁">
+                    {# V10.11.48 平台端点徽章（只读态）：端点绑定平台自动附加该平台 Key 池认证 #}
+                    {% if gname in PLATFORM_GROUPS %}
+                    <span class="badge bg-primary-subtle text-primary border platform-badge {{ '' if ep.platform else 'd-none' }}" title="平台端点（调用时自动附加该平台 Key 池认证并按 UApiPro 兼容协议解析）">
+                        <i class="fa-solid fa-cloud me-1"></i>{{ (platforms | selectattr('id', 'equalto', ep.platform) | list | first).name if (ep.platform and (platforms | selectattr('id', 'equalto', ep.platform) | list)) else '平台' }}
+                    </span>
+                    {# 编辑态平台选择（与编辑按钮联动显隐）：动态列出全部已注册平台 #}
+                    <span class="platform-edit d-none" title="端点绑定的 API 平台（认证与协议）">
+                        <select class="form-select form-select-sm endpoint-platform" style="min-width:150px" aria-label="端点平台">
+                            <option value="" {% if not ep.platform %}selected{% endif %}>直连·无认证</option>
+                            {% for p in platforms %}
+                            <option value="{{ p.id }}" {% if ep.platform == p.id %}selected{% endif %}>{{ p.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </span>
+                    {% endif %}
+                    <span class="d-flex align-items-center switch-wrap" title="启用该端点（停用则不参与故障转移；切换后即时保存生效）">
+                        <span class="small text-muted me-1">{{ '启用' if ep.enabled else '停用' }}</span>
+                        <div class="form-check form-switch mb-0">
+                            <input type="checkbox" class="form-check-input endpoint-enabled" role="switch" {% if ep.enabled %}checked{% endif %} {% if not current_user.is_admin %}disabled{% endif %}>
+                        </div>
+                    </span>
+                </div>
+                {% if current_user.is_admin %}
+                <div class="d-flex justify-content-end flex-wrap endpoint-actions">
+                    <button class="btn btn-outline-success btn-act" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
+                    <button class="btn btn-outline-secondary btn-act btn-up" type="button" title="上移" onclick="moveRow(this, -1)" {% if loop.first %}disabled{% endif %}><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
+                    <button class="btn btn-outline-secondary btn-act btn-down" type="button" title="下移" onclick="moveRow(this, 1)" {% if loop.last %}disabled{% endif %}><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
+                    <button class="btn btn-outline-primary btn-act btn-edit" type="button" title="编辑此端点（解锁地址输入框）" onclick="editEndpointRow(this)"><i class="fa-solid fa-pen-to-square me-1"></i>编辑</button>
+                    <button class="btn btn-outline-danger btn-act btn-del" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
+                    <button class="btn btn-success btn-act btn-save text-nowrap d-none" type="button" title="保存此端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
+                    <button class="btn btn-outline-danger btn-act btn-cancel text-nowrap d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>
+                </div>
                 {% endif %}
-                <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；V10.11.25 切换后即时保存生效）">
-                    <div class="form-check form-switch mb-0">
-                        <input type="checkbox" class="form-check-input endpoint-enabled" role="switch" {% if ep.enabled %}checked{% endif %}>
-                    </div>
-                </span>
-                <button class="btn btn-outline-success btn-icon" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial"></i></button>
-                <button class="btn btn-outline-secondary btn-icon btn-up" type="button" title="上移" onclick="moveRow(this, -1)" {% if loop.first %}disabled{% endif %}><i class="fa-solid fa-arrow-up"></i></button>
-                <button class="btn btn-outline-secondary btn-icon btn-down" type="button" title="下移" onclick="moveRow(this, 1)" {% if loop.last %}disabled{% endif %}><i class="fa-solid fa-arrow-down"></i></button>
-                <button class="btn btn-outline-primary btn-icon btn-edit" type="button" title="编辑此端点（解锁地址输入框）" onclick="editEndpointRow(this)"><i class="fa-solid fa-pen-to-square"></i></button>
-                <button class="btn btn-outline-danger btn-icon btn-del" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can"></i></button>
-                <button class="btn btn-success btn-icon btn-save text-nowrap d-none" type="button" title="保存此端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk"></i></button>
-                <button class="btn btn-outline-danger btn-icon btn-cancel text-nowrap d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark"></i></button>
             </div>
             {% endfor %}
         </div>
+        {% if current_user.is_admin %}
         <button class="btn btn-outline-success btn-sm mt-1" type="button" onclick="addEndpointRow('{{ gname }}')"><i class="fa-solid fa-plus me-1"></i>添加端点</button>
 
         <div class="row g-2 mt-2">
@@ -200,6 +237,18 @@
                 <span class="small text-muted"><i class="fa-regular fa-lightbulb me-1"></i>全部端点失败后按重试次数整轮重试；每次请求超时按上值。</span>
             </div>
         </div>
+        {% else %}
+        <div class="row g-2 mt-2">
+            <div class="col-6 col-md-3">
+                <label class="form-label small text-muted mb-1">请求超时（秒）</label>
+                <input type="number" class="form-control form-control-sm timeout-input" value="{{ gcfg.timeout }}" disabled>
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label small text-muted mb-1">重试次数（轮）</label>
+                <input type="number" class="form-control form-control-sm retries-input" value="{{ gcfg.retries }}" disabled>
+            </div>
+        </div>
+        {% endif %}
 
         {% if GROUP_HINTS.get(gname) %}
         <div class="small text-muted mt-2"><i class="fa-solid fa-circle-exclamation me-1"></i>{{ GROUP_HINTS[gname] }}</div>
@@ -231,6 +280,8 @@
     // V10.11.47：支持平台端点的组（天气/节假日双协议混排）与平台注册表数据
     const PLATFORM_GROUPS = {{ PLATFORM_GROUPS|tojson }};
     const PLATFORMS_DATA = {{ platforms|tojson }};
+    // V10.11.51：只读授权模式——非管理员动态新增行不渲染操作按钮与选择框
+    const IS_ADMIN = {{ 'true' if current_user.is_admin else 'false' }};
 
     function getCsrfToken() {
         const m = document.querySelector('meta[name="csrf-token"]');
@@ -299,7 +350,7 @@
         }
         badge.className = 'row-result small ms-1 ' + (ok ? 'text-success' : 'text-danger');
         badge.innerHTML = (ok ? '✓ ' : '✗ ') + esc(msg) + (ms != null ? `（${ms}ms）` : '');
-        btn.innerHTML = ok ? '<i class="fa-solid fa-circle-check"></i>' : '<i class="fa-solid fa-triangle-exclamation"></i>';
+        btn.innerHTML = ok ? '<i class="fa-solid fa-circle-check me-1"></i>测试' : '<i class="fa-solid fa-triangle-exclamation me-1"></i>测试';
         btn.classList.remove('btn-outline-success', 'btn-outline-danger');
         btn.classList.add(ok ? 'btn-outline-success' : 'btn-outline-danger');
     }
@@ -397,22 +448,33 @@
             ? ((PLATFORMS_DATA.find(p => p.id === platform) || {}).name || platform)
             : '';
         const row = document.createElement('div');
-        row.className = 'input-group input-group-sm mb-2 endpoint-row' + (isNew ? ' is-new-row' : '');
+        row.className = 'endpoint-row mb-2' + (isNew ? ' is-new-row' : '');
         row.dataset.platform = platform;
+        // V10.11.51 两行卡片：第一行地址/平台/开关，第二行操作按钮（图标+文字）
+        const selectCb = IS_ADMIN
+            ? '<input type="checkbox" class="form-check-input row-select-cb" aria-label="勾选参与批量操作" title="勾选参与批量操作（可单选/多选）" onchange="onRowSelectChange(this)">' : '';
         const platformHtml = supportPlatform ? `
-            <span class="input-group-text platform-badge ${platform ? '' : 'd-none'}" title="平台端点（调用时自动附加该平台 Key 池认证并按 UApiPro 兼容协议解析）"><i class="fa-solid fa-cloud me-1 text-primary"></i><span class="small">${esc(platName)}</span></span>
-            <span class="input-group-text p-0 platform-edit d-none" title="端点绑定的 API 平台（认证与协议）"><select class="form-select form-select-sm border-0 endpoint-platform" style="min-width:130px" aria-label="端点平台">${endpointPlatformOptionsHtml(platform)}</select></span>` : '';
+            <span class="badge bg-primary-subtle text-primary border platform-badge ${platform ? '' : 'd-none'}" title="平台端点（调用时自动附加该平台 Key 池认证并按 UApiPro 兼容协议解析）"><i class="fa-solid fa-cloud me-1"></i>${esc(platName || '平台')}</span>
+            <span class="platform-edit d-none" title="端点绑定的 API 平台（认证与协议）"><select class="form-select form-select-sm endpoint-platform" style="min-width:150px" aria-label="端点平台">${endpointPlatformOptionsHtml(platform)}</select></span>` : '';
+        const actionsHtml = IS_ADMIN ? `
+            <div class="d-flex justify-content-end flex-wrap endpoint-actions">
+                <button class="btn btn-outline-success btn-act" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial me-1"></i>测试</button>
+                <button class="btn btn-outline-secondary btn-act btn-up" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up me-1"></i>上移</button>
+                <button class="btn btn-outline-secondary btn-act btn-down" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down me-1"></i>下移</button>
+                <button class="btn btn-outline-primary btn-act btn-edit" type="button" title="编辑此端点（解锁地址输入框）" onclick="editEndpointRow(this)"><i class="fa-solid fa-pen-to-square me-1"></i>编辑</button>
+                <button class="btn btn-outline-danger btn-act btn-del" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can me-1"></i>删除</button>
+                <button class="btn btn-success btn-act btn-save text-nowrap d-none" type="button" title="保存此端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk me-1"></i>保存</button>
+                <button class="btn btn-outline-danger btn-act btn-cancel text-nowrap d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark me-1"></i>取消</button>
+            </div>` : '';
         row.innerHTML = `
-            <span class="input-group-text" title="勾选参与批量操作（可单选/多选）"><input type="checkbox" class="form-check-input mt-0 row-select-cb" onchange="onRowSelectChange(this)"></span>
-            <input type="text" class="form-control endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}" readonly aria-label="端点地址" title="默认只读锁定，点击「编辑」解锁">${platformHtml}
-            <span class="input-group-text d-flex align-items-center" title="启用该端点（停用则不参与故障转移；V10.11.25 切换后即时保存生效）"><div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input endpoint-enabled" role="switch" ${enabled !== false ? 'checked' : ''}></div></span>
-            <button class="btn btn-outline-success btn-icon" type="button" title="测试该端点" onclick="testEndpointRow(this)"><i class="fa-solid fa-vial"></i></button>
-            <button class="btn btn-outline-secondary btn-icon btn-up" type="button" title="上移" onclick="moveRow(this, -1)"><i class="fa-solid fa-arrow-up"></i></button>
-            <button class="btn btn-outline-secondary btn-icon btn-down" type="button" title="下移" onclick="moveRow(this, 1)"><i class="fa-solid fa-arrow-down"></i></button>
-            <button class="btn btn-outline-primary btn-icon btn-edit" type="button" title="编辑此端点（解锁地址输入框）" onclick="editEndpointRow(this)"><i class="fa-solid fa-pen-to-square"></i></button>
-            <button class="btn btn-outline-danger btn-icon btn-del" type="button" title="删除" onclick="delRow(this)"><i class="fa-solid fa-trash-can"></i></button>
-            <button class="btn btn-success btn-icon btn-save d-none" type="button" title="保存此端点" onclick="saveEndpointRow(this)"><i class="fa-solid fa-floppy-disk"></i></button>
-            <button class="btn btn-outline-danger btn-icon btn-cancel d-none" type="button" title="取消编辑（还原该行）" onclick="cancelEndpointRow(this)"><i class="fa-solid fa-xmark"></i></button>`;
+            <div class="d-flex align-items-center flex-wrap gap-2 endpoint-main">
+                ${selectCb}
+                <input type="text" class="form-control form-control-sm endpoint-url" value="${esc(url)}" placeholder="${esc(placeholder || '如：https://...')}" readonly aria-label="端点地址" title="默认只读锁定，点击「编辑」解锁">${platformHtml}
+                <span class="d-flex align-items-center switch-wrap" title="启用该端点（停用则不参与故障转移；切换后即时保存生效）">
+                    <span class="small text-muted me-1">${enabled !== false ? '启用' : '停用'}</span>
+                    <div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input endpoint-enabled" role="switch" ${enabled !== false ? 'checked' : ''} ${IS_ADMIN ? '' : 'disabled'}></div>
+                </span>
+            </div>${actionsHtml}`;
         return row;
     }
 
@@ -493,7 +555,7 @@
             let tag = row.querySelector('.off-tag');
             if (off && !tag) {
                 tag = document.createElement('span');
-                tag.className = 'input-group-text off-tag';
+                tag.className = 'badge bg-secondary-subtle text-secondary border off-tag';
                 tag.textContent = '已停用';
                 const url = row.querySelector('.endpoint-url');
                 if (url) url.parentElement.insertBefore(tag, url.nextSibling);
@@ -788,6 +850,12 @@
     document.addEventListener('change', function (e) {
         const cb = e.target;
         if (!cb || !cb.classList || !cb.classList.contains('endpoint-enabled')) return;
+        // V10.11.51：同步行内「启用/停用」可见文字（两行卡片布局）
+        const wrap = cb.closest('.switch-wrap');
+        if (wrap) {
+            const label = wrap.querySelector('.small.text-muted');
+            if (label) label.textContent = cb.checked ? '启用' : '停用';
+        }
         const card = cb.closest('.card');
         const gname = card ? card.dataset.group : '';
         if (!gname) return;

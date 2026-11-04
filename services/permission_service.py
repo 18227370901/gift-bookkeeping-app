@@ -24,6 +24,7 @@ PERMISSION_GROUPS = [
             {"key": "menu_webhooks", "name": "告警通知", "desc": "访问消息通知与系统告警记录", "default": False},
             {"key": "menu_backups", "name": "数据备份", "desc": "访问 WebDAV 云端备份与快照中心", "default": False},
             {"key": "menu_tools", "name": "实用工具", "desc": "快递物流跟踪与手机号归属地查询（消耗外部接口积分）", "default": False},
+            {"key": "menu_service_config", "name": "外部接口配置", "desc": "只读浏览外部接口端点、API 平台与目录（编辑与 Key 管理仍仅管理员）", "default": False},
         ]
     },
     {

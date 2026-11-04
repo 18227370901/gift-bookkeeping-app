@@ -1,6 +1,6 @@
 # 人情礼金记账系统 版本发布与全量变更日志 (Changelog)
 
-> 本文档收录了系统自诞生起从 V2 直至最新 V10.11.50 的全量版本演进、技术重构与历史缺陷修复档案。    
+> 本文档收录了系统自诞生起从 V2 直至最新 V10.11.51 的全量版本演进、技术重构与历史缺陷修复档案。    
 > 快速上手与使用指引请参见项目主页 [README.md](../README.md)。
 
 ---
@@ -9,6 +9,33 @@
 
 
 > 💡 **版本与架构升级公告（最新）**：
+### 🧰 V10.11.51 接口广场六大优化：官方 OpenAPI 全量校正 + 两行卡片布局 + 平台编辑 + Key 明文查看 + 目录一键获取 + 平台 API 管理 (2026-11-04)
+
+- **核心变更与架构升级**（用户六项需求 + 核查中发现的官方契约偏差一并根治）：
+  1. **官方 OpenAPI 全量考证与数据校正（核查新发现，比需求更重要）**：实测发现 UApiPro 官方提供标准 OpenAPI 3.1.0 规范（`https://uapis.cn/openapi.json`，112 路径/21 分类），以此为准全量比对本地 110 条目录，**采用「校正表 + 运行时合并」机制**（`uapi_catalog.py` 新增 API_OVERRIDES / PARAM_RENAME / PARAM_DROP / PARAM_AUGMENT / TEST_PARAMS_OVERRIDES 五张表，原始定义保持原样可追溯可回滚）：
+     - **11 处路径/方法错误修复（原样调用直接 404）**：菜谱详情 `/food/recipe-detail`→`/food/recipe/detail`、食材详情同病（用户实测指出的「只能输入 id」问题即源于此——官方实为 name/code 二选一）；AES 高级加解密补斜杠；MD5 与答案之书官方仅 POST；快速敏感词检测实际路径 `/text/profanitycheck`；异步网页转 Markdown 实际 `/web/tomarkdown/async`（含 `{task_id}` 路径参数）；剪贴板三接口实际在 `/api/store`、`/api/get`、`/api/raw/{id}`；image_svg 补文件上传型标记、image_speechless 解除误标；
+     - **约 50 条接口参数补全**（官方有、本地缺）：热榜时光机/搜索 5 参数、随机数 4 参数、历史天气日期区间、GitHub 用户 7 参数、AI 模型列表 9 参数、翻译 to_lang、B 站评论 oid 等，全部带中文标签/类型/枚举选项，参数类型含日历（date/datetime）+ 时间戳自动转换；
+     - **15 处参数名对齐**（本地错名→官方名）：username→user、toLang→to_lang、word→q、text→keyword 等，test_params 同步改写；
+     - **路径占位符支持**：`build_full_url(api_id, params)` 支持 `/api/raw/{id}` 类路径参数替换并从 query 剔除（call_uapi / call_uapi_raw 双链路）；
+     - 本地与官方 POST 版重复的 2 条条目置 hidden（目录 110→108 可见，避免重复展示）。
+  2. **两页布局重构：两行卡片 + 万按钮全中文**：「系统核心服务」端点行与「API 平台」Key 行由单行 input-group（7 个纯图标按钮依赖悬停 title，移动端不可用）重构为**两行卡片**：第一行地址/Key（限宽 420px）+ 平台徽章 + 启停开关（旁附「启用/停用」可见文字）；第二行操作按钮全部 **图标+中文**（测试/查看/上移/下移/编辑/删除/保存/取消），目录行「文档」链接补字；行容器 class 与既有 JS 状态机完全兼容零改动。
+  3. **平台「编辑」功能**：平台卡片新增「编辑平台」模态（名称/Base URL/认证方式/自定义头名可改，ID 只读）；后端 `platform/save` 入参扩展 `name/auth_type/auth_key_name`（白名单校验），save_platform 增量合并；实测临时平台改名+改地址并重载持久化。
+  4. **API Key 池查看明文（安全分级）**：Key 行新增「查看」按钮——二次确认模态（警示围观与审计留痕）→ 后端 `key/reveal`（仅管理员 + 会话级 10 秒 3 次频率限制 + Webhook 推送）→ 页面明文显示并 **30 秒自动遮蔽**（可手动「隐藏」立即遮蔽）；**高敏强制审计**：明文查看直接写 OperationLog，不走业务日志模块白名单过滤（实测发现管理员白名单为 ledger/banquets/auth 时此类安全审计会被静默丢弃——已在十一启复验强制落库 PASS）；审计详情仅记平台与标签、绝不记录明文。
+  5. **平台 API 目录管理（新增能力，含一键获取三层策略）**：
+     - **数据模型**：平台档案内嵌 `apis` 数组（上限 200 条/平台），条目含名称/方法/路径/说明/积分/参数定义（六型：text/number/bool/select/date/datetime）/预填示例/可绑定 30 个内置格式化器，删除平台自动级联清理；
+     - **一键获取**：内置平台直接提示已含 108 条无需导入；自定义平台自动探测 6 个常见规范地址（`{origin}/openapi.json`、`{base}/swagger.json`、`{base}/v3/api-docs` 等，超时 4+8s/限 3MB/禁重定向）；手动粘贴 OpenAPI/Swagger JSON 兜底；解析支持参数提取（query/path/body schema + $ref 6 层）与 base 前缀剥离（避免 `/api/v1/api/v1/` 拼接）；预览勾选按 method+path 去重后导入（新模块 `services/uapi_openapi.py`）；
+     - **调用链路**：`uapi_client.resolve_api_def` 统一解析（静态目录→平台自定义），`call_platform_api/call_platform_api_raw` 复用平台认证与 Key 轮换引擎；一键测试与试验台双路由支持 `platform_id + api_id`（试验台下拉编码 `@平台ID|API ID`）；实测 httpbin 导入 API query 传参 HTTP 200、`/delay/{sec}` 路径占位符 HTTP 200、一键测试 200；
+     - **SSRF 三重防线**（实测 4 种攻击全拦截）：path 白名单正则（仅字母数字下划线连字符点斜杠花括号）+ 禁 `..`/`//`/`\` 传输协议，最终 URL origin 与平台 base_url 二次比对。
+  6. **普通用户只读授权（权限体系 75→76 项）**：新增 `menu_service_config` 权限键（默认关闭）：菜单门控接入双页面路由（admin_service_config / admin_service_platform），授权用户可**只读浏览**端点组、平台档案与 API 目录（模板按 is_admin 隐藏全部写按钮与测试入口、开关禁用、地址只读，页首「只读浏览模式」横幅）；11 个写接口后端全部硬校验管理员（实测普通用户 6 写接口全 403）；用户管理页单用户/批量弹窗新增复选框、权限工单可申请、导航按授权显隐「外部接口」入口。
+- **三体系同步**：WebHook（外部接口配置页矩阵行复用：端点/平台/API 增删改 + Key 明文查看共 5 事件列）、审计（AUDIT_MODULE_MAP 将 service_config 组前移至首位并扩充关键词「平台 API/API 目录/API Key/Key 明文」，避免「导入平台 API 目录」被 ledger 组「导入」截胡——实测 5 类 action 归组全对）、备份（平台 API 存 system_settings，管理员整库备份自动包含，既有警示文案继续适用）。
+- **验证与效果**：
+  - `py_compile` 8 文件 + 全站 Jinja 模板编译失败 0；服务两启平稳（企微 WS 认证正常）；
+  - 真实调用验证：`food/ingredient/detail?name=小白菜` HTTP 200 返回正确营养数据（校正后路径与参数实测通过）；worldtime 回归 200（静态目录兼容无破坏）；
+  - 浏览器全项验证：管理员双页两行卡片/按钮全中文/Key 查看（明文 45 位与库一致→隐藏后恢复「已保存」占位）/编辑平台回填正确/临时平台增改删全链路/粘贴导入 2 条 API（含「导入」徽章与试验台入口）/试验台调用成功；
+  - SSRF 验证：路径上跳/协议注入/双斜杠/反斜杠 4 项全部拦截并返回中文提示；
+  - 权限验证：ro_test 授权用户双页 200 且零写按钮渲染、6 写接口 403、admin 对照全通；审计强制落库复验 PASS（id=138 明文查看记录完整）；
+  - 测试平台 v1051-test 与用户 ro_test 已清理，临时脚本已回收。
+
 ### 🔐 V10.11.50 新增功能三体系关联同步治理：工具页权限门控 + Webhook 推送矩阵 + 审计白名单双重序列化缺陷根治 (2026-11-03)
 
 - **核心变更与架构升级**（全局梳理 V10.11.47~49 新增功能 × 用户权限管理/Webhook 配置/WebDAV 备份三大体系的关联缺口并同步闭环）：

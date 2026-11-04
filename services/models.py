@@ -136,7 +136,7 @@ class User(UserMixin, db.Model):
 
     def get_allowed_menus(self):
         if getattr(self, 'is_admin', False):
-            return ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools', 'admin_users', 'admin_logs', 'admin_broadcasts', 'admin_webhooks', 'admin_backups']
+            return ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools', 'service_config', 'admin_users', 'admin_logs', 'admin_broadcasts', 'admin_webhooks', 'admin_backups']
         raw = getattr(self, 'allowed_menus', '') or ''
         return [m.strip() for m in raw.split(',') if m.strip()]
 
@@ -154,7 +154,7 @@ class User(UserMixin, db.Model):
                 res = json.loads(raw)
             except Exception:
                 res = {}
-        ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools']
+        ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools', 'service_config']
         final_perms = {}
         for m in ALL_MENUS:
             val = res.get(m)
@@ -180,7 +180,7 @@ class User(UserMixin, db.Model):
     def set_menu_permissions(self, perms_dict):
         """设置各菜单独立数据权限配置"""
         clean_perms = {}
-        ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools']
+        ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools', 'service_config']
         for m in ALL_MENUS:
             val = perms_dict.get(m, 0) if isinstance(perms_dict, dict) else 0
             try:

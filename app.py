@@ -345,7 +345,10 @@ import json as _json_module
 # V10: 审计日志模块过滤映射——按 action 关键词归组
 # V10.11.50 新增 tools（实用工具：快递/手机归属地）与 service_config（外部接口/平台）两组，
 # 与权限/页面矩阵同步；service_config 置于 ai_assistant 之前避免 'API' 关键词截胡
+# V10.11.51 service_config 移至最前并补关键词：避免「导入平台 API 目录」被 ledger 组的
+# 「导入」关键词截胡、且平台 API/Key 明文操作必须归入外部接口审计模块
 AUDIT_MODULE_MAP = {
+    'service_config': ['外部接口', 'API 平台', '端点', '服务配置', '平台 API', 'API 目录', 'API Key', 'Key 明文'],
     'ledger': ['记录', '极简记账', '导入', '导出', '查询记录'],
     'banquets': ['大账本', '宴席', '分享链接'],
     'reconciliation': ['对账'],
@@ -357,7 +360,6 @@ AUDIT_MODULE_MAP = {
     'permission_tickets': ['工单', '权限申请'],
     'broadcasts': ['广播'],
     'tools': ['快递', '手机归属地', '实用工具'],
-    'service_config': ['外部接口', 'API 平台', '端点', '服务配置'],
     'ai_assistant': ['AI', '会话', '配置更新', '授权管理'],
     'auth': ['登录', '注册', '退出', '找回', '风控', '锁定'],
     'system': ['系统配置', '注册策略', '邀请', '日志'],
@@ -2850,7 +2852,7 @@ def admin_batch_user_permissions():
         menus_list = [m for m in menus_list if m != 'weather']
     allowed_menus_str = ",".join(menus_list)
 
-    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools']
+    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools', 'service_config']
     menu_perms = {}
     for m in ALL_MENUS:
         val = request.form.get(f'menu_perm_{m}')
@@ -3091,7 +3093,7 @@ def admin_update_user_permissions(user_id):
     user.allowed_menus = ",".join(menus_list)
 
     # 2. 各菜单独立数据权限更新
-    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools']
+    ALL_MENUS = ['ledger', 'dashboard', 'family', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'backups', 'weather', 'webhooks', 'tools', 'service_config']
     MENU_NAMES = {
         'ledger': '礼金账本',
         'dashboard': '数据分析',
@@ -3103,7 +3105,8 @@ def admin_update_user_permissions(user_id):
         'backups': 'WebDAV备份',
         'weather': '天气',
         'webhooks': 'Webhook通知',
-        'tools': '实用工具'
+        'tools': '实用工具',
+        'service_config': '外部接口配置'
     }
     PERM_LABELS = {
         0: '仅自身',

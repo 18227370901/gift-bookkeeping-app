@@ -738,6 +738,10 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             'tools_page': 'tools',
             'api_tools_express': 'tools',
             'api_tools_phone_lookup': 'tools',
+            # V10.11.51 外部接口配置双页只读授权：普通用户勾选后可只读浏览
+            # （端点/平台/目录）；所有写操作与 Key 明文查看在路由层仍仅管理员
+            'admin_service_config': 'service_config',
+            'admin_service_platform': 'service_config',
         }
         required_menu = menu_map.get(endpoint)
         if required_menu and hasattr(current_user, 'can_access_menu'):
@@ -755,7 +759,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     'webhooks': 'Webhook通知',
                     'admin_webhooks': 'Webhook通知',
                     'backups': 'WebDAV备份',
-                    'tools': '实用工具'
+                    'tools': '实用工具',
+                    'service_config': '外部接口配置'
                 }
                 m_name = menu_names.get(required_menu, '该功能')
                 if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
@@ -3243,10 +3248,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @login_required
     def admin_service_config():
         """管理员「系统核心服务」子页（V10.11.49 拆分）：地理编码/天气/空气质量/节假日/
-        企微长连接/AI 搜索 六组端点管理 + 一键测试；端点可绑定平台（下拉数据由 platforms 提供）"""
-        if not getattr(current_user, 'is_admin', False):
-            flash('权限不足', 'danger')
-            return redirect(url_for('index'))
+        企微长连接/AI 搜索 六组端点管理 + 一键测试；端点可绑定平台（下拉数据由 platforms 提供）
+        V10.11.51：改由 menu_map 门控——管理员直接放行；被授权「外部接口配置」的普通用户
+        可只读浏览（模板按 is_admin 隐藏全部写操作与测试按钮）"""
         from services.service_config import get_all_config, get_platforms_for_display
         return render_template('admin_service_config.html', cfg=get_all_config(),
                                platforms=get_platforms_for_display())
@@ -3254,18 +3258,18 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @app.route('/admin/service-config/platform', methods=['GET'])
     @login_required
     def admin_service_platform():
-        """管理员「多平台接口广场与可视化调试」子页（V10.11.49 从配置页拆分）：
+        """「多平台接口广场与可视化调试」子页（V10.11.49 从配置页拆分）：
         API 平台注册表（多平台多 Key 池轮换管理）+ uapis.cn 全量 API 目录
-        （一键真实测试/搜索筛选）+ API 试验台（动态填参可视化调试）"""
-        if not getattr(current_user, 'is_admin', False):
-            flash('权限不足', 'danger')
-            return redirect(url_for('index'))
+        （一键真实测试/搜索筛选）+ API 试验台（动态填参可视化调试）
+        V10.11.51：改由 menu_map 门控（管理员或被授权普通用户；后者只读渲染）"""
         from services.service_config import get_platforms_for_display
         from services.uapi_catalog import get_catalog_for_frontend, summary as uapi_summary
+        from services.uapi_client import FORMATTERS
         return render_template('admin_service_platform.html',
                                platforms=get_platforms_for_display(),
                                uapi_catalog=get_catalog_for_frontend(),
-                               uapi_summary=uapi_summary())
+                               uapi_summary=uapi_summary(),
+                               uapi_formatters=sorted(FORMATTERS.keys()))
 
     @app.route('/admin/service-config/save', methods=['POST'])
     @login_required
@@ -5025,6 +5029,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         ('webhooks', 'Webhook通知'),
         # V10.11.50 实用工具入工单申请范围：普通用户可自助申请，管理员审批即合并进 allowed_menus
         ('tools', '实用工具'),
+        # V10.11.51 外部接口只读授权入工单申请范围（审批通过 = 只读浏览权，写操作仍仅管理员）
+        ('service_config', '外部接口配置（只读）'),
     ]
 
     @app.route('/permission_tickets')
@@ -6055,11 +6061,28 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         - V10.11.48 联动：变更推送 Webhook system 事件 + 审计日志（含 Key 增删数量，不记明文）"""
         if not getattr(current_user, 'is_admin', False):
             return jsonify({'success': False, 'message': '权限不足'}), 403
-        from services.service_config import save_platform, get_platforms_for_display, MAX_KEYS_PER_PLATFORM
+        from services.service_config import save_platform, get_platforms_for_display, MAX_KEYS_PER_PLATFORM, AUTH_TYPES
         data = request.get_json(silent=True) or {}
         pid = str(data.get('id') or '').strip()
         if not pid:
             return jsonify({'success': False, 'message': '平台 ID 不能为空'}), 400
+        name = data.get('name')
+        if name is not None:
+            name = str(name).strip()
+            if not name:
+                return jsonify({'success': False, 'message': '平台名称不能为空'}), 400
+            if len(name) > 50:
+                return jsonify({'success': False, 'message': '平台名称最多 50 字'}), 400
+        auth_type = data.get('auth_type')
+        if auth_type is not None:
+            auth_type = str(auth_type).strip()
+            if auth_type not in AUTH_TYPES:
+                return jsonify({'success': False, 'message': '认证方式非法'}), 400
+        auth_key_name = data.get('auth_key_name')
+        if auth_key_name is not None:
+            auth_key_name = str(auth_key_name).strip()
+            if len(auth_key_name) > 50:
+                return jsonify({'success': False, 'message': '自定义头/参数名最多 50 字符'}), 400
         base_url = str(data.get('base_url') or '').strip()
         if base_url and not (base_url.startswith('http://') or base_url.startswith('https://')):
             return jsonify({'success': False, 'message': '平台地址必须以 http:// 或 https:// 开头'}), 400
@@ -6078,7 +6101,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         enabled = data.get('enabled')
         if enabled is not None and not isinstance(enabled, bool):
             enabled = None
-        ok = save_platform(pid, base_url=base_url or None, api_keys=api_keys, enabled=enabled)
+        ok = save_platform(pid, name=name, base_url=base_url or None, auth_type=auth_type,
+                           auth_key_name=auth_key_name, api_keys=api_keys, enabled=enabled)
         if not ok:
             return jsonify({'success': False, 'message': '未知平台或参数非法'}), 400
         # 平台配置变更后清理调用引擎进程缓存（避免旧认证结果混存）
@@ -6225,36 +6249,239 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                         'auth_mode': auth_mode, 'key_label': key_label,
                         'message': f'{message or "连接失败"}（{auth_mode}，HTTP {status}）'})
 
+    # ===================== V10.11.51 平台 Key 明文查看 / API 目录管理 =====================
+
+    @app.route('/admin/service-config/platform/key/reveal', methods=['POST'])
+    @login_required
+    def admin_service_config_platform_key_reveal():
+        """查看 API Key 明文（仅管理员；前端安全二次确认后调用；同会话 10 秒内最多 3 次；
+        全程审计（仅记平台与 Key 标签，明文绝不落日志）；响应仅本次请求携带，页面 30 秒后自动遮蔽"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get('id') or '').strip()
+        uid = str(data.get('uid') or '').strip()
+        if not pid or not uid:
+            return jsonify({'success': False, 'message': '平台与 Key 标识不能为空'}), 400
+        # 会话级频率限制：10 秒内最多 3 次（防批量拖取全池 Key）
+        import time as _t
+        now = _t.time()
+        hits = [t for t in (session.get('_key_reveal_hits') or []) if now - t < 10]
+        if len(hits) >= 3:
+            return jsonify({'success': False, 'message': '操作过于频繁（10 秒内最多 3 次），请稍后再试'}), 429
+        hits.append(now)
+        session['_key_reveal_hits'] = hits
+        from services.service_config import reveal_platform_key
+        got = reveal_platform_key(pid, uid)
+        if not got:
+            return jsonify({'success': False, 'message': 'Key 不存在或未设置'}), 404
+        # V10.11.51b 高敏操作审计：Key 明文查看属于安全审计，必须强制落库——
+        # 不走 log_action 的模块白名单过滤（管理员可能只勾选部分业务模块，
+        # 导致 service_config 组被过滤、明文查看无据可查；此处直接写 OperationLog）
+        try:
+            from services.models import db as _db, OperationLog
+            _db.session.add(OperationLog(
+                user_id=current_user.id, username=current_user.username,
+                action='查看 API Key 明文',
+                detail=f'操作人：{current_user.username} | 平台：{pid} | Key 标签：{got["label"]}（明文未记录）',
+                ip_address=(request.remote_addr or '')[:60]))
+            _db.session.commit()
+        except Exception:
+            try:
+                from services.models import db as _db
+                _db.session.rollback()
+            except Exception:
+                pass
+        _push_service_config_webhook(
+            '%s 查看了平台「%s」的 Key 明文' % (current_user.username, pid),
+            '操作人：%s | 页面：外部接口服务配置 | 操作：查看 API Key 明文（平台 %s，标签 %s，明文未记录）' % (
+                current_user.username, pid, got['label']))
+        return jsonify({'success': True, 'key': got['key'], 'label': got['label']})
+
+    @app.route('/admin/service-config/platform/apis/discover', methods=['POST'])
+    @login_required
+    def admin_service_config_platform_apis_discover():
+        """一键获取平台 API 目录（三层策略第一/二层）：
+        - 内置平台 uapis：返回静态目录提示（108 条已内置，无需导入）
+        - 自定义平台：按候选地址探测 OpenAPI/Swagger 规范并解析（只读 GET、禁重定向、3MB 上限）
+        返回条目仅预览不落库，由前端勾选后调用 import 接口导入"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get('platform_id') or '').strip()
+        from services.service_config import get_platform
+        platform = get_platform(pid)
+        if not platform:
+            return jsonify({'success': False, 'message': '平台不存在'}), 404
+        existing = set()
+        for a in (platform.get('apis') or []):
+            existing.add((str(a.get('method') or 'GET').upper(), str(a.get('path') or '')))
+        # 内置 uapis 平台：静态目录已是完整目录，直接提示
+        if pid == 'uapis':
+            from services import uapi_catalog
+            summary = uapi_catalog.summary()
+            return jsonify({'success': True, 'builtin': True,
+                            'apis': [],
+                            'message': ('该平台已内置 %d 个官方目录 API（%d 个永久免费），'
+                                        '无需重复导入；如官方目录之外还有接口，可用「新增 API」手动补充。'
+                                        % (summary['total'], summary['free']))})
+        base_url = str(platform.get('base_url') or '').strip()
+        if not (base_url.startswith('http://') or base_url.startswith('https://')):
+            return jsonify({'success': False, 'message': '平台地址未配置（需以 http:// 或 https:// 开头）'}), 400
+        from services.uapi_openapi import discover, parse_pasted
+        pasted = str(data.get('pasted') or '').strip()
+        result = parse_pasted(pasted, base_url=base_url) if pasted else discover(base_url)
+        if not result['ok']:
+            hint = '；可改用「手动粘贴 OpenAPI JSON」或「新增 API」' if not pasted else ''
+            return jsonify({'success': False, 'apis': [],
+                            'message': result['message'] + hint}), 200
+        apis = []
+        for a in result['apis']:
+            key = (a['method'], a['path'])
+            item = dict(a)
+            item.pop('_source_url', None)
+            item['exists'] = key in existing
+            apis.append(item)
+        return jsonify({'success': True, 'builtin': False, 'apis': apis,
+                        'source_url': result.get('source_url', ''),
+                        'message': result['message']})
+
+    @app.route('/admin/service-config/platform/apis/import', methods=['POST'])
+    @login_required
+    def admin_service_config_platform_apis_import():
+        """导入 API 目录（discover 预览勾选后提交，或手动粘贴解析后提交）
+        按 method+path 去重；上限 200 条/平台；审计与 Webhook 不记参数明文"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get('platform_id') or '').strip()
+        items = data.get('apis')
+        if not pid:
+            return jsonify({'success': False, 'message': '平台 ID 不能为空'}), 400
+        if not isinstance(items, list) or not items:
+            return jsonify({'success': False, 'message': '未选择任何接口'}), 400
+        if len(items) > 300:
+            return jsonify({'success': False, 'message': '单次导入最多 300 条'}), 400
+        from services.service_config import import_platform_apis
+        result = import_platform_apis(pid, items, source=str(data.get('source') or 'openapi'))
+        safe_log('导入平台 API 目录',
+                 f'操作人：{current_user.username} | 平台：{pid} | 新增 {result["added"]} 条、跳过 {result["skipped"]} 条',
+                 user=current_user)
+        _push_service_config_webhook(
+            '%s 导入平台「%s」API 目录（新增 %d 条）' % (current_user.username, pid, result['added']),
+            '操作人：%s | 页面：外部接口服务配置 | 操作：导入 API 目录 | 平台：%s | 新增 %d 条 / 跳过 %d 条' % (
+                current_user.username, pid, result['added'], result['skipped']))
+        return jsonify({'success': True, 'message': '导入完成：新增 %d 条、跳过 %d 条'
+                        % (result['added'], result['skipped']),
+                        'added': result['added'], 'skipped': result['skipped'],
+                        'errors': result['errors']})
+
+    @app.route('/admin/service-config/platform/apis/save', methods=['POST'])
+    @login_required
+    def admin_service_config_platform_apis_save():
+        """新增/更新单条平台 API（original_id 非空 = 编辑模式）
+        校验：path 站内相对路径白名单（禁止协议/上跳/反斜杠，防 SSRF）、参数名合法、上限 200 条/平台"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get('platform_id') or '').strip()
+        item = data.get('api')
+        original_id = str(data.get('original_id') or '').strip() or None
+        if not pid:
+            return jsonify({'success': False, 'message': '平台 ID 不能为空'}), 400
+        if not isinstance(item, dict):
+            return jsonify({'success': False, 'message': 'API 数据不能为空'}), 400
+        from services.service_config import save_platform_api
+        ok, err, entry = save_platform_api(pid, item, original_id=original_id)
+        if not ok:
+            return jsonify({'success': False, 'message': err}), 400
+        try:
+            from services import uapi_client
+            uapi_client.clear_cache()
+        except Exception:
+            pass
+        action = '更新' if original_id else '新增'
+        safe_log('%s平台 API' % action,
+                 f'操作人：{current_user.username} | 平台：{pid} | {entry["method"]} {entry["path"]}（{entry["name"]}）',
+                 user=current_user)
+        _push_service_config_webhook(
+            '%s %s 了平台「%s」的 API「%s」' % (current_user.username, action, pid, entry['name']),
+            '操作人：%s | 页面：外部接口服务配置 | 操作：%s平台 API | 平台：%s | %s %s' % (
+                current_user.username, action, pid, entry['method'], entry['path']))
+        return jsonify({'success': True, 'message': 'API 已%s' % action, 'api': entry})
+
+    @app.route('/admin/service-config/platform/apis/delete', methods=['POST'])
+    @login_required
+    def admin_service_config_platform_apis_delete():
+        """删除单条平台 API（前端二次确认；审计与 Webhook 同步）"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        data = request.get_json(silent=True) or {}
+        pid = str(data.get('platform_id') or '').strip()
+        api_id = str(data.get('api_id') or '').strip()
+        if not pid or not api_id:
+            return jsonify({'success': False, 'message': '平台与 API 标识不能为空'}), 400
+        from services.service_config import get_platform_api, delete_platform_api
+        entry = get_platform_api(pid, api_id)
+        if not entry:
+            return jsonify({'success': False, 'message': 'API 不存在'}), 404
+        ok, err = delete_platform_api(pid, api_id)
+        if not ok:
+            return jsonify({'success': False, 'message': err}), 400
+        safe_log('删除平台 API',
+                 f'操作人：{current_user.username} | 平台：{pid} | {entry["method"]} {entry["path"]}（{entry["name"]}）',
+                 user=current_user)
+        _push_service_config_webhook(
+            '%s 删除了平台「%s」的 API「%s」' % (current_user.username, pid, entry['name']),
+            '操作人：%s | 页面：外部接口服务配置 | 操作：删除平台 API | 平台：%s | %s %s' % (
+                current_user.username, pid, entry['method'], entry['path']))
+        return jsonify({'success': True, 'message': 'API 已删除'})
+
     @app.route('/admin/service-config/uapi/test', methods=['POST'])
     @login_required
     def admin_service_config_uapi_test():
-        """uapis.cn API 目录一键测试：按目录预置参数真实调用（哨兵参数自动替换为当前
-        日期/时间），高积分接口前端已二次确认；响应经 V10.11.48 美化层转为人类可读摘要"""
+        """API 目录一键测试：按预置参数真实调用（哨兵参数自动替换为当前日期/时间），
+        高积分接口前端已二次确认；响应经 V10.11.48 美化层转为人类可读摘要。
+        V10.11.51：支持 platform_id + 平台自定义 API（先查静态目录，再查平台 apis）"""
         if not getattr(current_user, 'is_admin', False):
             return jsonify({'success': False, 'message': '权限不足'}), 403
         from services import uapi_catalog, uapi_client
         data = request.get_json(silent=True) or {}
         api_id = str(data.get('api_id') or '').strip()
-        api = uapi_catalog.get_api(api_id)
+        platform_id = str(data.get('platform_id') or 'uapis').strip()
+        api = uapi_client.resolve_api_def(platform_id, api_id)
         if not api:
             return jsonify({'success': False, 'message': '未知 API'}), 400
+        is_custom = not uapi_catalog.get_api(api_id)
         if api.get('file_type'):
             return jsonify({'success': False, 'message': '文件上传型接口暂不支持在线测试，请参考官方文档'}), 400
         if api.get('stream'):
             return jsonify({'success': False, 'message': '流式响应接口暂不支持在线测试'}), 400
-        if api.get('test_params') is None:
+        if api.get('test_params') is None and not is_custom:
             return jsonify({'success': False, 'message': '该接口无预置测试参数，请通过「API 试验台」手动填参调用'}), 400
         # V10.11.48：哨兵参数解析（今天日期/当前时间戳/年份）+ 允许覆盖
         params = uapi_catalog.resolve_test_params(api)
         if isinstance(data.get('params'), dict) and data['params']:
             params.update({k: v for k, v in data['params'].items() if v not in (None, '')})
+        # 自定义 API 无预置参数时校验必填项，给出一键测试引导
+        if is_custom and not params:
+            missing = [p['name'] for p in (api.get('params') or [])
+                       if p.get('required') and not p.get('example')]
+            if missing:
+                return jsonify({'success': False, 'message': '必填参数 %s 无预置值，请通过「API 试验台」手动填参调用'
+                                % '、'.join(missing[:5])}), 400
         import time as _t
         start = _t.time()
-        ok, payload, status, message, key_label = uapi_client.call_uapi(
-            api_id, params=params, timeout=(5, 20), return_key=True)
+        if is_custom:
+            ok, payload, status, message, key_label = uapi_client.call_platform_api(
+                platform_id, api, params=params, timeout=(5, 20), return_key=True)
+        else:
+            ok, payload, status, message, key_label = uapi_client.call_uapi(
+                api_id, params=params, timeout=(5, 20), return_key=True)
         latency = int((_t.time() - start) * 1000)
         if ok:
-            formatted = uapi_client.format_uapi_result(api_id, payload)
+            fmt_key = (api.get('formatter') or '') if is_custom else api_id
+            formatted = uapi_client.format_uapi_result(fmt_key, payload) if fmt_key else None
             keys = list(payload.keys())[:8] if isinstance(payload, dict) else []
             return jsonify({'success': True, 'status': status, 'latency_ms': latency,
                             'message': f'调用成功（HTTP {status}，{latency}ms）',
@@ -6268,15 +6495,18 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     def admin_service_config_uapi_playground():
         """API 试验台：任意目录 API 动态填参实时调用，返回原始响应元信息
         （JSON 结构化 / 图片 base64 / 其他文本）+ V10.11.48 人类可读格式化摘要。
-        仅固定平台 base_url + 目录 path，不接受任意 URL，无 SSRF 面；参数值限长 2000 字符"""
+        仅固定平台 base_url + 目录 path，不接受任意 URL，无 SSRF 面；参数值限长 2000 字符。
+        V10.11.51：支持 platform_id + 平台自定义 API（路径越界拦截在 uapi_client 层）"""
         if not getattr(current_user, 'is_admin', False):
             return jsonify({'success': False, 'message': '权限不足'}), 403
         from services import uapi_catalog, uapi_client
         data = request.get_json(silent=True) or {}
         api_id = str(data.get('api_id') or '').strip()
-        api = uapi_catalog.get_api(api_id)
+        platform_id = str(data.get('platform_id') or 'uapis').strip()
+        api = uapi_client.resolve_api_def(platform_id, api_id)
         if not api:
             return jsonify({'success': False, 'message': '未知 API'}), 400
+        is_custom = not uapi_catalog.get_api(api_id)
         if api.get('file_type'):
             return jsonify({'success': False, 'message': '文件上传型接口暂不支持试验台，请参考官方文档调用'}), 400
         if api.get('stream'):
@@ -6290,10 +6520,14 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 return jsonify({'success': False, 'message': f'参数 {k} 过长（最多 2000 字符）'}), 400
             if sv != '':
                 params[k] = sv
-        result = uapi_client.call_uapi_raw(api_id, params=params, timeout=(5, 20))
+        if is_custom:
+            result = uapi_client.call_platform_api_raw(platform_id, api, params=params, timeout=(5, 20))
+        else:
+            result = uapi_client.call_uapi_raw(api_id, params=params, timeout=(5, 20))
         formatted = None
-        if result.get('is_json') and 200 <= (result.get('status') or 0) < 300:
-            formatted = uapi_client.format_uapi_result(api_id, result.get('json'))
+        fmt_key = (api.get('formatter') or '') if is_custom else api_id
+        if fmt_key and result.get('is_json') and 200 <= (result.get('status') or 0) < 300:
+            formatted = uapi_client.format_uapi_result(fmt_key, result.get('json'))
         return jsonify({'success': 200 <= (result.get('status') or 0) < 300,
                         'api_id': api_id, 'result': result, 'formatted': formatted})
 

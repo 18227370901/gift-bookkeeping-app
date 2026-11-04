@@ -243,6 +243,12 @@
                     </li>
                     {% endif %}
                     {% if not current_user.is_admin %}
+                    {# V10.11.51 外部接口只读授权：被授权普通用户显示独立入口（页面内为只读浏览） #}
+                    {% if current_user.can_access_menu('service_config') %}
+                    <li class="nav-item">
+                        <a class="nav-link text-warning" href="{{ url_for('admin_service_config') }}"><i class="fa-solid fa-server me-1"></i>外部接口</a>
+                    </li>
+                    {% endif %}
                     <li class="nav-item">
                         <a class="nav-link text-primary" href="{{ url_for('permission_tickets_view') }}"><i class="fa-solid fa-ticket me-1"></i>权限申请</a>
                     </li>

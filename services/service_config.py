@@ -104,6 +104,11 @@ AUTH_TYPES = ('none', 'bearer', 'header', 'query')
 KNOWN_PLATFORM_IDS = ('uapis',)
 # 单平台 Key 池上限（防误粘贴巨量行）
 MAX_KEYS_PER_PLATFORM = 10
+# V10.11.51 单平台自定义/导入 API 上限与字段长度限制（防超大 JSON 撑库）
+MAX_APIS_PER_PLATFORM = 200
+MAX_API_PATH_LEN = 500
+MAX_API_DESC_LEN = 500
+MAX_API_PARAMS = 40
 
 
 # ===================== 存储 key =====================
@@ -524,6 +529,270 @@ def _normalize_key_pool(raw_keys):
     return pool
 
 
+# ===================== V10.11.51 平台 API 目录（自定义 / OpenAPI 导入） =====================
+# 存储：平台档案内嵌 apis 数组（与平台同生命周期，删除平台自动清理）。
+# 用途：管理员为任意平台补充官方目录之外的接口；内置 uapis 的 apis 作为「扩展条目」
+# 与静态 110 条目录合并展示。调用链路见 uapi_client.resolve_api_def / call_platform_api。
+# 安全：path 仅允许站内相对路径（禁止协议、反斜杠、上跳），调用时二次校验 origin 防 SSRF。
+
+API_METHODS = ('GET', 'POST', 'PUT', 'DELETE', 'PATCH')
+API_PARAM_TYPES = ('text', 'number', 'bool', 'select', 'date', 'datetime')
+
+
+def _api_error(msg):
+    return False, msg
+
+
+def _validate_api_entry(item):
+    """校验单条平台 API 定义，返回 (ok, err)"""
+    import re as _re
+    if not isinstance(item, dict):
+        return _api_error('API 记录格式不正确')
+    name = str(item.get('name') or '').strip()
+    if not name:
+        return _api_error('API 名称不能为空')
+    if len(name) > 50:
+        return _api_error('API 名称最多 50 字')
+    method = str(item.get('method') or 'GET').strip().upper()
+    if method not in API_METHODS:
+        return _api_error('请求方法非法（仅支持 %s）' % '/'.join(API_METHODS))
+    path = str(item.get('path') or '').strip()
+    if not path:
+        return _api_error('接口路径不能为空')
+    if len(path) > MAX_API_PATH_LEN:
+        return _api_error('接口路径最多 %d 字符' % MAX_API_PATH_LEN)
+    if not _re.fullmatch(r'^/[A-Za-z0-9_\-./{}]*$', path):
+        return _api_error('接口路径必须以 / 开头，仅允许字母/数字/下划线/连字符/点/斜杠/花括号占位符')
+    if '..' in path or '//' in path or '\\' in path:
+        return _api_error('接口路径不能包含 ..、// 或反斜杠')
+    desc = str(item.get('desc') or '').strip()
+    if len(desc) > MAX_API_DESC_LEN:
+        return _api_error('接口说明最多 %d 字' % MAX_API_DESC_LEN)
+    params = item.get('params')
+    if params is not None and not isinstance(params, list):
+        return _api_error('参数定义格式不正确')
+    if isinstance(params, list):
+        if len(params) > MAX_API_PARAMS:
+            return _api_error('参数最多 %d 个' % MAX_API_PARAMS)
+        seen = set()
+        for p in params:
+            if not isinstance(p, dict):
+                return _api_error('参数项格式不正确')
+            pname = str(p.get('name') or '').strip()
+            if not pname:
+                return _api_error('参数名不能为空')
+            if not _re.fullmatch(r'^[A-Za-z_][A-Za-z0-9_.\-]{0,49}$', pname):
+                return _api_error('参数名「%s」不合法（字母开头，仅字母/数字/下划线/点/连字符）' % pname)
+            if pname in seen:
+                return _api_error('参数名重复：%s' % pname)
+            seen.add(pname)
+            ptype = str(p.get('type') or 'text').strip()
+            if ptype not in API_PARAM_TYPES:
+                return _api_error('参数「%s」类型非法' % pname)
+    credits = item.get('credits')
+    if credits not in (None, ''):
+        try:
+            credits = float(credits)
+            if credits < 0:
+                return _api_error('积分不能为负数')
+        except (TypeError, ValueError):
+            return _api_error('积分需为数字')
+    fmt = str(item.get('formatter') or '').strip()
+    if fmt:
+        try:
+            from services.uapi_client import FORMATTERS
+            if fmt not in FORMATTERS:
+                return _api_error('格式化器「%s」不存在' % fmt)
+        except Exception:
+            pass
+    return True, ''
+
+
+def _normalize_api_entry(item, source='manual'):
+    """把提交/导入的 API 定义规范化为统一结构（调用前需先 _validate_api_entry）"""
+    import uuid as _uuid
+    name = str(item.get('name') or '').strip()[:50]
+    method = str(item.get('method') or 'GET').strip().upper()
+    path = str(item.get('path') or '').strip()
+    desc = str(item.get('desc') or '').strip()[:MAX_API_DESC_LEN]
+    credits = item.get('credits')
+    if credits in (None, ''):
+        credits = None
+    else:
+        try:
+            credits = int(float(credits))
+        except (TypeError, ValueError):
+            credits = None
+    params = []
+    for p in (item.get('params') or []):
+        if not isinstance(p, dict):
+            continue
+        pname = str(p.get('name') or '').strip()
+        if not pname:
+            continue
+        params.append({
+            'name': pname[:50],
+            'label': str(p.get('label') or pname)[:60],
+            'type': str(p.get('type') or 'text').strip() or 'text',
+            'required': bool(p.get('required')),
+            'example': str(p.get('example') or '')[:200],
+            'options': [str(x)[:60] for x in (p.get('options') or [])][:60],
+            'convert': str(p.get('convert') or '').strip(),
+        })
+    test_params = item.get('test_params') if isinstance(item.get('test_params'), dict) else {}
+    test_params = {str(k)[:50]: str(v)[:200] for k, v in test_params.items() if v is not None}
+    return {
+        'id': str(item.get('id') or ('c' + _uuid.uuid4().hex[:10]))[:60],
+        'name': name,
+        'method': method,
+        'path': path,
+        'desc': desc,
+        'credits': credits,
+        'params': params,
+        'test_params': test_params,
+        'formatter': str(item.get('formatter') or '').strip()[:60],
+        'source': str(item.get('source') or source)[:20],
+    }
+
+
+def _normalize_api_list(raw):
+    """读取时的轻量清洗：只保留结构完整的条目，不做严格校验（避免历史脏数据导致整页不可用）"""
+    out = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        if not str(item.get('path') or '').strip() or not str(item.get('name') or '').strip():
+            continue
+        out.append(_normalize_api_entry(item, source=str(item.get('source') or 'manual')))
+        if len(out) >= MAX_APIS_PER_PLATFORM:
+            break
+    return out
+
+
+def get_platform_apis(pid):
+    """返回平台自定义/导入的 API 列表（副本，避免调用方误改缓存）"""
+    p = get_platform(pid)
+    if not p:
+        return []
+    return [dict(a) for a in (p.get('apis') or [])]
+
+
+def get_platform_api(pid, api_id):
+    """按平台内 API ID 获取单条定义"""
+    for a in get_platform_apis(pid):
+        if a['id'] == api_id:
+            return a
+    return None
+
+
+def _save_platform_apis(pid, apis):
+    """把 API 列表写回平台档案（内部函数）"""
+    platforms = get_platforms()
+    target = None
+    for p in platforms:
+        if p['id'] == pid:
+            target = p
+            break
+    if target is None:
+        return False
+    target['apis'] = apis
+    _persist_platforms(platforms)
+    return True
+
+
+def save_platform_api(pid, item, original_id=None):
+    """新增或更新一条平台 API（original_id 非空 = 更新该条，否则新增）
+    返回 (ok, err, entry)"""
+    pid = str(pid or '').strip()
+    if not get_platform(pid):
+        return False, '平台不存在', None
+    ok, err = _validate_api_entry(item)
+    if not ok:
+        return False, err, None
+    entry = _normalize_api_entry(item, source=str(item.get('source') or 'manual'))
+    apis = get_platform_apis(pid)
+    if original_id:
+        idx = next((i for i, a in enumerate(apis) if a['id'] == original_id), -1)
+        if idx < 0:
+            return False, '原 API 不存在', None
+        entry['id'] = original_id
+        # 更新时若 method+path 与其他条目冲突则拒绝
+        for i, a in enumerate(apis):
+            if i != idx and a['method'] == entry['method'] and a['path'] == entry['path']:
+                return False, '已存在相同方法与路径的接口：%s %s' % (entry['method'], entry['path']), None
+        apis[idx] = entry
+    else:
+        for a in apis:
+            if a['method'] == entry['method'] and a['path'] == entry['path']:
+                return False, '已存在相同方法与路径的接口：%s %s' % (entry['method'], entry['path']), None
+        if len(apis) >= MAX_APIS_PER_PLATFORM:
+            return False, '单平台最多 %d 个自定义接口' % MAX_APIS_PER_PLATFORM, None
+        apis.append(entry)
+    if not _save_platform_apis(pid, apis):
+        return False, '保存失败（平台档案写入异常）', None
+    return True, '', entry
+
+
+def delete_platform_api(pid, api_id):
+    """删除一条平台 API，返回 (ok, err)"""
+    pid = str(pid or '').strip()
+    apis = get_platform_apis(pid)
+    remain = [a for a in apis if a['id'] != api_id]
+    if len(remain) == len(apis):
+        return False, 'API 不存在'
+    if not _save_platform_apis(pid, remain):
+        return False, '删除失败（平台档案写入异常）'
+    return True, ''
+
+
+def import_platform_apis(pid, items, source='openapi'):
+    """批量导入 API（按 method+path 去重），返回 {added, skipped, errors, total}"""
+    pid = str(pid or '').strip()
+    if not get_platform(pid):
+        return {'added': 0, 'skipped': 0, 'errors': ['平台不存在'], 'total': 0}
+    apis = get_platform_apis(pid)
+    existing = {(a['method'], a['path']) for a in apis}
+    added, skipped, errors = 0, 0, []
+    batch_keys = set()
+    for raw in (items or []):
+        if not isinstance(raw, dict):
+            skipped += 1
+            continue
+        ok, err = _validate_api_entry(raw)
+        if not ok:
+            errors.append('%s %s：%s' % (raw.get('method') or 'GET', raw.get('path') or '?', err))
+            continue
+        entry = _normalize_api_entry(raw, source=source)
+        key = (entry['method'], entry['path'])
+        if key in existing or key in batch_keys:
+            skipped += 1
+            continue
+        if len(apis) >= MAX_APIS_PER_PLATFORM:
+            errors.append('已达单平台上限 %d 条，其余未导入' % MAX_APIS_PER_PLATFORM)
+            break
+        apis.append(entry)
+        batch_keys.add(key)
+        added += 1
+    if added:
+        _save_platform_apis(pid, apis)
+    return {'added': added, 'skipped': skipped, 'errors': errors[:20], 'total': added + skipped + len(errors)}
+
+
+def reveal_platform_key(pid, uid):
+    """读取指定 Key 明文（仅供路由层在管理员二次确认后调用；调用方必须写审计日志）
+    返回 {key, label} 或 None"""
+    p = get_platform(pid)
+    if not p:
+        return None
+    uid = str(uid or '').strip()
+    for k in (p.get('api_keys') or []):
+        if str(k.get('uid') or '') == uid and str(k.get('key') or '').strip():
+            return {'key': str(k['key']), 'label': str(k.get('label') or '')}
+    return None
+
+
 def get_platforms():
     """读取全部平台档案：库中记录与内置默认档案合并（内置平台缺失项由默认档案补全）
     V10.11.47 旧档案的单一 api_key 字符串自动升级为 Key 池 [{key, label:'默认', enabled:True}]（读取兼容，零迁移）
@@ -543,6 +812,7 @@ def get_platforms():
     for d in DEFAULT_PLATFORMS:
         rec = dict(d)
         rec['api_keys'] = list(d.get('api_keys') or [])
+        rec['apis'] = list(d.get('apis') or [])
         s = stored.pop(d['id'], None)
         if isinstance(s, dict):
             for k in ('name', 'base_url', 'auth_type', 'auth_key_name', 'enabled'):
@@ -554,6 +824,9 @@ def get_platforms():
             elif s.get('api_key'):
                 _uid = __import__('uuid').uuid4().hex[:12]
                 rec['api_keys'] = [{'key': str(s['api_key']), 'label': '默认', 'enabled': True, 'uid': _uid}]
+            # V10.11.51 平台 API 目录（自定义/导入条目）
+            if isinstance(s.get('apis'), list):
+                rec['apis'] = _normalize_api_list(s.get('apis'))
         result.append(rec)
     # 其余自定义平台（非内置）按库中记录原样加入
     for pid, s in stored.items():
@@ -570,6 +843,7 @@ def get_platforms():
             'auth_type': str(s.get('auth_type') or 'none'),
             'auth_key_name': str(s.get('auth_key_name') or ''),
             'api_keys': pool,
+            'apis': _normalize_api_list(s.get('apis')),
             'enabled': bool(s.get('enabled', True)),
             'builtin': False,
         })
@@ -708,6 +982,7 @@ def _persist_platforms(platforms):
             'id': p['id'], 'name': p['name'], 'base_url': p['base_url'],
             'auth_type': p['auth_type'], 'auth_key_name': p['auth_key_name'],
             'api_keys': p.get('api_keys') or [], 'enabled': bool(p.get('enabled', True)),
+            'apis': p.get('apis') or [],
         })
     _set_setting(PLATFORMS_KEY, json.dumps(stored, ensure_ascii=False))
 
@@ -770,6 +1045,8 @@ def get_platforms_for_display():
                      for k in pool],
             'key_count': len(pool),
             'key_enabled_count': sum(1 for k in pool if k.get('enabled')),
+            'apis': [dict(a) for a in (p.get('apis') or [])],
+            'api_count': len(p.get('apis') or []),
             'enabled': p['enabled'], 'builtin': p.get('builtin', False),
         })
     return out

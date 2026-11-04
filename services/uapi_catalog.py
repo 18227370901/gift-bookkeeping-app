@@ -762,6 +762,361 @@ APIS = [
          doc='https://uapis.cn/docs/api-reference/get-clipzy-raw'),
 ]
 
+# ===================== V10.11.51 官方 OpenAPI 校正表 =====================
+# 依据：https://uapis.cn/openapi.json（OpenAPI 3.1.0，2026-11-03 全量逐条核对）
+# 设计原则：不改动上方 110 条原始定义（保留历史可追溯），在读取时按本表校正，零破坏可回滚。
+#   1) API_OVERRIDES：修正路径/方法/文件型标记/隐藏重复项
+#   2) PARAM_RENAME：本地参数名 → 官方参数名（官方契约优先，test_params 同步改名）
+#   3) PARAM_DROP：确认无效的本地参数（官方规范中不存在且非兼容别名）
+#   4) PARAM_AUGMENT：补齐官方有、本地缺的参数（按官方顺序追加）
+
+API_OVERRIDES = {
+    # —— 方法与路径错误（原定义会 404 或方法不被接受）——
+    'text_md5': {'method': 'POST'},                       # 官方仅 POST /text/md5
+    'answerbook_ask': {'method': 'POST'},                   # 官方仅 POST /answerbook/ask
+    'text_aes_encrypt_advanced': {'path': '/text/aes/encrypt-advanced'},
+    'text_aes_decrypt_advanced': {'path': '/text/aes/decrypt-advanced'},
+    'sensitive_word_quick_check': {'path': '/text/profanitycheck'},
+    'web_to_markdown_async': {'path': '/web/tomarkdown/async'},
+    'web_tomarkdown_async_status': {'path': '/web/tomarkdown/async/{task_id}'},
+    'food_recipe_detail': {'path': '/food/recipe/detail'},
+    'food_ingredient_detail': {'path': '/food/ingredient/detail'},
+    'clipzy_store': {'path': '/api/store'},
+    'clipzy_get': {'path': '/api/get'},
+    'clipzy_raw': {'path': '/api/raw/{id}'},
+    # —— 文件型标记校正（multipart 上传，试验台与一键测试不支持）——
+    'image_svg': {'file_type': True},                      # 官方为 multipart/form-data
+    'image_speechless': {'file_type': False},               # 官方为 application/json，可在线测试
+    # —— 与官方 POST 版本重复的本地条目（目录中隐藏，保留定义避免旧引用失效）——
+    'text_md5_post': {'hidden': True},
+    'answerbook_ask_post': {'hidden': True},
+}
+
+# 本地参数名 → 官方参数名（仅列确认不一致的；兼容别名如 translate 的 fromLang 不在此列）
+PARAM_RENAME = {
+    'github_user': {'username': 'user'},
+    'translate_text': {'toLang': 'to_lang'},
+    'ai_translate': {'to': 'target_lang'},
+    'dictionary_suggest': {'word': 'q'},
+    'sensitive_word_analyze': {'text': 'keyword'},
+    'sensitive_word_analyze_query': {'text': 'keyword'},
+    'misc_district': {'name': 'keywords'},
+    'misc_movie_rating_rank': {'type': 'period'},
+    'watermark_producer_code': {'type': 'subject_type'},
+    'social_bilibili_archives': {'uid': 'mid', 'page': 'pn'},
+    'social_bilibili_replies': {'aid': 'oid', 'page': 'pn'},
+    'clipzy_store': {'text': 'compressedData'},
+}
+
+# 确认无效的本地参数（官方规范无此参数且无兼容说明）
+PARAM_DROP = {
+    'image_svg': ['svg'],                    # 官方改为 multipart 文件上传
+    'social_bilibili_replies': ['bvid'],     # 官方仅支持 oid / aid 语义的评论区 ID
+    'misc_weather_history': ['date'],        # 官方改为 start_date / end_date
+    'food_ingredient_detail': ['id'],        # 官方改为 name / code 二选一
+    'clipzy_get': ['key'],                   # 官方参数名为 id
+    'clipzy_raw': ['key'],                   # 官方参数名为 id
+}
+
+# 预置测试参数校正（None = 无可靠预置值，一键测试引导走试验台手填）
+TEST_PARAMS_OVERRIDES = {
+    'food_ingredient_detail': {'name': '小白菜'},
+    'clipzy_store': None,                    # compressedData 需 LZString 压缩后的真实串，无法预置
+    'social_bilibili_replies': None,         # oid 需真实评论区 ID
+}
+
+# 官方有、本地缺的参数（按接口补齐；已在上方重命名中覆盖的不重复列）
+PARAM_AUGMENT = {
+    'misc_hotboard': [
+        _p('time', '时光机时间点', 'datetime', convert='timestamp_ms'),
+        _p('keyword', '搜索关键词（配合起止时间）'),
+        _p('time_start', '搜索起始时间', 'datetime', convert='timestamp_ms'),
+        _p('time_end', '搜索结束时间', 'datetime', convert='timestamp_ms'),
+        _p('limit', '搜索返回条数上限（默认 50）', 'number'),
+    ],
+    'misc_lunartime': [
+        _p('timezone', '时区（如 Asia/Shanghai）', example='Asia/Shanghai'),
+    ],
+    'misc_randomnumber': [
+        _p('count', '生成数量', 'number', False, '5'),
+        _p('allow_repeat', '允许出现重复值', 'bool'),
+        _p('allow_decimal', '允许生成小数', 'bool'),
+        _p('decimal_places', '小数位数', 'number', False, '2'),
+    ],
+    'misc_holiday_calendar': [
+        _p('timezone', '时区（默认 Asia/Shanghai）', example='Asia/Shanghai'),
+        _p('nearby_limit', '邻近节日数量上限（默认 7）', 'number', False, '7'),
+    ],
+    'misc_district': [
+        _p('lat', '纬度（与 lng 配合反查）', 'number', False, '39.9'),
+        _p('lng', '经度（与 lat 配合反查）', 'number', False, '116.4'),
+        _p('level', '行政级别', 'select', False, '', ['province', 'city', 'district', 'street']),
+        _p('country', '国家代码', example='CN'),
+        _p('limit', '返回数量上限（默认 20）', 'number', False, '20'),
+    ],
+    'misc_date_diff': [
+        _p('format', '日期格式（可选）', example='YYYY-MM-DD'),
+    ],
+    'misc_weather_history': [
+        _p('adcode', '6 位行政区划代码', example='110000'),
+        _p('start_date', '起始日期', 'date', False, '2026-05-01'),
+        _p('end_date', '结束日期', 'date', False, '2026-05-31'),
+        _p('days', '回看天数（1-366）', 'number', False, '30'),
+        _p('lang', '返回语言', 'select', False, '', ['zh', 'en']),
+    ],
+    'misc_movie_rating_rank': [
+        _p('channel', '渠道', 'select', False, '', ['all', 'tv', 'web', 'cinema']),
+        _p('platform', '平台关键词（如 爱奇艺）', example='爱奇艺'),
+        _p('limit', '每渠道返回条数', 'number', False, '10'),
+        _p('date', '历史快照日期', 'date'),
+    ],
+    'saying_random': [
+        _p('scene', '推荐场景（mode=recommend 必填）', 'select', False, '',
+           ['dawn', 'morning', 'noon', 'afternoon', 'evening', 'night', 'deep-night',
+            'work', 'coding', 'meeting', 'relax', 'emo', 'philosophy']),
+        _p('source', '语料来源', 'select', False, '',
+           ['caoxingyu sentence', 'english historical quotes', 'quotable', 'sentences bundle']),
+        _p('category', '分类', 'select', False, '',
+           ['诗词', '古诗文', '文学', '哲学', '影视', '动画', '漫画', '游戏', '网络',
+            '网易云', '抖机灵', '原创', '其他']),
+        _p('tag', '标签', 'select', False, '',
+           ['emo', '励志', '治愈', '温柔', '热血', '哲理', '禅意', '爱情', '友情', '离别',
+            '相思', '怀旧', '成长', '工作', '编码', '放松', '幽默', '深夜', '清晨']),
+    ],
+    'text_aes_decrypt': [
+        _p('nonce', 'IV/Nonce（16 字符）', example='1234567890abcdef'),
+    ],
+    'text_aes_encrypt_advanced': [
+        _p('padding', '填充方式', 'select', False, 'PKCS7', ['PKCS7', 'ZERO', 'NONE']),
+        _p('output_format', '输出格式', 'select', False, 'base64', ['base64', 'hex']),
+    ],
+    'text_aes_decrypt_advanced': [
+        _p('padding', '填充方式（须与加密时一致）', 'select', False, 'NONE',
+           ['PKCS7', 'ZERO', 'NONE']),
+    ],
+    'text_markdown_to_html': [
+        _p('format', '响应格式', 'select', False, 'json', ['json', 'html']),
+        _p('sanitize', '过滤风险脚本（默认开启）', 'bool'),
+    ],
+    'text_markdown_to_pdf': [
+        _p('theme', '排版主题', 'select', False, 'github',
+           ['github', 'minimal', 'light', 'dark']),
+        _p('paper_size', '纸张大小', 'select', False, 'A4', ['A4', 'Letter']),
+    ],
+    'text_convert': [
+        _p('options', '扩展选项（预留，当前未使用）'),
+    ],
+    'watermark_producer_code': [
+        _p('binding', '证件类型', 'select', False, '',
+           ['uscc', 'id', 'phone', 'passport', 'netid']),
+        _p('identifier', '证件号', example='13800138000'),
+        _p('service_type', '服务角色', 'select', False, '', ['generation', 'propagation']),
+        _p('model_code', '4 位模型/应用码', example='0001'),
+        _p('code', '待校验的 27 位编码'),
+    ],
+    'social_bilibili_liveroom': [
+        _p('mid', '主播 MID（与 room_id 二选一）', example='672328094'),
+    ],
+    'social_bilibili_archives': [
+        _p('keywords', '搜索关键词'),
+        _p('orderby', '排序方式', 'select', False, 'pubdate', ['pubdate', 'views']),
+        _p('ps', '每页条数（默认 20）', 'number', False, '20'),
+    ],
+    'social_bilibili_videoinfo': [
+        _p('aid', 'AV 号（与 bvid 二选一）', example='75836761'),
+    ],
+    'social_bilibili_replies': [
+        _p('sort', '排序方式', 'select', False, 'hot', ['time', 'like', 'reply', 'hot']),
+        _p('ps', '每页条数（1-20）', 'number', False, '5'),
+    ],
+    'github_user': [
+        _p('activity', '包含贡献活动数据', 'bool'),
+        _p('activity_scope', '活动数据范围', 'select', False, '', ['all', 'organization']),
+        _p('org', '组织登录名'),
+        _p('pinned', '包含置顶仓库', 'bool'),
+        _p('repos', '包含公开仓库列表', 'bool'),
+        _p('repos_limit', '仓库数量上限', 'number'),
+    ],
+    'network_whois': [
+        _p('format', '返回格式', 'select', False, 'text', ['text', 'json']),
+    ],
+    'network_portscan': [
+        _p('protocol', '扫描协议', 'select', False, 'tcp', ['tcp', 'udp']),
+    ],
+    'dictionary_lookup': [
+        _p('lang', '目标语种', 'select', False, 'en', ['en']),
+        _p('engine', '查询引擎（local=高速模式）', 'select', False, '', ['local']),
+    ],
+    'dictionary_audio': [
+        _p('accent', '口音', 'select', False, 'uk', ['uk', 'us']),
+    ],
+    'dictionary_suggest': [
+        _p('limit', '候选词数量（默认 10）', 'number', False, '10'),
+    ],
+    'random_image': [
+        _p('category', '图片分类', 'select', False, 'acg',
+           ['acg', 'landscape', 'anime', 'pc_wallpaper', 'mobile_wallpaper',
+            'general_anime', 'ai_drawing', 'bq', 'furry']),
+    ],
+    'random_string': [
+        _p('type', '字符类型', 'select', False, 'alphanumeric',
+           ['numeric', 'lower', 'upper', 'alpha', 'alphanumeric', 'hex']),
+    ],
+    'game_steam_summary': [
+        _p('id', 'Steam 自定义 URL 名', example='gabelogannewell'),
+        _p('id3', 'Steam ID3', example='STEAM_0:0:22202'),
+        _p('key', 'Steam API Key（可选）'),
+    ],
+    'game_minecraft_historyid': [
+        _p('uuid', '玩家 UUID', example='ee9b4ed1-aac1-491e-b761-1471be374b80'),
+    ],
+    'game_steam_servers': [
+        _p('name', '服务器名称关键词', example='SCUM'),
+        _p('limit', '返回数量上限（默认 20）', 'number', False, '20'),
+    ],
+    'game_minecraft_mods': [
+        _p('source', '搜索来源', 'select', False, 'all', ['all', 'modrinth', 'spigotmc']),
+        _p('type', '资源类型（mod/plugin）', example='mod'),
+        _p('limit', '每来源条数（默认 10）', 'number', False, '10'),
+        _p('enrich', '补全下载直链与作者（默认开启）', 'bool'),
+    ],
+    'ai_translate': [
+        _p('source_lang', '源语言代码（留空自动检测）', example='en'),
+        _p('style', '翻译风格', 'select', False, 'professional',
+           ['casual', 'professional', 'academic', 'literary']),
+        _p('context', '场景', 'select', False, 'general',
+           ['general', 'business', 'technical', 'medical', 'legal',
+            'marketing', 'entertainment', 'education', 'news']),
+        _p('preserve_format', '保留原文格式', 'bool'),
+    ],
+    'status_usage': [
+        _p('path', '端点路径（可选，如 /api/v1/image/motou）', example='/api/v1/image/motou'),
+    ],
+    'image_bing_daily': [
+        _p('date', '壁纸日期（仅近 8 天）', 'date'),
+        _p('random', '随机返回历史壁纸', 'bool'),
+        _p('market', '壁纸地区', 'select', False, 'zh-CN',
+           ['zh-CN', 'en-US', 'ja-JP', 'en-GB', 'de-DE', 'en-CA', 'en-IN',
+            'fr-FR', 'fr-CA', 'it-IT', 'es-ES', 'pt-BR']),
+        _p('format', '响应格式', 'select', False, 'image', ['image', 'json', 'redirect']),
+    ],
+    'image_qrcode': [
+        _p('size', '边长（256-2048 像素）', 'number', False, '512'),
+        _p('format', '响应格式', 'select', False, 'image', ['image', 'json', 'json_url']),
+        _p('transparent', '透明背景', 'bool'),
+        _p('fgcolor', '前景色（#RRGGBB）'),
+        _p('bgcolor', '背景色（#RRGGBB）'),
+    ],
+    'avatar_gravatar': [
+        _p('hash', '邮箱小写 MD5（优先于 email）'),
+        _p('s', '尺寸（1-2048 像素）', 'number'),
+        _p('d', '默认头像类型（mp/identicon/monsterid…）', 'select', False, 'mp',
+           ['mp', 'identicon', 'monsterid', 'wavatar', 'retro', 'robohash', 'blank']),
+        _p('r', '头像分级', 'select', False, 'g', ['g', 'pg', 'r', 'x']),
+    ],
+    'image_bing_daily_history': [
+        _p('resolution', '分辨率', 'select', False, '4k', ['4k', '1080']),
+        _p('page_size', '每页条数（默认 30）', 'number', False, '10'),
+    ],
+    'image_svg': [
+        _p('format', '输出格式', 'select', False, 'png',
+           ['png', 'jpeg', 'jpg', 'gif', 'tiff', 'bmp']),
+        _p('width', '输出宽度（像素）', 'number'),
+        _p('height', '输出高度（像素）', 'number'),
+        _p('quality', 'JPEG 质量（1-100）', 'number'),
+    ],
+    'search_aggregate': [
+        _p('site', '限定站点（不含 site: 前缀）'),
+        _p('filetype', '限定文件类型（pdf/doc/xls…）'),
+        _p('fetch_full', '抓取完整正文（较慢）', 'bool'),
+        _p('sort', '排序方式', 'select', False, 'relevance', ['relevance', 'date']),
+        _p('time_range', '时间范围', 'select', False, '',
+           ['day', 'week', 'month', 'year']),
+    ],
+    'execution_run': [
+        _p('stdin', '标准输入内容（≤65536 字节）'),
+        _p('timeout_ms', '执行超时（毫秒，1-30000）', 'number', False, '10000'),
+        _p('network', '沙盒网络策略（默认 offline 断网）', example='offline'),
+        _p('packs', '加载依赖包（如 python-libs）', example='python-libs'),
+    ],
+    'daily_word': [
+        _p('date', '日期（作为每日种子）', 'date'),
+        _p('seed', '固定种子（可复现，与 date 互斥）', 'number'),
+    ],
+    'food_ingredient': [
+        _p('page', '页码（1-100）', 'number', False, '1'),
+    ],
+    'food_ingredient_detail': [
+        _p('name', '食材名称（与 code 二选一）', example='小白菜'),
+        _p('code', '食材编码（与 name 二选一）'),
+    ],
+    'image_speechless': [
+        _p('top_text', '上方文字（默认“你们怎么不说话了”）'),
+        _p('bottom_text', '下方文字（默认“求求你______”）'),
+    ],
+    'ai_models': [
+        _p('q', '搜索关键词（ID/名称/厂商/描述）'),
+        _p('provider', '厂商过滤（逗号分隔多选）', example='deepseek,openai'),
+        _p('type', '用途类型', 'select', False, '',
+           ['language', 'embedding', 'reranking', 'image', 'video', 'speech',
+            'transcription', 'ocr']),
+        _p('modality', '模态', 'select', False, '',
+           ['text', 'image', 'audio', 'video', 'file', 'pdf']),
+        _p('capability', '进阶能力', 'select', False, '',
+           ['reasoning', 'tools', 'structured_output', 'web_search', 'long_context']),
+        _p('sort', '排序字段', 'select', False, '',
+           ['released_at', 'name', 'provider', 'context_window']),
+        _p('order', '排序方向', 'select', False, 'asc', ['asc', 'desc']),
+        _p('page', '页码（默认 1）', 'number', False, '1'),
+        _p('limit', '返回上限（0=不限）', 'number', False, '100'),
+    ],
+    'clipzy_store': [
+        _p('ttl', '留存秒数（-1 永久，默认 3600）', 'number', False, '3600'),
+    ],
+    'clipzy_get': [
+        _p('id', '片段 ID', 'text', True, 'PREF0Zv8Yj'),
+    ],
+    'clipzy_raw': [
+        _p('id', '片段 ID', 'text', True, 'PREF0Zv8Yj'),
+    ],
+}
+
+
+def _apply_correction(api):
+    """按校正表生成 API 副本（不修改模块级原始定义，保证历史可追溯与可回滚）"""
+    out = dict(api)
+    fix = API_OVERRIDES.get(api['id'])
+    if fix:
+        out.update(fix)
+    params = [dict(p) for p in (api.get('params') or [])]
+    drops = set(PARAM_DROP.get(api['id']) or [])
+    rename = PARAM_RENAME.get(api['id']) or {}
+    params = [p for p in params if p['name'] not in drops]
+    for p in params:
+        if p['name'] in rename:
+            p['name'] = rename[p['name']]
+    existing = {p['name'] for p in params}
+    for extra in (PARAM_AUGMENT.get(api['id']) or []):
+        if extra['name'] not in existing:
+            params.append(dict(extra))
+            existing.add(extra['name'])
+    out['params'] = params
+    # 预置测试参数同步改名/剔除，避免提交旧参数名
+    tp = dict(api.get('test_params') or {})
+    if tp:
+        for old, new in rename.items():
+            if old in tp:
+                tp[new] = tp.pop(old)
+        for name in drops:
+            tp.pop(name, None)
+        out['test_params'] = tp
+    if api['id'] in TEST_PARAMS_OVERRIDES:
+        out['test_params'] = TEST_PARAMS_OVERRIDES[api['id']]
+    return out
+
+
+_CORRECTED_APIS = [_apply_correction(a) for a in APIS]
+
 # ===================== 业务组绑定（组内 uapis 端点 → 目录 API 的协议映射） =====================
 # 天气预报组/节假日组的端点可标记 platform=uapis；标记后按此处映射的 API 协议调用与测试。
 # geocoding/air_quality 组无独立对应 API（uapis 天气一步到位无需地理编码；AQI 含在 extended 中），不做绑定。
@@ -773,11 +1128,11 @@ API_GROUP_BINDINGS = {
 
 # ===================== 索引与查询函数 =====================
 
-_APIS_BY_ID = {a['id']: a for a in APIS}
+_APIS_BY_ID = {a['id']: a for a in _CORRECTED_APIS}
 
 
 def get_api(api_id):
-    """按内部 ID 获取单条 API 定义（无此 ID 返回 None）"""
+    """按内部 ID 获取单条 API 定义（已应用 V10.11.51 官方 OpenAPI 校正；无此 ID 返回 None）"""
     return _APIS_BY_ID.get(api_id)
 
 
@@ -788,10 +1143,11 @@ def get_group_api(group):
 
 
 def get_catalog_for_frontend():
-    """供配置页面/API 目录渲染：按分类分组的完整目录（含分类中文名与图标）"""
+    """供配置页面/API 目录渲染：按分类分组的完整目录（含分类中文名与图标）
+    V10.11.51：使用官方 OpenAPI 校正后的定义，并过滤 hidden 的重复条目"""
     grouped = []
     for cat_key, cat_name, icon in CATEGORIES:
-        items = [dict(a) for a in APIS if a['cat'] == cat_key]
+        items = [dict(a) for a in _CORRECTED_APIS if a['cat'] == cat_key and not a.get('hidden')]
         if not items:
             continue
         grouped.append({
@@ -801,19 +1157,37 @@ def get_catalog_for_frontend():
     return grouped
 
 
-def build_full_url(api_id, base_url=None):
-    """拼接完整请求 URL：base_url（默认平台配置值）+ API 路径"""
+def build_full_url(api_id, base_url=None, params=None):
+    """拼接完整请求 URL：base_url（默认平台配置值）+ API 路径
+    V10.11.51：支持路径占位符（如 /api/raw/{id}、/web/tomarkdown/async/{task_id}），
+    传入 params 时按同名参数替换并返回（调用方需将路径参数从 query 中剔除）"""
     api = get_api(api_id)
     if not api:
         return None
     base = (base_url or UAPI_DEFAULT_BASE_URL).rstrip('/')
-    return base + api['path']
+    path = api['path']
+    if params:
+        import re as _re
+        for ph in _re.findall(r'\{(\w+)\}', path):
+            if ph in params and params[ph] not in (None, ''):
+                path = path.replace('{' + ph + '}', str(params[ph]))
+    return base + path
+
+
+def path_param_names(api_id):
+    """返回该 API 路径中的占位符参数名集合（调用方用于从 query 中剔除）"""
+    api = get_api(api_id)
+    if not api:
+        return set()
+    import re as _re
+    return set(_re.findall(r'\{(\w+)\}', api.get('path') or ''))
 
 
 def summary():
-    """目录统计（页面提示条用）"""
-    total = len(APIS)
-    free = sum(1 for a in APIS if a.get('credits') == 0)
-    cats = len([c for c in CATEGORIES if any(a['cat'] == c[0] for a in APIS)])
-    testable = sum(1 for a in APIS if a.get('test_params') is not None and not a.get('file_type'))
+    """目录统计（页面提示条用；基于校正后定义）"""
+    visible = [a for a in _CORRECTED_APIS if not a.get('hidden')]
+    total = len(visible)
+    free = sum(1 for a in visible if a.get('credits') == 0)
+    cats = len([c for c in CATEGORIES if any(a['cat'] == c[0] for a in visible)])
+    testable = sum(1 for a in visible if a.get('test_params') is not None and not a.get('file_type'))
     return {'total': total, 'free': free, 'categories': cats, 'testable': testable}
