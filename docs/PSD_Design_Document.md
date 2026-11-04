@@ -2557,3 +2557,24 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   - py_compile 4 个改动 Python 文件 + 全站 Jinja 编译 0 失败；十二启平稳；
   - 浏览器 9 项全过：顶部试验台按钮；三平台徽章三口径（uapis 108/官方 108/自定义 0、free-api 0、test123 万站API 1/自定义 1）；页底独立卡已删；折叠区 108 条 + 搜索「农历」精确 1 条；格式化器下拉 30 项全中文；wzapi 13 候选逐条失败原因 + 引导出现；指定 https://uapis.cn/openapi.json 成功预览 105 接口（仅预览未导入零落库）；worldtime 一键测试 200/560ms（经 Key「ghca」回归无破坏）；
   - 实测结论沉淀：wzapi /api/openapi.json 返回 200 但内容为「接口不存在」JSON——地址在、内容非规范的假阳性最难排查，失败明细逐条归类后一眼可辨；tianapi/kuleu/showapi 全 404/HTML；4 平台均无标准规范为上游现状，新平台标准接入路径为「获取目录 → 看失败明细 → 文档站规范直链 / 粘贴 JSON 兜底」。
+
+### ADR-83：接口广场零刷新架构与表单排版精细化——局部重建、平台 ID 改名级联、认证联动与脱敏长度感知（V10.11.53 落地）
+- **背景与痛点**：
+  1. **局部操作整页刷新**：模板中 7 处 window.location.reload() 覆盖全部写操作（Key 池保存含启停切换/增删改/排序、平台增删改、API 增删改、目录导入），每次重拉全页重渲染 108 条目录，折叠区展开状态/搜索词/滚动位置全部丢失——「局部操作导致整个布局刷新、过多拉取致性能问题」；
+  2. **Key 行排版三连缺陷**：输入框 flex: 0 1 420px 过长，中窄窗口标签(180px)+输入框(420px)+开关组(110px)≈710px 必然 flex-wrap 换行，启停开关被挤成孤行（「启停按钮跟文字描述不在同一列/分隔距离较远」）；Bootstrap .form-check 默认 padding-left:1.5rem 造成文字与开关 44px 空隙；.form-switch .form-check-input 的 float:left + margin-left:-40px（特异性 0,2,0）压过 .platform-enabled{margin:0}（0,1,0），单删 padding 后负 margin 漂移致平台总开关叠字（-36px）；
+  3. **平台 ID 不可改**：作为端点绑定引用键/试验台 @pid|aid 编码/审计标识的关联主键恒只读，用户质疑「没用就去掉」——实为必需，但应支持改名并级联更新引用（经用户确认选方案 B）；
+  4. **认证方式无联动**：添加/编辑平台模态选「无认证」仍恒显示「自定义头/参数名（header/query 型必填）」；
+  5. **脱敏星号固定 4 个**：45 位真实 Key 只显 4 星+末 4 位，长度感知缺失。
+- **决策方案**：
+  1. **零刷新架构（数据层+前端局部重建）**：apis/save、apis/delete、apis/import 三路由补返回单平台完整数据（platform/save 已有，补 renamed 标志）；前端四函数分区块重建——rebuildKeyPool（按服务端 keys 重建行，新 uid 回填脱敏）、applyPlatformMeta（卡头名称/地址/认证说明）、rebuildPlatformApis（自定义条目列表+三口径徽章）、syncPlatData（同步 JS 内存 PLATFORMS_DATA——试验台下拉与编辑模态的数据源，下次打开即最新）；保留两处结构性整页刷新（添加平台、改平台 ID——新增整卡与卡内 data-pid/id/onclick 全量标识变更为低频操作）；平台启停/保存地址既有局部链路补 syncPlatData；
+  2. **排版三件套**：pkey-input 420→300px；.plat-switch/.pkey-switch flex: 0 0 auto 永不收缩换行断裂；.form-check 留白清零与 .form-check-input 负 margin 配对清零（Bootstrap float+负 margin 是成对样式，只删一侧必乱）；
+  3. **平台 ID 改名级联**：platform/save 接受 new_id（正则/内置 uapis 禁改/唯一性三重校验），save_platform 遍历 DEFAULT_GROUPS 六组替换 platform 引用（与既有 _url_key 写入路径一致）后改写档案主键；审计记「旧ID → 新ID」；前端自定义平台解锁 epId、内置只读，改 ID 成功后整页刷新；
+  4. **认证联动**：syncAuthKeyName 双模态统一——none/bearer 隐藏并清空头名输入框，header/query 显示必填；showAdd/showEditPlatformModal 打开时同步初始状态；
+  5. **星号长度感知**：mask_platform_key 输出 min(len-4, 12) 星 + 末 4 位（≤8 位短 Key 保持末 2 位逻辑）。
+- **验证与效果**：
+  - py_compile 3 文件 + 30 模板编译 0 失败；十五启平稳；
+  - 零刷新 14 项实测：Key 启停切换零刷新（存活标记保留+徽章更新+折叠区保持展开）/ Key 池保存重建（uid 保持、12 星回填）/ 编辑平台名称（卡头+认证说明+JS 内存同步）/ API 新增（行插入+三口径徽章+空态移除）/ API 删除（行移除+空态恢复+徽章回落）/ 删除平台（卡移除+数据同步）；添加平台与改 ID 保留结构性刷新（toast 说明）；
+  - 级联 SQLite 实战：临时平台绑定停用端点 → 改名 → 端点 platform 字段实测跟随 → 删除平台 → forecast 原值（3 条端点+timeout/retries）逐字节恢复；
+  - 布局实测：900px 窄窗 Key 行三元素同行（input 300px）、文字与开关 4px（Key 行 44px→4px、平台头部 -36px 叠字→4px）、垂直对齐；
+  - 联动实测：双模态初始状态正确、header/query 显示、切回 none 隐藏并清空；worldtime 回归 200/564ms（经 Key「ghca」）；
+  - 演练平台与临时脚本全清理，用户真实数据（ghca Key/三平台/forecast 端点）零污染。

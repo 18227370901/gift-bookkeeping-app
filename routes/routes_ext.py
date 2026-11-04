@@ -6064,11 +6064,25 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         - V10.11.48 联动：变更推送 Webhook system 事件 + 审计日志（含 Key 增删数量，不记明文）"""
         if not getattr(current_user, 'is_admin', False):
             return jsonify({'success': False, 'message': '权限不足'}), 403
-        from services.service_config import save_platform, get_platforms_for_display, MAX_KEYS_PER_PLATFORM, AUTH_TYPES
+        from services.service_config import (save_platform, get_platforms_for_display, get_platform,
+                                             get_platforms, MAX_KEYS_PER_PLATFORM, AUTH_TYPES)
         data = request.get_json(silent=True) or {}
         pid = str(data.get('id') or '').strip()
         if not pid:
             return jsonify({'success': False, 'message': '平台 ID 不能为空'}), 400
+        # V10.11.53 平台 ID 改名：格式/内置禁改/唯一性三重校验（级联更新由 save_platform 执行）
+        new_id = str(data.get('new_id') or '').strip().lower() or None
+        if new_id and new_id != pid:
+            import re as _re
+            if not _re.fullmatch(r'[a-z][a-z0-9-]{1,29}', new_id):
+                return jsonify({'success': False, 'message': '新平台 ID 需 2~30 位小写字母/数字/连字符，且以字母开头'}), 400
+            cur = get_platform(pid)
+            if not cur:
+                return jsonify({'success': False, 'message': '平台不存在'}), 404
+            if cur.get('builtin'):
+                return jsonify({'success': False, 'message': '内置平台（uapis）ID 被调用引擎依赖，不允许修改'}), 400
+            if any(x['id'] == new_id for x in get_platforms()):
+                return jsonify({'success': False, 'message': '新平台 ID 已存在：%s' % new_id}), 400
         name = data.get('name')
         if name is not None:
             name = str(name).strip()
@@ -6105,7 +6119,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         if enabled is not None and not isinstance(enabled, bool):
             enabled = None
         ok = save_platform(pid, name=name, base_url=base_url or None, auth_type=auth_type,
-                           auth_key_name=auth_key_name, api_keys=api_keys, enabled=enabled)
+                           auth_key_name=auth_key_name, api_keys=api_keys, enabled=enabled,
+                           new_id=new_id)
         if not ok:
             return jsonify({'success': False, 'message': '未知平台或参数非法'}), 400
         # 平台配置变更后清理调用引擎进程缓存（避免旧认证结果混存）
@@ -6114,18 +6129,20 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             uapi_client.clear_cache()
         except Exception:
             pass
-        plat = next((p for p in get_platforms_for_display() if p['id'] == pid), None)
+        plat = next((p for p in get_platforms_for_display() if p['id'] == (new_id or pid)), None)
         key_desc = ''
         if plat:
             key_desc = '（%d 个 Key，启用 %d 个）' % (plat.get('key_count', 0), plat.get('key_enabled_count', 0))
+        pid_disp = ('%s → %s' % (pid, new_id)) if (new_id and new_id != pid) else pid
         safe_log('更新 API 平台配置',
-                 f'操作人：{current_user.username} | 平台：{pid} | Key 池{key_desc}',
+                 f'操作人：{current_user.username} | 平台：{pid_disp} | Key 池{key_desc}',
                  user=current_user)
         _push_service_config_webhook(
-            '%s 更新 API 平台「%s」配置' % (current_user.username, pid),
+            '%s 更新 API 平台「%s」配置' % (current_user.username, plat['name'] if plat else pid),
             '操作人：%s | 页面：外部接口服务配置 | 操作：更新 API 平台 %s 配置 %s' % (
-                current_user.username, pid, key_desc))
-        return jsonify({'success': True, 'message': '平台配置已保存', 'platform': plat})
+                current_user.username, pid_disp, key_desc))
+        return jsonify({'success': True, 'message': '平台配置已保存', 'platform': plat,
+                        'renamed': bool(new_id and new_id != pid)})
 
     @app.route('/admin/service-config/platform/add', methods=['POST'])
     @login_required
@@ -6370,7 +6387,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return jsonify({'success': False, 'message': '未选择任何接口'}), 400
         if len(items) > 300:
             return jsonify({'success': False, 'message': '单次导入最多 300 条'}), 400
-        from services.service_config import import_platform_apis
+        from services.service_config import import_platform_apis, get_platforms_for_display
         result = import_platform_apis(pid, items, source=str(data.get('source') or 'openapi'))
         safe_log('导入平台 API 目录',
                  f'操作人：{current_user.username} | 平台：{pid} | 新增 {result["added"]} 条、跳过 {result["skipped"]} 条',
@@ -6379,10 +6396,12 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             '%s 导入平台「%s」API 目录（新增 %d 条）' % (current_user.username, pid, result['added']),
             '操作人：%s | 页面：外部接口服务配置 | 操作：导入 API 目录 | 平台：%s | 新增 %d 条 / 跳过 %d 条' % (
                 current_user.username, pid, result['added'], result['skipped']))
+        plat = next((p for p in get_platforms_for_display() if p['id'] == pid), None)
         return jsonify({'success': True, 'message': '导入完成：新增 %d 条、跳过 %d 条'
                         % (result['added'], result['skipped']),
                         'added': result['added'], 'skipped': result['skipped'],
-                        'errors': result['errors']})
+                        'errors': result['errors'],
+                        'platform': plat})   # V10.11.53：返回单平台数据供前端局部重建（零刷新）
 
     @app.route('/admin/service-config/platform/apis/save', methods=['POST'])
     @login_required
@@ -6399,7 +6418,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return jsonify({'success': False, 'message': '平台 ID 不能为空'}), 400
         if not isinstance(item, dict):
             return jsonify({'success': False, 'message': 'API 数据不能为空'}), 400
-        from services.service_config import save_platform_api
+        from services.service_config import save_platform_api, get_platforms_for_display
         ok, err, entry = save_platform_api(pid, item, original_id=original_id)
         if not ok:
             return jsonify({'success': False, 'message': err}), 400
@@ -6416,7 +6435,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             '%s %s 了平台「%s」的 API「%s」' % (current_user.username, action, pid, entry['name']),
             '操作人：%s | 页面：外部接口服务配置 | 操作：%s平台 API | 平台：%s | %s %s' % (
                 current_user.username, action, pid, entry['method'], entry['path']))
-        return jsonify({'success': True, 'message': 'API 已%s' % action, 'api': entry})
+        plat = next((p for p in get_platforms_for_display() if p['id'] == pid), None)
+        return jsonify({'success': True, 'message': 'API 已%s' % action, 'api': entry,
+                        'platform': plat})   # V10.11.53：返回单平台数据供前端局部重建（零刷新）
 
     @app.route('/admin/service-config/platform/apis/delete', methods=['POST'])
     @login_required
@@ -6429,7 +6450,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         api_id = str(data.get('api_id') or '').strip()
         if not pid or not api_id:
             return jsonify({'success': False, 'message': '平台与 API 标识不能为空'}), 400
-        from services.service_config import get_platform_api, delete_platform_api
+        from services.service_config import get_platform_api, delete_platform_api, get_platforms_for_display
         entry = get_platform_api(pid, api_id)
         if not entry:
             return jsonify({'success': False, 'message': 'API 不存在'}), 404
@@ -6443,7 +6464,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             '%s 删除了平台「%s」的 API「%s」' % (current_user.username, pid, entry['name']),
             '操作人：%s | 页面：外部接口服务配置 | 操作：删除平台 API | 平台：%s | %s %s' % (
                 current_user.username, pid, entry['method'], entry['path']))
-        return jsonify({'success': True, 'message': 'API 已删除'})
+        plat = next((p for p in get_platforms_for_display() if p['id'] == pid), None)
+        return jsonify({'success': True, 'message': 'API 已删除',
+                        'platform': plat})   # V10.11.53：返回单平台数据供前端局部重建（零刷新）
 
     @app.route('/admin/service-config/uapi/test', methods=['POST'])
     @login_required

@@ -10,11 +10,15 @@
     .uapi-item:hover { background-color: rgba(13, 110, 253, .04); border-radius: .4rem; }
     /* 目录搜索框聚焦微动效 */
     #uapiSearchInput:focus { box-shadow: 0 0 0 .2rem rgba(13, 110, 253, .12); }
-    /* V10.11.51 Key 行两行卡片布局：第一行标签/Key/开关，第二行操作按钮（图标+文字） */
+    /* V10.11.51 Key 行两行卡片布局：第一行标签/Key/开关，第二行操作按钮（图标+文字）
+       V10.11.53：Key 输入框限宽 420→300px（避免中窄窗口把启停开关挤成孤行），开关组不参与收缩 */
     .pkey-row { border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .5rem .6rem .35rem; background: var(--bs-body-bg); }
     .pkey-row .pkey-main { row-gap: .25rem; }
-    .pkey-row .pkey-input { flex: 0 1 420px; min-width: 0; }
+    .pkey-row .pkey-input { flex: 0 1 300px; min-width: 0; }
     .pkey-row .pkey-actions { gap: .25rem; margin-top: .35rem; padding-top: .35rem; border-top: 1px dashed var(--bs-border-color-translucent, rgba(33,37,41,.15)); }
+    .plat-switch, .pkey-switch { flex: 0 0 auto; }   /* 启停开关组永不压缩/换行断裂（文字与开关始终同列紧邻） */
+    .plat-switch .form-check, .pkey-switch .form-check { padding-left: 0; margin: 0; }   /* 清除 Bootstrap 表单默认留白——文字与开关紧贴（修复「分隔距离较远」） */
+    .plat-switch .form-check-input, .pkey-switch .form-check-input { margin-left: 0; }   /* 配对清除 form-switch 负 margin（删 padding 后不再回拉，防止开关叠到文字上） */
     .btn-act { padding: .12rem .5rem; font-size: .78rem; white-space: nowrap; }
     .btn-act i { font-size: .72rem; }
     .pkey-row .row-select-cb, .pkey-row .pkey-enabled { margin: 0; }
@@ -101,7 +105,7 @@
         <div class="border rounded-3 mb-3 p-3 platform-block" data-pid="{{ p.id }}" id="platBlock_{{ p.id }}">
             <div class="d-flex align-items-center flex-wrap gap-2 mb-2">
                 <i class="fa-solid fa-cloud text-primary"></i>
-                <b>{{ p.name }}</b>
+                <b class="plat-name">{{ p.name }}</b>
                 <code class="small text-muted">{{ p.id }}</code>
                 {% if p.builtin %}<span class="badge bg-success-subtle text-success border">内置</span>{% else %}<span class="badge bg-info-subtle text-info border">自定义</span>{% endif %}
                 <span class="badge {{ 'bg-success-subtle text-success border' if p.enabled else 'bg-secondary-subtle text-secondary border' }} plat-enabled-badge" id="platEnabledBadge_{{ p.id }}">{{ '已启用' if p.enabled else '已停用' }}</span>
@@ -109,7 +113,7 @@
                     {{ ('%d 个 Key · 启用 %d' % (p.key_count, p.key_enabled_count)) if p.key_count else '访客模式（无 Key）' }}</span>
                 <span class="badge bg-secondary-subtle text-secondary border" id="platApiBadge_{{ p.id }}">
                     平台 API {{ p.api_count }} 个</span>
-                <div class="d-flex align-items-center gap-1 ms-1">
+                <div class="d-flex align-items-center gap-1 ms-1 plat-switch">
                     <span class="small text-muted plat-enabled-label">{{ '启用' if p.enabled else '停用' }}：</span>
                     <div class="form-check form-switch mb-0">
                         <input type="checkbox" class="form-check-input platform-enabled" role="switch" {% if p.enabled %}checked{% endif %}
@@ -129,7 +133,7 @@
             </div>
             <div class="row g-2 mb-2">
                 <div class="col-12 col-md-7">
-                    <label class="form-label small text-muted mb-1">平台地址 Base URL{% if not p.builtin %}（认证方式：{{ {'none':'无认证','bearer':'Bearer 头','header':'自定义头','query':'URL 参数'}[p.auth_type] }}{% if p.auth_key_name %} · {{ p.auth_key_name }}{% endif %}）{% endif %}</label>
+                    <label class="form-label small text-muted mb-1 plat-url-label">平台地址 Base URL{% if not p.builtin %}（认证方式：{{ {'none':'无认证','bearer':'Bearer 头','header':'自定义头','query':'URL 参数'}[p.auth_type] }}{% if p.auth_key_name %} · {{ p.auth_key_name }}{% endif %}）{% endif %}</label>
                     <div class="input-group input-group-sm">
                         <input type="text" class="form-control platform-baseurl" value="{{ p.base_url }}" placeholder="https://uapis.cn/api/v1" aria-label="平台地址" {% if not current_user.is_admin %}readonly{% endif %}>
                         {% if current_user.is_admin %}
@@ -161,7 +165,7 @@
                         <input type="password" class="form-control form-control-sm pkey-input" autocomplete="new-password" readonly
                                value="{{ '已保存' if k.key_set else '' }}"
                                placeholder="{{ (k.key_masked ~ '（点「编辑」修改）') if k.key_set else '未保存（新 Key）' }}" aria-label="API Key">
-                        <span class="d-flex align-items-center gap-1" title="启用该 Key（停用则不参与轮换；切换后即时保存生效）">
+                        <span class="d-flex align-items-center gap-1 pkey-switch" title="启用该 Key（停用则不参与轮换；切换后即时保存生效）">
                             <span class="small text-muted pkey-enabled-label">{{ '启用' if k.enabled else '停用' }}</span>
                             <div class="form-check form-switch mb-0">
                                 <input type="checkbox" class="form-check-input pkey-enabled" role="switch" {% if k.enabled %}checked{% endif %} {% if not current_user.is_admin %}disabled{% endif %}>
@@ -197,9 +201,9 @@
                             onclick="this.querySelector('i.arrow').classList.toggle('fa-chevron-down')">
                         <i class="fa-solid fa-bars-staggered me-1"></i>平台 API 目录
                         {# V10.11.52 计数按合计显示（官方 + 自定义），不再出现「平台显示 0、目录孤悬页底」的割裂 #}
-                        <span class="badge bg-primary-subtle text-primary border ms-1">{{ p.catalog_count_total }} 个</span>
+                        <span class="badge bg-primary-subtle text-primary border ms-1" id="platCatalogTotal_{{ p.id }}">{{ p.catalog_count_total }} 个</span>
                         {% if p.builtin %}<span class="badge bg-success-subtle text-success border">官方 {{ p.builtin_catalog_count }}</span>{% endif %}
-                        <span class="badge bg-secondary-subtle text-secondary border">{{ '自定义 ' + p.custom_api_count|string }}</span>
+                        <span class="badge bg-secondary-subtle text-secondary border" id="platCatalogCustom_{{ p.id }}">{{ '自定义 ' + p.custom_api_count|string }}</span>
                         <i class="fa-solid fa-chevron-right arrow ms-1 small"></i>
                     </button>
                     {% if current_user.is_admin %}
@@ -341,7 +345,7 @@
                             <option value="header">自定义请求头</option>
                             <option value="query">URL 查询参数</option>
                         </select></div>
-                    <div class="col-6"><label class="form-label small text-muted mb-1">自定义头/参数名（header/query 型必填）</label>
+                    <div class="col-6" id="npAuthKeyNameWrap"><label class="form-label small text-muted mb-1">自定义头/参数名（header/query 型必填）</label>
                         <input type="text" class="form-control form-control-sm" id="npAuthKeyName" placeholder="X-API-Key" maxlength="50"></div>
                     <div class="col-12"><label class="form-label small text-muted mb-1">初始 API Key（可选，保存后可随时增删）</label>
                         <input type="password" class="form-control form-control-sm" id="npApiKey" autocomplete="new-password" placeholder="留空 = 暂不配置"></div>
@@ -381,10 +385,10 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
             </div>
             <div class="modal-body">
-                <div class="mb-2 small text-muted">平台 ID 是主键不可修改；名称、地址与认证方式可更新（Key 池请在平台卡片内管理）。</div>
+                <div class="mb-2 small text-muted">平台 ID 是核心关联键：天气/节假日端点绑定、试验台调用与审计记录都以它引用本平台。<b>自定义平台可修改 ID</b>（自动级联更新端点绑定，不断链）；内置平台（uapis）被调用引擎依赖、不可修改。名称、地址与认证方式可更新（Key 池请在平台卡片内管理）。</div>
                 <div class="row g-2">
-                    <div class="col-4"><label class="form-label small text-muted mb-1">平台 ID（只读）</label>
-                        <input type="text" class="form-control form-control-sm" id="epId" readonly></div>
+                    <div class="col-4"><label class="form-label small text-muted mb-1">平台 ID（内置只读，自定义可改）</label>
+                        <input type="text" class="form-control form-control-sm" id="epId"></div>
                     <div class="col-8"><label class="form-label small text-muted mb-1">平台名称</label>
                         <input type="text" class="form-control form-control-sm" id="epName" maxlength="50"></div>
                     <div class="col-12"><label class="form-label small text-muted mb-1">Base URL</label>
@@ -396,7 +400,7 @@
                             <option value="header">自定义请求头</option>
                             <option value="query">URL 查询参数</option>
                         </select></div>
-                    <div class="col-6"><label class="form-label small text-muted mb-1">自定义头/参数名（header/query 型必填）</label>
+                    <div class="col-6" id="epAuthKeyNameWrap"><label class="form-label small text-muted mb-1">自定义头/参数名（header/query 型必填）</label>
                         <input type="text" class="form-control form-control-sm" id="epAuthKeyName" placeholder="X-API-Key" maxlength="50"></div>
                 </div>
             </div>
@@ -652,6 +656,7 @@
             .then(data => {
                 if (data && data.success) {
                     refreshPlatformBadges(pid, data.platform);
+                    syncPlatData(pid, data.platform);   // V10.11.53：同步 JS 内存（试验台/编辑模态读取方即时生效）
                     showToast(enabled ? `平台「${pid}」已启用` : `平台「${pid}」已停用：相关调用将静默降级`, true, !enabled);
                 } else {
                     showToast(data.message || '保存失败', false);
@@ -677,6 +682,7 @@
             .then(data => {
                 if (data && data.success) {
                     refreshPlatformBadges(pid, data.platform);
+                    syncPlatData(pid, data.platform);   // V10.11.53：同步 JS 内存（试验台 URL 构建读取方即时生效）
                     showToast(`平台「${pid}」地址已保存`);
                 } else {
                     showToast(data.message || '保存失败', false);
@@ -702,8 +708,109 @@
         }
     }
 
+    // ===================== V10.11.53 局部零刷新：保存成功后仅重建受影响区块 =====================
+    // 数据源：后端各保存路由返回的「单平台完整数据」（get_platforms_for_display 单项，含脱敏 keys/apis/计数）
+
+    function syncPlatData(pid, plat) {
+        // 同步 JS 内存中的平台数据（编辑模态/试验台/API 编辑模态等读取方即时生效）
+        const i = PLATFORMS_DATA.findIndex(x => x.id === pid);
+        if (i >= 0 && plat) PLATFORMS_DATA[i] = plat;
+    }
+
+    // Key 池局部重建：用服务端返回的 keys（脱敏+新 uid）重建行（保存 Key 池/启停切换后零刷新）
+    function rebuildKeyPool(pid, plat) {
+        const list = document.getElementById('platKeys_' + pid);
+        if (!list || !plat) return;
+        list.querySelectorAll('.pkey-row').forEach(r => r.remove());
+        const empty = document.getElementById('platKeysEmpty_' + pid);
+        if (empty) empty.remove();
+        (plat.keys || []).forEach(k => {
+            list.appendChild(makePkeyRow(k.label, k.key_masked, k.key_set, k.enabled, k.uid));
+        });
+        if (!(plat.keys || []).length) {
+            list.insertAdjacentHTML('afterbegin',
+                `<div class="small text-muted mb-2" id="platKeysEmpty_${esc(pid)}"><i class="fa-solid fa-user-ninja me-1"></i>未配置 Key（访客模式可直接调用；点「添加 Key」接入账号额度）</div>`);
+        }
+        refreshPkeyMoveButtons(list);
+        refreshPlatformBadges(pid, plat);
+        syncPlatData(pid, plat);
+    }
+
+    // 平台元信息局部更新（编辑平台：名称/地址/认证说明；不含 ID 改名——改名走整页刷新）
+    function applyPlatformMeta(pid, plat) {
+        const block = getPlatBlock(pid);
+        if (!block || !plat) return;
+        const nameEl = block.querySelector('.plat-name');
+        if (nameEl) nameEl.textContent = plat.name || pid;
+        const baseInput = block.querySelector('.platform-baseurl');
+        if (baseInput) baseInput.value = plat.base_url || '';
+        const urlLabel = block.querySelector('.plat-url-label');
+        if (urlLabel) {
+            const AUTH_TXT = { none: '无认证', bearer: 'Bearer 头', header: '自定义头', query: 'URL 参数' };
+            const auth = plat.builtin ? '' : ('（认证方式：' + (AUTH_TXT[plat.auth_type] || plat.auth_type) + (plat.auth_key_name ? ' · ' + plat.auth_key_name : '') + '）');
+            urlLabel.textContent = '平台地址 Base URL' + auth;
+        }
+        refreshPlatformBadges(pid, plat);
+        syncPlatData(pid, plat);
+    }
+
+    // 自定义 API 条目行 HTML（与服务端 Jinja 渲染结构一致；增删改仅管理员触发，恒渲染写按钮）
+    function pcapiRowHtml(pid, a) {
+        return `<div class="d-flex align-items-center flex-wrap gap-2 border-bottom py-2 pcapi-row" data-api-id="${esc(a.id)}">
+            <span class="badge ${a.method === 'POST' ? 'bg-dark' : 'bg-primary'} text-white method-badge">${esc(a.method)}</span>
+            <span class="fw-semibold text-nowrap">${esc(a.name)}</span>
+            <code class="small text-muted text-truncate" style="max-width:280px" title="${esc(a.path)}">${esc(a.path)}</code>
+            ${a.credits ? `<span class="badge bg-warning-subtle text-warning-emphasis border">${a.credits} 积分</span>` : ''}
+            <span class="badge ${a.source === 'openapi' ? 'bg-info-subtle text-info' : 'bg-secondary-subtle text-secondary'} border">${a.source === 'openapi' ? '导入' : '手动'}</span>
+            ${a.formatter ? `<span class="badge bg-success-subtle text-success border" title="绑定可读格式化器：${esc(a.formatter)}">可读化</span>` : ''}
+            <span class="ms-auto d-flex gap-1">
+                <button class="btn btn-outline-info btn-sm rounded-pill px-2" type="button" title="试验台动态填参调用" onclick="openPlayground('@${esc(pid)}|${esc(a.id)}')"><i class="fa-solid fa-flask"></i> 试验台</button>
+                <button class="btn btn-outline-primary btn-sm rounded-pill px-2" type="button" title="编辑此 API 定义" onclick="showApiEditModal('${esc(pid)}', '${esc(a.id)}')"><i class="fa-solid fa-pen-to-square"></i> 编辑</button>
+                <button class="btn btn-outline-danger btn-sm rounded-pill px-2" type="button" title="删除此 API" onclick="deletePlatformApi('${esc(pid)}', '${esc(a.id)}', '${esc(a.name)}')"><i class="fa-solid fa-trash-can"></i> 删除</button>
+            </span>
+        </div>`;
+    }
+
+    // 自定义 API 列表局部重建 + 三口径徽章更新（API 增删改/导入后零刷新）
+    function rebuildPlatformApis(pid, plat) {
+        const list = document.getElementById('platApiList_' + pid);
+        if (!list || !plat) return;
+        list.querySelectorAll('.pcapi-row').forEach(r => r.remove());
+        const empty = document.getElementById('platApiEmpty_' + pid);
+        if (empty) empty.remove();
+        const apis = plat.apis || [];
+        apis.forEach(a => list.insertAdjacentHTML('beforeend', pcapiRowHtml(pid, a)));
+        if (!apis.length) {
+            const tip = plat.builtin ? '暂无自定义/导入条目' : '暂无自定义/导入条目；点「获取目录」自动探测，或用「新增 API」单条录入';
+            list.insertAdjacentHTML('beforeend', `<div class="small text-muted py-2" id="platApiEmpty_${esc(pid)}"><i class="fa-solid fa-inbox me-1"></i>${tip}</div>`);
+        }
+        const tot = document.getElementById('platCatalogTotal_' + pid);
+        if (tot) tot.textContent = plat.catalog_count_total + ' 个';
+        const cus = document.getElementById('platCatalogCustom_' + pid);
+        if (cus) cus.textContent = '自定义 ' + plat.custom_api_count;
+        const ab = document.getElementById('platApiBadge_' + pid);
+        if (ab) ab.textContent = '平台 API ' + plat.api_count + ' 个';
+        syncPlatData(pid, plat);
+    }
+
+    // V10.11.53 认证方式联动：无认证/Bearer 头 → 隐藏并清空「自定义头/参数名」；header/query → 显示必填
+    function syncAuthKeyName(authSelId, wrapId) {
+        const sel = document.getElementById(authSelId);
+        const wrap = document.getElementById(wrapId);
+        if (!sel || !wrap) return;
+        const need = (sel.value === 'header' || sel.value === 'query');
+        wrap.classList.toggle('d-none', !need);
+        if (!need) {
+            const inp = wrap.querySelector('input');
+            if (inp) inp.value = '';
+        }
+    }
+
+    document.getElementById('npAuthType').addEventListener('change', () => syncAuthKeyName('npAuthType', 'npAuthKeyNameWrap'));
+    document.getElementById('epAuthType').addEventListener('change', () => syncAuthKeyName('epAuthType', 'epAuthKeyNameWrap'));
+
     // ===== Key 行构造 =====
-    // V10.11.51 两行卡片：第一行标签/Key（限宽 420px）/启停，第二行操作按钮（图标+文字）；
+    // V10.11.51 两行卡片：第一行标签/Key（V10.11.53 限宽 300px）/启停，第二行操作按钮（图标+文字）；
     // 已保存 Key 额外提供「查看」明文按钮（后端二次确认 + 审计 + 30 秒自动遮蔽）
     function makePkeyRow(label, keyMasked, keySet, enabled, uid) {
         const row = document.createElement('div');
@@ -733,7 +840,7 @@
                 <input type="password" class="form-control form-control-sm pkey-input" autocomplete="new-password" readonly
                        value="${keySet ? '已保存' : ''}"
                        placeholder="${keySet ? (esc(keyMasked || '****') + '（点「编辑」修改）') : '新 Key（点「编辑」填写）'}" aria-label="API Key">
-                <span class="d-flex align-items-center gap-1" title="启用该 Key（停用则不参与轮换；保存后即时生效）">
+                <span class="d-flex align-items-center gap-1 pkey-switch" title="启用该 Key（停用则不参与轮换；保存后即时生效）">
                     <span class="small text-muted pkey-enabled-label">${enabled !== false ? '启用' : '停用'}</span>
                     <div class="form-check form-switch mb-0"><input type="checkbox" class="form-check-input pkey-enabled" role="switch" ${enabled !== false ? 'checked' : ''}></div>
                 </span>
@@ -888,8 +995,8 @@
         postJSON('/admin/service-config/platform/save', { id: pid, api_keys: keys })
             .then(data => {
                 if (data && data.success) {
+                    rebuildKeyPool(pid, data.platform);   // V10.11.53 零刷新：局部重建 Key 池（新 uid/脱敏回显由服务端数据重建）
                     showToast(`平台「${pid}」Key 池已保存（${(data.platform && data.platform.key_count) || 0} 个 Key，启用 ${data.platform ? data.platform.key_enabled_count : 0} 个）`);
-                    setTimeout(() => window.location.reload(), 600);   // 重载刷新脱敏回显与 uid
                 } else {
                     showToast(data.message || '保存失败', false);
                 }
@@ -961,6 +1068,7 @@
     function showAddPlatformModal() {
         ['npId', 'npName', 'npBaseUrl', 'npAuthKeyName', 'npApiKey'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
         const sel = document.getElementById('npAuthType'); if (sel) sel.value = 'bearer';
+        syncAuthKeyName('npAuthType', 'npAuthKeyNameWrap');   // V10.11.53 联动初始状态（Bearer 默认隐藏头名）
         bootstrap.Modal.getOrCreateInstance(document.getElementById('addPlatformModal')).show();
     }
 
@@ -1008,10 +1116,13 @@
         if (pid) {
             postJSON('/admin/service-config/platform/delete', { id: pid })
                 .then(data => {
-                    if (data && data.success) {
-                        showToast('平台已删除，页面即将刷新');
-                        setTimeout(() => window.location.reload(), 600);
-                    } else showToast(data.message || '删除失败', false);
+                if (data && data.success) {
+                    const block = document.getElementById('platBlock_' + pid);
+                    if (block) block.remove();   // V10.11.53 零刷新：直接移除平台卡
+                    const idx = PLATFORMS_DATA.findIndex(x => x.id === pid);
+                    if (idx >= 0) PLATFORMS_DATA.splice(idx, 1);
+                    showToast('平台已删除：相关端点绑定回落为无认证直连语义');
+                } else showToast(data.message || '删除失败', false);
                 })
                 .catch(() => showToast('网络错误，删除失败', false));
         }
@@ -1027,19 +1138,27 @@
     const IS_ADMIN = {{ 'true' if current_user.is_admin else 'false' }};
 
     // ===== 编辑平台（名称/地址/认证方式；ID 只读）=====
+    let editPlatOrigId = '';   // V10.11.53 打开编辑模态时的原平台 ID（改名检测）
     function showEditPlatformModal(pid) {
         const p = PLATFORMS_DATA.find(x => x.id === pid);
         if (!p) { showToast('平台不存在', false); return; }
-        document.getElementById('epId').value = pid;
+        editPlatOrigId = pid;
+        const idInput = document.getElementById('epId');
+        idInput.value = pid;
+        // V10.11.53：内置平台 ID 被调用引擎依赖→只读；自定义平台可改（级联更新端点绑定）
+        if (p.builtin) idInput.setAttribute('readonly', 'readonly');
+        else idInput.removeAttribute('readonly');
         document.getElementById('epName').value = p.name || '';
         document.getElementById('epBaseUrl').value = p.base_url || '';
         document.getElementById('epAuthType').value = p.auth_type || 'none';
         document.getElementById('epAuthKeyName').value = p.auth_key_name || '';
+        syncAuthKeyName('epAuthType', 'epAuthKeyNameWrap');   // V10.11.53 联动初始状态
         bootstrap.Modal.getOrCreateInstance(document.getElementById('editPlatformModal')).show();
     }
 
     function submitEditPlatform() {
-        const pid = document.getElementById('epId').value.trim();
+        const pid = editPlatOrigId;
+        const newId = document.getElementById('epId').value.trim().toLowerCase();
         const name = document.getElementById('epName').value.trim();
         const baseUrl = document.getElementById('epBaseUrl').value.trim();
         const authType = document.getElementById('epAuthType').value;
@@ -1047,14 +1166,23 @@
         if (!name) { showToast('平台名称不能为空', false); return; }
         if (baseUrl && !/^https?:\/\//.test(baseUrl)) { showToast('Base URL 必须以 http:// 或 https:// 开头', false); return; }
         if ((authType === 'header' || authType === 'query') && !authKeyName) { showToast('自定义头/参数名不能为空（当前认证方式必填）', false); return; }
+        const renamed = newId && newId !== pid;
+        if (renamed && !/^[a-z][a-z0-9-]{1,29}$/.test(newId)) { showToast('平台 ID 需 2~30 位小写字母/数字/连字符，且以字母开头', false); return; }
         const body = { id: pid, name, auth_type: authType, auth_key_name: authKeyName };
         if (baseUrl) body.base_url = baseUrl;
+        if (renamed) body.new_id = newId;   // V10.11.53 改名：后端校验+级联更新端点绑定
         postJSON('/admin/service-config/platform/save', body)
             .then(data => {
                 if (data && data.success) {
                     bootstrap.Modal.getInstance(document.getElementById('editPlatformModal')).hide();
-                    showToast('平台信息已更新，页面即将刷新');
-                    setTimeout(() => window.location.reload(), 600);
+                    if (renamed) {
+                        // 改 ID 涉及卡内全部 DOM 标识（data-pid/id/onclick 参数），结构性变更保留一次刷新
+                        showToast('平台 ID 已修改：端点绑定已级联更新，页面即将刷新');
+                        setTimeout(() => window.location.reload(), 700);
+                    } else {
+                        applyPlatformMeta(pid, data.platform);   // V10.11.53 零刷新：局部更新卡头/地址/认证说明
+                        showToast('平台信息已更新');
+                    }
                 } else {
                     showToast(data.message || '保存失败', false);
                 }
@@ -1211,8 +1339,8 @@
             .then(data => {
                 if (data && data.success) {
                     bootstrap.Modal.getInstance(document.getElementById('apiEditModal')).hide();
-                    showToast('API 已保存，页面即将刷新');
-                    setTimeout(() => window.location.reload(), 600);
+                    rebuildPlatformApis(apiEditCtx.pid, data.platform);   // V10.11.53 零刷新：局部重建条目列表与三口径徽章
+                    showToast('API 已保存');
                 } else {
                     showToast(data.message || '保存失败', false);
                 }
@@ -1238,8 +1366,8 @@
         postJSON('/admin/service-config/platform/apis/delete', { platform_id: ctx.pid, api_id: ctx.apiId })
             .then(data => {
                 if (data && data.success) {
-                    showToast('API 已删除，页面即将刷新');
-                    setTimeout(() => window.location.reload(), 600);
+                    rebuildPlatformApis(ctx.pid, data.platform);   // V10.11.53 零刷新
+                    showToast('API 已删除');
                 } else showToast(data.message || '删除失败', false);
             })
             .catch(() => showToast('网络错误，删除失败', false));
@@ -1354,8 +1482,8 @@
             .then(data => {
                 if (data && data.success) {
                     bootstrap.Modal.getInstance(document.getElementById('discoverModal')).hide();
-                    showToast(`${data.message}，页面即将刷新`);
-                    setTimeout(() => window.location.reload(), 900);
+                    rebuildPlatformApis(discoverCtx.pid, data.platform);   // V10.11.53 零刷新
+                    showToast(data.message || '导入完成');
                 } else {
                     btn.disabled = false;
                     showToast(data.message || '导入失败', false);

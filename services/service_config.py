@@ -859,10 +859,12 @@ def get_platform(pid):
 
 
 def save_platform(pid, name=None, base_url=None, auth_type=None,
-                  auth_key_name=None, api_keys=None, api_key=None, enabled=None):
+                  auth_key_name=None, api_keys=None, api_key=None, enabled=None, new_id=None):
     """保存平台档案（增量合并：仅更新传入的非 None 字段）
     - api_keys：Key 池整池覆盖提交（[{key, label, enabled}]，Key 行式管理与端点组同构）
     - api_key：V10.11.47 单 Key 兼容入参（None=不动；''=清空池）
+    - new_id：V10.11.53 平台 ID 改名（级联）——格式/冲突/内置禁改校验由路由层前置完成；
+      此处级联更新全部端点组的 platform 引用（天气/节假日等绑定不断链），再改写档案主键
     内置平台（uapis）不允许删除，只允许改连接参数与 Key 池"""
     pid = str(pid or '').strip()
     if not pid:
@@ -926,6 +928,20 @@ def save_platform(pid, name=None, base_url=None, auth_type=None,
                               if str(api_key).strip() else [])
     if enabled is not None:
         target['enabled'] = bool(enabled)
+    # V10.11.53 平台 ID 改名（级联）：仅自定义平台；内置 uapis 被调用引擎硬编码依赖禁改
+    if new_id:
+        new_id = str(new_id or '').strip().lower()
+        if new_id and new_id != pid and not target.get('builtin'):
+            for g in DEFAULT_GROUPS:
+                urls = get_urls(g)
+                changed = False
+                for u in urls:
+                    if str(u.get('platform', '') or '') == pid:
+                        u['platform'] = new_id
+                        changed = True
+                if changed:
+                    _set_setting(_url_key(g), json.dumps(urls, ensure_ascii=False))
+            target['id'] = new_id
     _persist_platforms(platforms)
     return True
 
@@ -997,13 +1013,15 @@ def get_platform_keys(pid):
 
 
 def mask_platform_key(key):
-    """API Key 脱敏展示：仅显示末 4 位（页面回显用，避免整串泄露）"""
+    """API Key 脱敏展示：末 4 位可见，星号数与真实长度联动（上限 12）
+    V10.11.53：固定 4 星改为 min(长度-4, 12) 星——45 位 Key 显示 12 星+末 4 位，
+    长度感知且不撑爆 Key 行限宽输入框；≤8 位短 Key 保持末 2 位可见"""
     k = str(key or '')
     if not k:
         return ''
     if len(k) <= 8:
-        return '****' + k[-2:]
-    return '****' + k[-4:]
+        return '*' * 4 + k[-2:]
+    return '*' * min(len(k) - 4, 12) + k[-4:]
 
 
 def get_auth_headers(pid, key=None):

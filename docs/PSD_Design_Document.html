@@ -1897,6 +1897,18 @@ graph LR
 </table>
 </div>
 
+<!-- ==================== ADR-83 ==================== -->
+<div class="section">
+<h1>第 11 部分补充二十六：ADR-83 接口广场零刷新架构与表单排版精细化——局部重建、平台 ID 改名级联、认证联动与脱敏长度感知（V10.11.53 落地）</h1>
+<table>
+<tr><th>项</th><th>说明</th></tr>
+<tr><td>背景与痛点</td><td>① <strong>局部操作整页刷新</strong>：模板中 7 处 window.location.reload() 覆盖全部写操作（Key 池保存含启停切换/增删改/排序、平台增删改、API 增删改、目录导入），每次重拉全页重渲染 108 条目录，折叠区展开状态/搜索词/滚动位置全部丢失——「局部操作导致整个布局刷新、过多拉取致性能问题」。② <strong>Key 行排版三连缺陷</strong>：输入框 flex: 0 1 420px 过长，中窄窗口标签(180px)+输入框(420px)+开关组(110px)≈710px 必然 flex-wrap 换行，启停开关被挤成孤行（「启停按钮跟文字描述不在同一列/分隔距离较远」）；Bootstrap .form-check 默认 padding-left:1.5rem 造成文字与开关 44px 空隙；.form-switch .form-check-input 的 float:left + margin-left:-40px（特异性 0,2,0）压过 .platform-enabled{margin:0}（0,1,0），单删 padding 后负 margin 漂移致平台总开关叠字（-36px）。③ <strong>平台 ID 不可改</strong>：作为端点绑定引用键/试验台 @pid|aid 编码/审计标识的关联主键恒只读，用户质疑「没用就去掉」——实为必需，但应支持改名并级联更新引用（经用户确认选方案 B）。④ <strong>认证方式无联动</strong>：添加/编辑平台模态选「无认证」仍恒显示「自定义头/参数名（header/query 型必填）」。⑤ <strong>脱敏星号固定 4 个</strong>：45 位真实 Key 只显 4 星+末 4 位，长度感知缺失。</td></tr>
+<tr><td>决策方案</td><td>① <strong>零刷新架构（数据层+前端局部重建）</strong>：apis/save、apis/delete、apis/import 三路由补返回单平台完整数据（platform/save 已有，补 renamed 标志）；前端四函数分区块重建——rebuildKeyPool（按服务端 keys 重建行，新 uid 回填脱敏）、applyPlatformMeta（卡头名称/地址/认证说明）、rebuildPlatformApis（自定义条目列表+三口径徽章+platApiBadge）、syncPlatData（同步 JS 内存 PLATFORMS_DATA——试验台下拉与编辑模态的数据源，下次打开即最新）；保留两处结构性整页刷新（添加平台、改平台 ID——新增整卡与卡内 data-pid/id/onclick 全量标识变更为低频操作）；平台启停/保存地址既有局部链路补 syncPlatData。② <strong>排版三件套</strong>：pkey-input 420→300px；.plat-switch/.pkey-switch flex: 0 0 auto 永不收缩换行断裂；.form-check 留白清零与 .form-check-input 负 margin 配对清零（Bootstrap float+负 margin 是成对样式，只删一侧必乱）——文字与开关恒 4px 紧邻。③ <strong>平台 ID 改名级联</strong>：platform/save 接受 new_id（格式正则/内置 uapis 禁改/唯一性三重校验），save_platform 遍历 DEFAULT_GROUPS 六组替换 platform 引用（与既有 _url_key 写入路径一致）后改写档案主键；审计记「旧ID → 新ID」；前端自定义平台解锁 epId、内置只读，改 ID 成功后整页刷新。④ <strong>认证联动</strong>：syncAuthKeyName 双模态统一——none/bearer 隐藏并清空头名输入框，header/query 显示必填；打开模态时同步初始状态。⑤ <strong>星号长度感知</strong>：mask_platform_key 输出 min(len-4, 12) 星 + 末 4 位（≤8 位短 Key 保持末 2 位逻辑）。</td></tr>
+<tr><td>验证与效果</td><td>py_compile 3 文件 + 30 模板编译 0 失败；十五启平稳。零刷新 14 项实测：Key 启停切换零刷新（window 存活标记保留+徽章即时更新+折叠区保持展开——旧版必然丢失）/ Key 池保存重建（uid 保持 e542bcc6afd9、12 星脱敏回填）/ 编辑平台名称（卡头+认证说明+JS 内存同步零刷新）/ API 新增（行局部插入+三口径徽章 1 个·自定义 1+空态移除）/ API 删除（行移除+空态恢复+徽章回落）/ 删除平台（卡移除+数据同步）；添加平台与改 ID 保留结构性刷新（toast 说明）。<strong>级联 SQLite 实战</strong>：临时平台绑定停用端点 → 改名 v1053-casc→v1053-casc2 → 端点 platform 字段实测跟随 → 删除平台 → forecast 原值（3 条端点+timeout/retries）逐字节恢复。<strong>布局实测</strong>：900px 窄窗 Key 行三元素同行（input 300px）、文字与开关 4px（Key 行 44px→4px、平台头部 -36px 叠字→4px）、垂直对齐。<strong>联动实测</strong>：双模态初始状态正确（Bearer/无认证默认隐藏头名）、header/query 显示、切回 none 隐藏并清空。worldtime 回归 HTTP 200/564ms（经 Key「ghca」，调用链路零破坏）；演练平台与临时脚本全清理，用户真实数据零污染。</td></tr>
+<tr><td>连带影响</td><td>涉及 services/service_config.py（mask_platform_key 长度感知 + save_platform new_id 参数与六组级联）、routes/routes_ext.py（platform/save 接受 new_id 三重校验+renamed 返回+审计「旧ID → 新ID」；apis/save、apis/delete、apis/import 三路由补 platform 返回）、templates/admin_service_platform.html（CSS 三件套：输入框 300px/开关组不收缩/form-check 留白与负 margin 配对清零；JS：rebuildKeyPool/applyPlatformMeta/rebuildPlatformApis/pcapiRowHtml/syncPlatData/syncAuthKeyName 六新函数+六处 reload 改局部重建；模态：np/ep 头名容器加 id+双下拉 change 联动+epId 内置只读自定义解锁+说明文案更新）；docs/CHANGELOG.md 与本文档双格式同步；README 版本号更新。</td></tr>
+</table>
+</div>
+
 <!-- ==================== 附录 ==================== -->
 <div class="section">
 <h1>附录：文档元数据</h1>
