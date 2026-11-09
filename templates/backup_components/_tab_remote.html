@@ -1,0 +1,83 @@
+<div class="card border-0 shadow-sm rounded-4 mb-4">
+  <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center">
+    <div class="d-flex align-items-center gap-2">
+      <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-cloud-arrow-down text-info me-2"></i>WebDAV 云端快照清单</h5>
+      <span class="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-2 py-1 small">实时网盘资产</span>
+    </div>
+    <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3 shadow-sm" onclick="loadWebdavBackups(true)">
+      <i class="fa-solid fa-arrows-rotate me-1"></i>刷新快照列表
+    </button>
+  </div>
+  <div class="card-body">
+      <!-- 对标 mengya-local 网盘磁盘使用看板 -->
+      <div class="rounded-4 border border-primary-subtle bg-primary-subtle bg-opacity-10 p-3 mb-3" id="remoteQuotaCard">
+        <div class="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-2">
+          <div class="d-flex align-items-center gap-2">
+            <div class="rounded-3 bg-primary text-white p-2 d-flex align-items-center justify-content-center" style="width: 36px; height: 36px;">
+              <i class="fa-solid fa-hard-drive"></i>
+            </div>
+            <div>
+              <div class="d-flex align-items-center gap-2">
+                <h6 class="fw-bold mb-0 text-dark">WebDAV 网盘存储空间</h6>
+                <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2 py-0.5 small" id="remoteQuotaBadge">
+                  已占用 {{ storage_quota.used_percent if storage_quota else 0 }}%
+                </span>
+              </div>
+              <small class="text-muted" id="remoteQuotaSubtext">
+                {% if storage_quota and storage_quota.quota_supported %}网盘服务商实时配额同步{% else %}基于云端快照自适应容量看板{% endif %}
+              </small>
+            </div>
+          </div>
+          <div class="d-flex align-items-center gap-4 small">
+            <div class="text-end">
+              <span class="text-muted d-block" style="font-size: 11px;">总容量</span>
+              <span class="fw-bold text-dark" id="remoteQuotaTotal">{{ storage_quota.total_human if storage_quota else "10.0 GB" }}</span>
+            </div>
+            <div class="text-end">
+              <span class="text-muted d-block" style="font-size: 11px;">已占用</span>
+              <span class="fw-bold text-primary" id="remoteQuotaUsed">{{ storage_quota.used_human if storage_quota else "0 B" }}</span>
+            </div>
+            <div class="text-end">
+              <span class="text-muted d-block" style="font-size: 11px;">剩余可用</span>
+              <span class="fw-bold text-success" id="remoteQuotaAvailable">{{ storage_quota.available_human if storage_quota else "10.0 GB" }}</span>
+            </div>
+          </div>
+        </div>
+        <div class="progress rounded-pill shadow-none" style="height: 6px;">
+          <div class="progress-bar {% if storage_quota and storage_quota.used_percent > 85 %}bg-danger{% elif storage_quota and storage_quota.used_percent > 70 %}bg-warning{% else %}bg-primary{% endif %}"
+               id="remoteQuotaProgressBar"
+               role="progressbar" style="width: {{ storage_quota.used_percent if storage_quota else 0 }}%;"></div>
+        </div>
+      </div>
+    <div class="table-responsive">
+          <!-- V10.11.7 列宽拖拽 -->
+          <table class="table table-hover align-middle mb-0" data-resizable="admin_webdav_backups">
+            <thead class="table-light">
+              <tr>
+                <th data-col="checkbox" data-col-min="32" data-col-max="60"><input type="checkbox" id="selectAllBackups" onclick="toggleSelectAllBackups(this)"></th>
+                <th class="ps-1" data-col="file" data-col-min="200">备份文件</th>
+                <th data-col="size" data-col-min="70" data-col-max="120">大小</th>
+                <th data-col="time" data-col-min="130">备份时间</th>
+                <th data-col="creator" data-col-min="80">创建者</th>
+                <th class="text-end pe-4" data-col="actions" data-col-min="150">操作</th>
+              </tr>
+            </thead>
+            <tbody id="webdavBackupsTableBody">
+              <tr id="loadingWebdavRow">
+                <td colspan="6" class="text-center py-5 text-muted">
+                  <span class="spinner-border spinner-border-sm me-2 text-primary"></span>正在安全拉取云端备份列表...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="d-flex justify-content-between align-items-center mt-2 px-2">
+            <button type="button" class="btn btn-sm btn-outline-danger" id="btnBatchDelete" onclick="batchDeleteBackups()" style="display:none;">
+              <i class="fa-solid fa-trash me-1"></i>批量删除选中
+            </button>
+            <span class="small text-muted" id="selectedCount"></span>
+          </div>
+        </div>
+      </div>
+      
+  </div>
+

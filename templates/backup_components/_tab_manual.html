@@ -1,0 +1,158 @@
+<div class="row g-4 mb-4 align-items-start">
+  <div class="col-lg-7 col-12">
+  <div class="card border-0 shadow-sm rounded-4 p-4">
+    <div class="d-flex align-items-center gap-3 border-bottom pb-3 mb-4">
+      <div class="rounded-circle bg-primary-subtle text-primary p-2 d-flex align-items-center justify-content-center shadow-sm" style="width: 44px; height: 44px;">
+        <i class="fa-solid fa-cloud-arrow-up fs-5"></i>
+      </div>
+      <div>
+        <h5 class="fw-bold mb-1 text-dark">即时手动备份并推送到 WebDAV</h5>
+        <p class="text-muted small mb-0">随时随地创建系统容灾快照，支持直接上云或离线导出</p>
+      </div>
+    </div>
+
+    <form action="{{ url_for('admin_trigger_webdav_backup') }}" method="POST" id="manualBackupForm">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="backup_type" id="manual_backup_type" value="full_backup">
+
+      <div class="mb-4">
+        <label class="form-label fw-bold small text-dark mb-2">选择备份数据范围：</label>
+        <div class="row g-3">
+          <div class="col-md-6 col-12">
+            <div class="p-3 rounded-4 border border-2 border-primary bg-primary-subtle bg-opacity-25 cursor-pointer h-100 backup-type-card" id="card_full_backup" onclick="selectBackupScope('full_backup')">
+              <div class="d-flex align-items-start gap-3">
+                <div class="rounded-3 bg-primary text-white p-2">
+                  <i class="fa-solid fa-layer-group"></i>
+                </div>
+                <div class="flex-grow-1">
+                  <div class="d-flex align-items-center justify-content-between mb-1">
+                    <span class="fw-bold text-dark small">全量系统快照备份</span>
+                    <span class="badge bg-primary text-white rounded-pill px-2 py-0.5" style="font-size: 10px;">推荐（一键容灾）</span>
+                  </div>
+                  <p class="text-muted small mb-0 leading-relaxed" style="font-size: 11px;">
+                    打包全部数据表、权限配置、API 平台与 Key 池设置及系统元数据 (.zip)
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-6 col-12">
+            <div class="p-3 rounded-4 border border-2 bg-light cursor-pointer h-100 backup-type-card" id="card_db_backup" onclick="selectBackupScope('db_backup')">
+              <div class="d-flex align-items-start gap-3">
+                <div class="rounded-3 bg-secondary text-white p-2">
+                  <i class="fa-solid fa-database"></i>
+                </div>
+                <div class="flex-grow-1">
+                  <div class="d-flex align-items-center justify-content-between mb-1">
+                    <span class="fw-bold text-dark small">纯数据库原子快照</span>
+                    <span class="badge bg-secondary text-white rounded-pill px-2 py-0.5" style="font-size: 10px;">精简模式</span>
+                  </div>
+                  <p class="text-muted small mb-0 leading-relaxed" style="font-size: 11px;">
+                    流式导出当前数据库模式的核心关系表业务数据
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 加密选项 -->
+      <div class="p-3 rounded-4 bg-light border mb-4">
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" name="use_encrypt" id="useEncrypt" onchange="toggleEncryptSection()">
+          <label class="form-check-label fw-bold small text-dark" for="useEncrypt">
+            <i class="fa-solid fa-lock text-warning me-1"></i>启用 AES-256 高强度加密
+          </label>
+          <span class="text-muted small ms-2">（勾选后可自定义输入密码，未输入时使用管理员预设密码）</span>
+        </div>
+        <div id="encryptSection" style="display:none;" class="pt-2">
+          <div class="row g-2">
+            <div class="col-md-7">
+              <div class="input-group input-group-sm">
+                <span class="input-group-text bg-white"><i class="fa-solid fa-key text-muted"></i></span>
+                <input type="password" name="manual_encrypt_password" id="manualEncryptPwd" class="form-control" placeholder="请输入 AES-256 加密密码" autocomplete="new-password">
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('manualEncryptPwd', this)" title="切换显隐">
+                  <i class="fa-regular fa-eye"></i>
+                </button>
+              </div>
+            </div>
+            <div class="col-md-5 d-flex align-items-center">
+              <span class="text-muted small" style="font-size: 11px;">解密时需提供此密码。</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 触发按钮组 -->
+      <div class="d-flex flex-wrap align-items-center justify-content-end gap-3 pt-2">
+        <button type="submit" class="btn btn-primary rounded-pill px-4 py-2 fw-bold shadow-sm">
+          <i class="fa-solid fa-cloud-arrow-up me-1"></i>立即备份并上传至 WebDAV
+        </button>
+      </div>
+    </form>
+  </div>
+</div>
+  <!-- 卡片 1: 本地数据库导出下载 -->
+  <div class="col-lg-5 col-12">
+    <div class="card border-0 shadow-sm rounded-4">
+      <div class="card-header bg-white py-3 border-light d-flex align-items-center justify-content-between">
+        <h5 class="card-title fw-bold mb-0 text-dark">
+          <i class="fa-solid fa-cloud-arrow-down text-success me-2"></i>本地数据导出
+        </h5>
+        <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2 py-1 small">
+          <i class="fa-solid fa-download me-1"></i>备份
+        </span>
+      </div>
+      <div class="card-body p-4">
+        <div>
+          {% if not current_user.is_admin %}
+          <div class="alert alert-info border-0 rounded-3 mb-3 py-2 px-3 small">
+            <i class="fa-solid fa-shield-halved me-1 text-info"></i>您导出的备份仅包含本人的账目明细与礼金数据（不含系统配置与其他用户数据）。
+          </div>
+          {% else %}
+          <div class="alert alert-info border-0 rounded-3 mb-3 py-2 px-3 small">
+            <i class="fa-solid fa-shield-halved me-1 text-info"></i>管理员导出的为整库全量备份（含全部用户数据、权限配置与系统配置——含外部接口配置及 API 平台 Key 等敏感设置），请妥善保管备份文件，谨防外传泄露。
+          </div>
+          {% endif %}
+          <label class="form-label fw-bold text-dark mb-2">当前运行环境与格式</label>
+          <div class="p-3 bg-light rounded-3 border mb-3">
+            <div class="d-flex align-items-center justify-content-between mb-2">
+              <span class="small text-muted">运行模式：</span>
+              {% if current_db_type == 'sqlite' %}
+              <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1">SQLite</span>
+              {% elif current_db_type == 'pg_shared' %}
+              <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">共享 PostgreSQL</span>
+              {% elif current_db_type == 'pg_indep' %}
+              <span class="badge bg-info-subtle text-info border border-info-subtle px-2 py-1">独立 PostgreSQL</span>
+              {% else %}
+              <span class="badge bg-secondary">未知模式</span>
+              {% endif %}
+            </div>
+            <div class="d-flex align-items-center justify-content-between mb-0">
+              <span class="small text-muted">导出格式：</span>
+              <span class="fw-semibold small text-dark">
+                {% if current_db_type == 'sqlite' %}
+                标准 <code>.db</code> 原生文件
+                {% else %}
+                结构化 <code>.sql</code> 脚本
+                {% endif %}
+              </span>
+            </div>
+          </div>
+          <p class="small text-muted mb-3 leading-relaxed">
+            点击下方按钮将直接生成全量/个人数据备份文件，文件名包含生成时间、数据库类型与操作人标识。
+          </p>
+        </div>
+        <div class="pt-2">
+          <a href="{{ url_for('admin_download_local_backup') }}" class="btn btn-success w-100 rounded-pill py-2 shadow-sm fw-bold">
+            <i class="fa-solid fa-download me-1"></i>一键下载数据库备份 ({% if current_db_type == 'sqlite' %}.db{% else %}.sql{% endif %})
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  
+</div>

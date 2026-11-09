@@ -41,6 +41,63 @@ _PG_GLOBAL_TABLES = [t for t in _ALL_TABLES_ORDERED if t not in _PG_USER_TABLES]
 SNAPSHOT_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'snapshots'))
 
 
+# 礼金系统核心特征签名表（用于沙箱恢复前的指纹与拓扑安全预检）
+GIFT_SIGNATURE_TABLES = [
+    'users',
+    'gift_records',
+    'system_settings',
+    'banquets',
+    'anniversary_reminders',
+    'operation_logs',
+]
+
+def verify_gift_database_fingerprint(db_path: str) -> tuple:
+    """
+    【第一防线：系统专属特征签名与沙箱预检】
+    参考 mengya 容灾体系：在物理覆盖或合并任何 SQLite 数据库前，
+    深度校验其 PRAGMA integrity_check 与核心特征表指纹，
+    杜绝将任意异构 db 物理覆盖导致主表缺失和系统彻底瘫痪 (no such table: users)。
+    返回: (ok: bool, msg: str, stats: dict)
+    """
+    if not os.path.exists(db_path):
+        return False, "待校验的数据库文件不存在", {}
+
+    try:
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("PRAGMA integrity_check;")
+        res = cur.fetchone()
+        if not (res and res[0] == "ok"):
+            conn.close()
+            return False, f"数据库物理文件已损坏或非合法 SQLite 文件: {res}", {}
+
+        cur.execute("SELECT name FROM sqlite_master WHERE type='table';")
+        tables = {r[0] for r in cur.fetchall()}
+
+        stats = {}
+        for t in tables:
+            try:
+                cur.execute(f'SELECT COUNT(*) FROM "{t}";')
+                stats[t] = cur.fetchone()[0]
+            except Exception:
+                stats[t] = 0
+
+        conn.close()
+
+        matched = [t for t in GIFT_SIGNATURE_TABLES if t in tables]
+        if 'users' not in tables or 'gift_records' not in tables or len(matched) < 3:
+            return False, (
+                "【安全熔断拦截】该文件不符合礼金记账系统备份规范！"
+                "检测到该文件缺少系统的核心数据表结构（必须包含 users、gift_records、system_settings 等）。"
+                "为防止主系统崩溃瘫痪，系统已主动熔断并拒绝执行恢复操作。"
+            ), stats
+
+        return True, "礼金系统特征指纹校验通过", stats
+    except Exception as e:
+        return False, f"读取数据库结构失败: {str(e)}", {}
+
+
+
 def _is_pg_mode():
     """检查当前是否为 PostgreSQL 模式"""
     return os.environ.get('DATABASE_URL', '').strip().startswith('postgresql://')
@@ -384,6 +441,26 @@ def create_prerestore_snapshot(user, db_path=None):
                 src_conn.close()
                 dst_conn.close()
 
+        # 统计原库统计指标（对标 mengya 容灾元信息）
+        total_tables = 0
+        total_records = 0
+        try:
+            if not _is_pg_mode() and os.path.exists(snapshot_path):
+                s_conn = sqlite3.connect(snapshot_path)
+                s_cur = s_conn.cursor()
+                s_cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                t_names = [r[0] for r in s_cur.fetchall() if not r[0].startswith("sqlite_")]
+                total_tables = len(t_names)
+                for t in t_names:
+                    try:
+                        s_cur.execute(f'SELECT COUNT(*) FROM "{t}"')
+                        total_records += s_cur.fetchone()[0]
+                    except Exception:
+                        pass
+                s_conn.close()
+        except Exception:
+            pass
+
         info = {
             'filename': snapshot_filename,
             'filepath': snapshot_path,
@@ -391,7 +468,9 @@ def create_prerestore_snapshot(user, db_path=None):
             'operator': username,
             'user_id': user.id if user else None,
             'is_admin': bool(getattr(user, 'is_admin', False)),
-            'db_type': db_type
+            'db_type': db_type,
+            'total_tables': total_tables,
+            'total_records': total_records
         }
         meta_file = os.path.join(SNAPSHOT_DIR, 'latest_snapshot.json')
         with open(meta_file, 'w', encoding='utf-8') as f:
@@ -464,6 +543,16 @@ def merge_user_scoped_backup(db_path, backup_db_path, user):
         src = sqlite3.connect(backup_db_path)
         src.row_factory = sqlite3.Row
         src.execute('PRAGMA busy_timeout = 8000')
+
+        # 沙箱物理完整性校验防线
+        try:
+            chk = src.execute('PRAGMA integrity_check').fetchone()
+            if not (chk and chk[0] == 'ok'):
+                src.close()
+                return False, f'备份文件物理结构损坏或非合法 SQLite 文件 ({chk[0] if chk else "未知错误"})', {}
+        except Exception as _ce:
+            src.close()
+            return False, f'无法解析备份文件物理结构: {str(_ce)}', {}
 
         existing = {r[0] for r in src.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         user_tables = ['banquets', 'gift_records', 'anniversary_reminders']
@@ -544,11 +633,32 @@ def _restore_to_sqlite(source_file_path, user, is_full_restore, db_path=None):
     # 场景 1: SQLite 源 -> SQLite 目标
     if src_format == 'sqlite':
         if is_full_restore:
-            test_conn = sqlite3.connect(source_file_path)
-            integrity = test_conn.execute('PRAGMA integrity_check').fetchone()[0]
-            test_conn.close()
-            if integrity != 'ok':
-                return False, f'恢复失败：备份文件完整性自检未通过 ({integrity})', {}
+            # 1. 第一防线：执行礼金系统专属特征签名与沙箱预检，杜绝非礼金库导致系统瘫痪
+            fp_ok, fp_msg, fp_stats = verify_gift_database_fingerprint(source_file_path)
+            if not fp_ok:
+                return False, fp_msg, {}
+
+            # 2. 暂存当前活跃操作人账户（防踢出保护）与 WebDAV 配置（防冲刷保护）
+            preserved_admin = None
+            preserved_webdav = None
+            try:
+                cur_conn = sqlite3.connect(db_path)
+                cur_conn.row_factory = sqlite3.Row
+                c_cur = cur_conn.cursor()
+                # 提取当前操作人信息
+                if user and hasattr(user, "username"):
+                    c_cur.execute("SELECT * FROM users WHERE username = ?", (user.username,))
+                    r_admin = c_cur.fetchone()
+                    if r_admin:
+                        preserved_admin = dict(r_admin)
+                # 提取系统当前最新的一份 WebDAV 配置
+                c_cur.execute("SELECT * FROM backup_configs ORDER BY id DESC LIMIT 1")
+                r_webdav = c_cur.fetchone()
+                if r_webdav:
+                    preserved_webdav = dict(r_webdav)
+                cur_conn.close()
+            except Exception:
+                pass
 
             for suffix in ('-wal', '-shm'):
                 p = db_path + suffix
@@ -570,7 +680,39 @@ def _restore_to_sqlite(source_file_path, user, is_full_restore, db_path=None):
                         os.remove(p)
                     except Exception:
                         pass
-            return True, 'SQLite 数据库全量恢复成功', {}
+
+            # 3. 校验并自愈防踢与防冲刷资产（当前管理员账户 + WebDAV 配置）
+            try:
+                heal_conn = sqlite3.connect(db_path)
+                heal_cur = heal_conn.cursor()
+                if preserved_admin:
+                    # 检查新库中是否已经包含该操作人账户
+                    heal_cur.execute("SELECT id FROM users WHERE username = ?", (preserved_admin["username"],))
+                    if not heal_cur.fetchone():
+                        # 新库无此管理员：无缝注入当前执行恢复的管理员，确保绝不会被踢出系统
+                        cols = [c for c in preserved_admin.keys() if c != "id"]
+                        col_str = ", ".join(f'"{c}"' for c in cols)
+                        ph_str = ", ".join(["?"] * len(cols))
+                        vals = tuple(preserved_admin[c] for c in cols)
+                        heal_cur.execute(f'INSERT INTO "users" ({col_str}) VALUES ({ph_str})', vals)
+                        print(f"[Restore Healing] 已为恢复后的数据库自愈保留当前管理员: {preserved_admin["username"]}")
+                if preserved_webdav:
+                    # 检查新库是否有 WebDAV 配置；若无或为空，自愈写回当前的 WebDAV 配置
+                    heal_cur.execute("SELECT COUNT(*) FROM backup_configs")
+                    cnt = heal_cur.fetchone()[0]
+                    if cnt == 0:
+                        w_cols = [c for c in preserved_webdav.keys() if c != "id"]
+                        w_col_str = ", ".join(f'"{c}"' for c in w_cols)
+                        w_ph_str = ", ".join(["?"] * len(w_cols))
+                        w_vals = tuple(preserved_webdav[c] for c in w_cols)
+                        heal_cur.execute(f'INSERT INTO "backup_configs" ({w_col_str}) VALUES ({w_ph_str})', w_vals)
+                        print("[Restore Healing] 已为恢复后的数据库自愈保留 WebDAV 配置")
+                heal_conn.commit()
+                heal_conn.close()
+            except Exception as _he:
+                print(f"[Restore Healing Warning] 管理员防踢/WebDAV回填跳过: {_he}")
+
+            return True, 'SQLite 数据库全量恢复成功（特征指纹检验通过，管理员与云端配置已安全保全）', fp_stats
         else:
             return merge_user_scoped_backup(db_path, source_file_path, user)
 
@@ -835,13 +977,16 @@ def universal_restore_database(file_path, user, target_filename='', is_rollback=
     else:
         ok, msg, stats = _restore_to_sqlite(file_path, user=user, is_full_restore=is_full_restore, db_path=db_path)
 
-    # 4. 自愈结构与补列
+    # 4. 第四防线核心：强制后置结构迁移与缺列自愈 (Post-Restore Force Migration)
+    # 对标 mengya ADR-77：无论导入何种老旧版本备份，原地无条件执行全量补表补列与管理员账号同步，
+    # 彻底杜绝未重启前发起登录抛出 no such column 的 500 崩溃
     if ok:
         try:
             from app import init_database
-            init_database()
+            init_database(force_migrate=True)
+            print("[Post-Restore Healing] 已原地强制执行全量表结构迁移自愈，所有历史缺失列已补齐！")
         except Exception as e:
-            print(f"[Schema Healing Warning] init_database 执行异常: {e}", file=sys.stderr)
+            print(f"[Schema Healing Warning] 强制迁移自愈异常: {e}", file=sys.stderr)
 
     return ok, msg, stats
 
@@ -866,3 +1011,47 @@ def rollback_prerestore_snapshot(user, db_path=None):
             pass
         return True, f'已成功撤销本次导入，数据已完整回滚到导入前状态（快照时间: {snapshot.get("created_at")}）！', stats
     return False, f'回滚失败: {msg}', stats
+
+
+def get_storage_quota_stats():
+    """
+    【对标 mengya 容灾存储配额探测】
+    统计系统运行磁盘空间及备份存储目录大小与使用率
+    """
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(base_dir, 'data')
+    snaps_dir = os.path.join(data_dir, 'snapshots')
+
+    try:
+        total, used, free = shutil.disk_usage(base_dir)
+        used_pct = round((used / total) * 100, 1)
+    except Exception:
+        total, used, free, used_pct = 0, 0, 0, 0
+
+    snap_bytes = 0
+    snap_count = 0
+    if os.path.exists(snaps_dir):
+        for fn in os.listdir(snaps_dir):
+            fp = os.path.join(snaps_dir, fn)
+            if os.path.isfile(fp):
+                snap_bytes += os.path.getsize(fp)
+                snap_count += 1
+
+    def fmt_size(b):
+        if b < 1024:
+            return f"{b} B"
+        elif b < 1024 * 1024:
+            return f"{b/1024:.1f} KB"
+        elif b < 1024 * 1024 * 1024:
+            return f"{b/(1024*1024):.2f} MB"
+        else:
+            return f"{b/(1024*1024*1024):.2f} GB"
+
+    return {
+        'disk_total': fmt_size(total),
+        'disk_free': fmt_size(free),
+        'disk_used': fmt_size(used),
+        'disk_used_percent': used_pct,
+        'snaps_size': fmt_size(snap_bytes),
+        'snaps_count': snap_count
+    }

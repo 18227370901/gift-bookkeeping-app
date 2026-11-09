@@ -314,23 +314,22 @@
 
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
-        <!-- 全局悬浮通知浮层容器：脱离文档普通流，彻底根除顶部弹窗挤压推挤页面的抖动缺陷 -->
-        <div class="flash-alert-overlay position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 2060; min-width: 320px; max-width: 90vw; pointer-events: none;">
+        <!-- 全局悬浮通知浮层容器：屏幕绝对居中 + 提示框内严格图文水平居中 + 移除X关闭按钮 + 自动淡出 -->
+        <div class="flash-alert-overlay position-fixed top-0 start-50 translate-middle-x p-3 d-flex flex-column align-items-center" style="z-index: 2080; width: fit-content; max-width: min(92vw, 580px); pointer-events: none;">
             {% for category, message in messages %}
-            <div class="alert alert-{{ category }} alert-dismissible fade show shadow-lg border-0 py-2 px-3 mb-2 auto-dismiss-alert d-flex align-items-center justify-content-between" role="alert" style="pointer-events: auto;">
-                <div class="d-flex align-items-center gap-2">
-                    {% if category == 'success' %}
-                        <i class="fa-solid fa-circle-check text-success fs-5"></i>
-                    {% elif category in ['danger', 'error'] %}
-                        <i class="fa-solid fa-circle-xmark text-danger fs-5"></i>
-                    {% elif category == 'warning' %}
-                        <i class="fa-solid fa-triangle-exclamation text-warning fs-5"></i>
+            <div class="alert alert-{{ category }} fade show shadow-lg border-0 py-2 px-4 mb-2 auto-dismiss-alert d-inline-flex align-items-center justify-content-center text-center rounded-pill" role="alert" style="pointer-events: auto; width: fit-content; max-width: 100%;">
+                <div class="d-inline-flex align-items-center justify-content-center gap-2 text-center">
+                    {% if category == "success" %}
+                        <i class="fa-solid fa-circle-check text-success fs-5 flex-shrink-0"></i>
+                    {% elif category in ["danger", "error"] %}
+                        <i class="fa-solid fa-circle-xmark text-danger fs-5 flex-shrink-0"></i>
+                    {% elif category == "warning" %}
+                        <i class="fa-solid fa-triangle-exclamation text-warning fs-5 flex-shrink-0"></i>
                     {% else %}
-                        <i class="fa-solid fa-circle-info text-primary fs-5"></i>
+                        <i class="fa-solid fa-circle-info text-primary fs-5 flex-shrink-0"></i>
                     {% endif %}
-                    <span>{{ message }}</span>
+                    <span class="fw-medium">{{ message }}</span>
                 </div>
-                <button type="button" class="btn-close ms-3" data-bs-dismiss="alert" aria-label="Close"></button>
             </div>
             {% endfor %}
         </div>
@@ -688,16 +687,12 @@
     })();
     </script>
 
-    <!-- 全局异步操作通用 Toast 提示容器 -->
-    <!-- V10.11.46：max-width 约束防止长文案撑出巨型提示条；提示条顶部居中、数秒后自动消失，无需手动点击 -->
-    <div class="toast-container position-fixed top-0 start-50 translate-middle-x p-3" style="z-index: 2050;">
-        <div id="globalAppToast" class="toast align-items-center text-white border-0 shadow" role="alert" aria-live="assertive" aria-atomic="true" style="max-width: min(92vw, 520px);">
-            <div class="d-flex">
-                <div class="toast-body d-flex align-items-center gap-2" id="globalAppToastBody">
-                    <i class="fa-solid fa-circle-check fs-6" id="globalAppToastIcon"></i>
-                    <span id="globalAppToastMsg">操作成功</span>
-                </div>
-                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+    <!-- 全局异步操作通用 Toast 提示容器：屏幕绝对居中 + 提示框内严格图文水平居中 + 移除X关闭按钮 + 自动淡出 -->
+    <div class="toast-container position-fixed top-0 start-50 translate-middle-x p-3 d-flex flex-column align-items-center" style="z-index: 2080; width: fit-content; max-width: min(92vw, 580px); pointer-events: none;">
+        <div id="globalAppToast" class="toast align-items-center text-white border-0 shadow-lg rounded-pill" role="alert" aria-live="assertive" aria-atomic="true" style="pointer-events: auto; width: fit-content; max-width: 100%;">
+            <div class="toast-body d-inline-flex align-items-center justify-content-center text-center gap-2 py-2 px-4" id="globalAppToastBody">
+                <i class="fa-solid fa-circle-check fs-6 flex-shrink-0" id="globalAppToastIcon"></i>
+                <span id="globalAppToastMsg" class="fw-medium">操作成功</span>
             </div>
         </div>
     </div>

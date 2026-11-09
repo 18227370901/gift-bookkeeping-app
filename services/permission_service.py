@@ -222,7 +222,7 @@ def apply_default_permissions_to_user(user, force_save=True):
     
     # 1. 计算 allowed_menus
     menus = []
-    menu_keys = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'dashboard', 'family', 'weather', 'webhooks', 'backups', 'tools']
+    menu_keys = ['ledger', 'banquets', 'reconciliation', 'reminders', 'recycle_bin', 'dashboard', 'family', 'weather', 'webhooks', 'backups', 'tools', 'service_config']
     for m in menu_keys:
         if template.get(f'menu_{m}', False):
             menus.append(m)

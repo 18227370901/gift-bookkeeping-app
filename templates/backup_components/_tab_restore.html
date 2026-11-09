@@ -1,0 +1,103 @@
+<div class="row g-4 mb-4">
+  <!-- 卡片 2: 本地数据库恢复与跨库迁移 -->
+  <div class="col-lg-6 col-12">
+    <div class="card border-0 shadow-sm rounded-4 h-100">
+      <div class="card-header bg-white py-3 border-light d-flex align-items-center justify-content-between">
+        <h5 class="card-title fw-bold mb-0 text-dark">
+          <i class="fa-solid fa-rotate text-danger me-2"></i>数据恢复与迁移
+        </h5>
+        <span class="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill px-2 py-1 small">
+          <i class="fa-solid fa-bolt me-1"></i>跨引擎
+        </span>
+      </div>
+      <div class="card-body d-flex flex-column justify-content-between">
+        <form action="{{ url_for('admin_upload_local_backup') }}" method="POST" enctype="multipart/form-data" class="d-flex flex-column h-100 justify-content-between" onsubmit="return confirm('警告：上传恢复数据库将{% if current_user.is_admin %}替换现有数据（系统会自动先生成前置快照，支持一键撤销）{% else %}合并您的个人数据（主键重新自动分配并外键保真）{% endif %}，是否确认继续？');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div>
+            {% if not current_user.is_admin %}
+            <div class="alert alert-info border-0 rounded-3 mb-3 py-2 px-3 small">
+              <i class="fa-solid fa-user-shield me-1 text-info"></i>恢复时系统将自动为您合并账目，绝不影响其他用户。
+            </div>
+            {% endif %}
+            
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-dark mb-1">选择备份文件 (.db / .sql / .zip)</label>
+              <input type="file" name="backup_file" accept=".db,.sql,.zip" class="form-control form-control-sm rounded-3" required>
+            </div>
+
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-dark mb-1">解密密码 (可选)</label>
+              <div class="input-group input-group-sm">
+                <span class="input-group-text bg-light text-muted"><i class="fa-solid fa-key"></i></span>
+                <input type="password" name="decrypt_password" id="localRestoreDecryptPwd" class="form-control" placeholder="若为 .zip 加密包请输入密码（未加密留空）" autocomplete="new-password">
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('localRestoreDecryptPwd', this)" title="切换密码显隐">
+                  <i class="fa-regular fa-eye"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="p-2 bg-light rounded-3 border mb-3 small text-muted">
+              <div class="d-flex align-items-center gap-1 mb-1 text-dark fw-semibold">
+                <i class="fa-solid fa-circle-check text-success"></i> 智能格式自适应
+              </div>
+              支持开发环境 SQLite 与生产环境 PG 跨引擎热导入，覆盖前自动建立安全快照。
+            </div>
+          </div>
+
+          <div class="pt-2">
+            <button type="submit" class="btn btn-outline-danger w-100 rounded-pill py-2 shadow-sm fw-bold">
+              <i class="fa-solid fa-upload me-1"></i>上传备份文件并恢复
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 卡片 3: 附件与其它文件恢复 -->
+  
+  <div class="col-lg-6 col-12">
+    <div class="card border-0 shadow-sm rounded-4 h-100">
+      <div class="card-header bg-white py-3 border-light d-flex align-items-center justify-content-between">
+        <h5 class="card-title fw-bold mb-0 text-dark">
+          <i class="fa-solid fa-paperclip text-info me-2"></i>附件文件恢复
+        </h5>
+        <span class="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-2 py-1 small">
+          <i class="fa-solid fa-file me-1"></i>附加资源
+        </span>
+      </div>
+      <div class="card-body d-flex flex-column justify-content-between">
+        <form action="{{ url_for('admin_upload_attachment') }}" method="POST" enctype="multipart/form-data" class="d-flex flex-column h-100 justify-content-between">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div>
+            <label class="form-label fw-bold text-dark mb-1">选择附件或其他备份文件</label>
+            <p class="small text-muted mb-3">支持将导出的账单报表、账本表格或打包附件文件上传还原至系统存储区。</p>
+            
+            <div class="mb-3">
+              <input type="file" name="attachment_file" accept=".json,.csv,.txt,.xlsx,.docx,.zip" class="form-control form-control-sm rounded-3" required>
+            </div>
+
+            <div class="p-3 bg-light rounded-3 border mb-3">
+              <div class="small text-dark fw-semibold mb-2"><i class="fa-solid fa-layer-group text-info me-1"></i>兼容格式清单</div>
+              <div class="d-flex flex-wrap gap-1">
+                <span class="badge bg-white text-secondary border">JSON</span>
+                <span class="badge bg-white text-secondary border">CSV</span>
+                <span class="badge bg-white text-secondary border">XLSX</span>
+                <span class="badge bg-white text-secondary border">DOCX</span>
+                <span class="badge bg-white text-secondary border">TXT</span>
+                <span class="badge bg-white text-secondary border">ZIP</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="pt-2">
+            <button type="submit" class="btn btn-outline-info w-100 rounded-pill py-2 shadow-sm fw-bold">
+              <i class="fa-solid fa-cloud-arrow-up me-1"></i>上传并恢复附件
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+

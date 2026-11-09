@@ -863,7 +863,7 @@
                               <div class="form-check mb-0 d-flex align-items-center">
                                 <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="service_config" id="menu_service_config_{{ u.id }}" {% if u.can_access_menu('service_config') %}checked{% endif %}>
                                 <label class="form-check-label fw-semibold small text-dark" for="menu_service_config_{{ u.id }}">
-                                  <i class="fa-solid fa-server text-warning me-1"></i>外部接口配置
+                                  <i class="fa-solid fa-server text-warning me-1"></i>外部接口配置 <span class="badge bg-warning-subtle text-warning border border-warning-subtle rounded-pill px-1 small" style="font-size: 10px;">只读浏览</span>
                                 </label>
                               </div>
                               <div class="small text-muted"><i class="fa-solid fa-eye me-1"></i>只读浏览端点、平台与 API 目录（写操作仅管理员）</div>
@@ -885,7 +885,7 @@
                   <div class="form-check mb-0 d-flex align-items-center">
                     <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="service_config" id="batch_menu_service_config">
                     <label class="form-check-label fw-semibold small text-dark" for="batch_menu_service_config">
-                      <i class="fa-solid fa-server text-warning me-1"></i>外部接口配置
+                      <i class="fa-solid fa-server text-warning me-1"></i>外部接口配置 <span class="badge bg-warning-subtle text-warning border border-warning-subtle rounded-pill px-1 small" style="font-size: 10px;">只读浏览</span>
                     </label>
                   </div>
                   <div class="small text-muted"><i class="fa-solid fa-eye me-1"></i>只读浏览端点、平台与 API 目录（写操作仅管理员）</div>

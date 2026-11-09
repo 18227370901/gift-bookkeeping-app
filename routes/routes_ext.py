@@ -16,6 +16,7 @@ from services.models import (
 )
 from services.webhook_utils import trigger_webhook_event, test_single_webhook, validate_wecom_credentials, extract_chatid_from_url, start_wecom_long_connection_listener, _cached_chatids, record_webhook_log, _send_payload, send_wecom_long_connection_message
 from services.webdav_utils import (
+    get_webdav_storage_quota,
     test_connection as test_webdav_connection,
     upload_backup as upload_backup_webdav,
     list_backups as list_webdav_backups,
@@ -101,7 +102,8 @@ from services.backup_engine import (
     get_latest_prerestore_snapshot,
     rollback_prerestore_snapshot,
     universal_restore_database
-)
+,
+    get_storage_quota_stats)
 
 _PG_ALL_TABLES = _ALL_TABLES_ORDERED
 
@@ -1009,7 +1011,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             )
         except Exception:
             pass
-        flash(f'已成功还原 [{title}]！', 'success')
+        flash(f'已成功还原「{title}」创建成功，可开始录入宾客礼金明细！', 'success')
         return redirect(url_for('recycle_bin_view'))
 
     @app.route('/recycle_bin/purge/<string:entity_type>/<int:item_id>', methods=['POST'])
@@ -1059,7 +1061,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             )
         except Exception:
             pass
-        flash(f'已彻底删除 [{title}]，无法恢复！', 'success')
+        flash(f'已彻底销毁「{title}」，磁盘历史数据已清理完毕！', 'success')
         return redirect(url_for('recycle_bin_view'))
 
     @app.route('/recycle_bin/batch_restore', methods=['POST'])
@@ -1390,7 +1392,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 )
             except Exception:
                 pass
-            flash(f'已成功从礼金账本拉取最新数据完成同步！共核对 {len(balance_list)} 位亲友的人情往来。', 'success')
+            flash(f'人情往来数据同步完成：已精准核对 {len(balance_list)} 位亲友的人情往来。', 'success')
         except Exception as e:
             flash(f'同步人情对账数据失败：{str(e)}', 'danger')
         return redirect(url_for('reconciliation_view'))
@@ -1702,18 +1704,18 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             )
             db.session.add(b)
             db.session.commit()
-            safe_log('创建大账本', f"创建了专属宴席账本 [{title}]，办宴成本: {banquet_cost}元")
+            safe_log('创建大账本', f"创建了专属专属宴席台账「{title}]，办宴成本: {banquet_cost}元")
             try:
                 trigger_webhook_event(
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_create',
-                    f'创建宴席账本 [{title}]',
+                    f'创建专属宴席台账「{title}]',
                     f'操作人：{current_user.username} | 页面：专属宴席 | 名称：{title} | 办宴成本：{banquet_cost}元',
                     page_key='banquets', user_name=current_user.username,
                     operator_id=current_user.id
                 )
             except Exception:
                 pass
-            flash(f'成功创建宴席账本 [{title}]！', 'success')
+            flash(f'专属宴席台账「{title}」创建成功，可开始录入宾客礼金明细！', 'success')
             return redirect(url_for('banquets_view'))
 
         # 页面加载时自动从礼金账本获取数据并按办席原因自动生成/更新大账本
@@ -1964,11 +1966,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             pass
         b.notes = request.form.get('notes', b.notes).strip()
         db.session.commit()
-        safe_log('修改大账本', f"更新了宴席账本 [{b.title}] 的信息与成本支出")
+        safe_log('修改大账本', f"更新了专属宴席台账「{b.title}] 的信息与成本支出")
         try:
             trigger_webhook_event(
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_update',
-                f'修改宴席账本 [{b.title}]',
+                f'修改专属宴席台账「{b.title}]',
                 f'操作人：{current_user.username} | 页面：专属宴席 | 账本：{b.title}',
                 page_key='banquets', user_name=current_user.username,
                 operator_id=current_user.id
@@ -2003,7 +2005,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         try:
             trigger_webhook_event(
                 WebhookConfig.query.filter_by(is_enabled=True).all(), 'record_delete',
-                f'删除宴席账本 [{b_title}]',
+                f'删除专属宴席台账「{b_title}]',
                 f'操作人：{current_user.username} | 页面：专属宴席 | 账本：{b_title}',
                 page_key='banquets', user_name=current_user.username,
                 operator_id=current_user.id
@@ -2011,8 +2013,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         except Exception:
             pass
         if is_ajax:
-            return jsonify({'code': 200, 'message': f'宴席账本 [{b_title}] 已成功移入回收站！'})
-        flash(f'宴席账本 [{b_title}] 已成功移入回收站！', 'success')
+            return jsonify({'code': 200, 'message': f'专属宴席台账「{b_title}」已暂存至回收站，可随时撤销还原！'})
+        flash(f'专属宴席台账「{b_title}」已暂存至回收站，可随时撤销还原！', 'success')
         return redirect(url_for('banquets_view'))
 
     @app.route('/banquets/batch_delete', methods=['POST'])
@@ -2108,8 +2110,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         except Exception:
             pass
         if is_ajax:
-            return jsonify({'code': 200, 'message': f'客人 [{rec_name}] 的记录已移入回收站！'})
-        flash(f'客人 [{rec_name}] 的记录已成功移入回收站！', 'success')
+            return jsonify({'code': 200, 'message': f'宾客「{rec_name}] 的记录已移入回收站！'})
+        flash(f'宾客「{rec_name}」礼金记录已暂存至回收站，可随时撤销还原！', 'success')
         return redirect(url_for('banquet_detail_view', banquet_id=banquet_id))
 
     @app.route('/banquet/<int:banquet_id>/records/batch_delete', methods=['POST'])
@@ -2295,7 +2297,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         except Exception:
             pass
         if not is_ajax:
-            flash(f"成功登记客人 [{name}] 礼金 ¥{amount:.2f}！", 'success')
+            flash(f"成功登记宾客「{name}] 礼金 ¥{amount:.2f}！", 'success')
             return redirect(url_for('banquet_detail_view', banquet_id=b.id))
         return jsonify({
             'code': 200,
@@ -2462,7 +2464,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         if r and r.banquet_id == b.id:
             r.banquet_id = None
             db.session.commit()
-            safe_log('移出宴席明细', f"将客人 [{r.name}] 的记录移出专属宴席 [{b.title}]（保留在主账本中）")
+            safe_log('移出宴席明细', f"将宾客「{r.name}] 的记录移出专属宴席 [{b.title}]（保留在主账本中）")
             # V10.3: 补充移出宴席明细推送
             try:
                 trigger_webhook_event(
@@ -2474,7 +2476,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 )
             except Exception:
                 pass
-            flash(f'已将客人 [{r.name}] 的记录移出专属宴席（主账本数据仍完好保留）！', 'success')
+            flash(f'已将宾客「{r.name}] 的记录移出专属宴席（主账本数据仍完好保留）！', 'success')
         return redirect(url_for('banquet_detail_view', banquet_id=banquet_id))
 
     @app.route('/banquet/<int:banquet_id>/share', methods=['POST'])
@@ -4011,7 +4013,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             can_edit_others_tasks=current_user.can_edit_others_scheduled_tasks(),
             can_delete_others_tasks=current_user.can_delete_others_scheduled_tasks(),
             current_db_type=get_current_db_type(),
-            latest_snapshot=get_latest_prerestore_snapshot(current_user)
+            latest_snapshot=get_latest_prerestore_snapshot(current_user),
+            storage_quota=get_webdav_storage_quota(config)
         )
 
     @app.route('/admin/backups/reference_admin_config', methods=['GET'])
@@ -4084,7 +4087,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         # V3: 按用户获取配置
         config = BackupConfig.get_config(None if current_user.is_admin else current_user.id)
         if not config.server_url or not config.username:
-            return jsonify({'success': True, 'configured': False, 'backups': [], 'message': '未配置 WebDAV'})
+            return jsonify({'success': True, 'configured': False, 'backups': [], 'storage_quota': get_webdav_storage_quota(config), 'message': '未配置 WebDAV'})
         safe_log('查看备份列表', f"WebDAV: {config.server_url}")
         try:
             ok, res = list_webdav_backups(config)
@@ -4113,7 +4116,8 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     else:
                         item['can_restore'] = current_user.is_admin or _is_own or current_user.can_edit_others_backup()
                         item['can_delete'] = current_user.is_admin or _is_own or current_user.can_delete_others_backup()
-                return jsonify({'success': True, 'configured': True, 'backups': res, 'current_user': current_user.username, 'is_admin': current_user.is_admin, 'current_db_type': get_current_db_type()})
+                quota_info = get_webdav_storage_quota(config, backups_list=res)
+                return jsonify({'success': True, 'configured': True, 'backups': res, 'storage_quota': quota_info, 'current_user': current_user.username, 'is_admin': current_user.is_admin, 'current_db_type': get_current_db_type()})
             else:
                 return jsonify({'success': False, 'configured': True, 'message': str(res), 'backups': []})
         except Exception as e:
@@ -4437,7 +4441,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                     )
                 except Exception:
                     pass
-                flash(f'{msg}，请刷新页面确认数据更新。', 'success')
+                flash(f'{msg}，账本数据已就绪。', 'success')
             else:
                 flash(f'{msg}', 'danger')
         except Exception as e:
@@ -4563,7 +4567,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                         )
                     except Exception:
                         pass
-                    flash(f'{msg}，请刷新页面确认数据更新。', 'success')
+                    flash(f'{msg}，账本数据已就绪。', 'success')
                 else:
                     flash(f'{msg}', 'danger')
             else:
@@ -5189,7 +5193,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
         except Exception:
             pass
 
-        flash('权限申请已提交，请耐心等待管理员审批。', 'success')
+        flash('模块访问权限申请已提交，系统管理员审批后将自动生效。', 'success')
         return redirect(url_for('permission_tickets_view'))
 
     @app.route('/permission_tickets/<int:ticket_id>/approve', methods=['POST'])

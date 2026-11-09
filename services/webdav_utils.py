@@ -560,3 +560,122 @@ def download_and_decrypt_backup(webdav_url_or_config, username=None, password=No
             return ok, msg
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def get_webdav_storage_quota(webdav_url_or_config, username=None, password=None, backup_path=None, backups_list=None) -> dict:
+    """
+    【对标 mengya 容灾 WebDAV 真实网盘空间探测】
+    1. 优先尝试 RFC 4331 标准 (quota-available-bytes / quota-used-bytes)
+    2. 若远端不支持，基于云端实际备份文件总计大小提供真实占用统计
+    """
+    if hasattr(webdav_url_or_config, "server_url") or hasattr(webdav_url_or_config, "webdav_url"):
+        cfg = webdav_url_or_config
+        webdav_url, username, password = _unpack_auth_params(cfg)
+        if backup_path is None:
+            backup_path = getattr(cfg, "backup_path", None) or getattr(cfg, "backup_subdir", "")
+    else:
+        webdav_url = webdav_url_or_config
+
+    if not webdav_url or not str(webdav_url).strip():
+        return {
+            "configured": False,
+            "quota_supported": False,
+            "total_bytes": 0,
+            "used_bytes": 0,
+            "available_bytes": 0,
+            "used_percent": 0.0,
+            "total_human": "未配置",
+            "used_human": "0 B",
+            "available_human": "未配置",
+            "backups_sum_bytes": 0
+        }
+
+    target_url = _resolve_target_dir_url(webdav_url, backup_path)
+    session = _get_session(username, password)
+    
+    quota_available = None
+    quota_used = None
+    
+    prop_xml = (
+        '<?xml version="1.0" encoding="utf-8" ?>'
+        '<D:propfind xmlns:D="DAV:">'
+        '  <D:prop>'
+        '    <D:quota-available-bytes/>'
+        '    <D:quota-used-bytes/>'
+        '  </D:prop>'
+        '</D:propfind>'
+    ).encode("utf-8")
+
+    namespaces = {"D": "DAV:"}
+    test_urls = [target_url]
+    parsed_base = urllib.parse.urlparse(_normalize_url(webdav_url))
+    root_url = f"{parsed_base.scheme}://{parsed_base.netloc}/"
+    if root_url not in test_urls:
+        test_urls.append(root_url)
+        
+    for u in test_urls:
+        try:
+            resp = session.request("PROPFIND", u, data=prop_xml, headers={"Depth": "0"}, timeout=8, verify=False)
+            if resp.status_code in (200, 207):
+                root = ET.fromstring(resp.content)
+                for prop in root.findall(".//D:prop", namespaces):
+                    av_el = prop.find("D:quota-available-bytes", namespaces)
+                    if av_el is not None and av_el.text and av_el.text.strip().isdigit():
+                        quota_available = int(av_el.text.strip())
+                    us_el = prop.find("D:quota-used-bytes", namespaces)
+                    if us_el is not None and us_el.text and us_el.text.strip().isdigit():
+                        quota_used = int(us_el.text.strip())
+                if quota_available is not None or quota_used is not None:
+                    break
+        except Exception:
+            pass
+
+    backups_sum_bytes = 0
+    if backups_list:
+        for b in backups_list:
+            backups_sum_bytes += int(b.get("size") or 0)
+
+    if quota_available is not None and quota_used is not None:
+        total = quota_available + quota_used
+        pct = round((quota_used / total * 100), 2) if total > 0 else 0.0
+        return {
+            "configured": True,
+            "quota_supported": True,
+            "total_bytes": total,
+            "used_bytes": quota_used,
+            "available_bytes": quota_available,
+            "used_percent": pct,
+            "total_human": f"{total / (1024**3):.2f} GB" if total >= 1024**3 else f"{total / (1024**2):.1f} MB",
+            "used_human": f"{quota_used / (1024**3):.2f} GB" if quota_used >= 1024**3 else f"{quota_used / (1024**2):.2f} MB",
+            "available_human": f"{quota_available / (1024**3):.2f} GB" if quota_available >= 1024**3 else f"{quota_available / (1024**2):.1f} MB",
+            "backups_sum_bytes": backups_sum_bytes,
+        }
+
+        # 若 WebDAV 服务商（如坚果云基础接口）未开放 RFC 4331，按云端备份与主流标准预设计算（对标 mengya-local 规范）
+    # 坚果云免费用户默认约 1GB~5GB，此处默认以 10GB 为基准比例尺或动态自适应
+    estimated_total = max(10 * 1024 * 1024 * 1024, backups_sum_bytes * 2)
+    estimated_used = backups_sum_bytes
+    estimated_available = max(0, estimated_total - estimated_used)
+    pct = round((estimated_used / estimated_total * 100), 2) if estimated_total > 0 else 0.0
+
+    if estimated_used == 0:
+        used_human = "0 B"
+    elif estimated_used < 1024 * 1024:
+        used_human = f"{estimated_used / 1024:.1f} KB"
+    elif estimated_used < 1024**3:
+        used_human = f"{estimated_used / (1024**2):.2f} MB"
+    else:
+        used_human = f"{estimated_used / (1024**3):.2f} GB"
+
+    return {
+        "configured": True,
+        "quota_supported": False,
+        "total_bytes": estimated_total,
+        "used_bytes": estimated_used,
+        "available_bytes": estimated_available,
+        "used_percent": pct,
+        "total_human": f"{estimated_total / (1024**3):.1f} GB",
+        "used_human": used_human,
+        "available_human": f"{estimated_available / (1024**3):.2f} GB",
+        "backups_sum_bytes": backups_sum_bytes,
+    }

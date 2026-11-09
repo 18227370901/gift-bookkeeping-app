@@ -842,7 +842,7 @@ def _do_startup_sync():
     except Exception as _e:
         print(f"[Init] 天气与菜单权限回填/清洗跳过: {_e}")
 
-def init_database():
+def init_database(force_migrate=False):
     with app.app_context():
         # V10.11.18: 启动前置防御性结构检查，保证 users.webhook_authorized 字段存在，防止 ORM 加载崩溃
         try:
@@ -883,7 +883,7 @@ def init_database():
             print(f"[Init] 告警渠道字段防御检查跳过: {_pre_err2}")
 
         # V10.10.16: 幂等快速跳过——已标记最新版本的库跳过完整迁移流程
-        if _is_db_schema_current():
+        if not force_migrate and _is_db_schema_current():
             print(f"[Init] 数据库结构已最新 (v{_SCHEMA_VERSION})，跳过迁移流程")
             _do_startup_sync()
             return

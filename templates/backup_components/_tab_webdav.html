@@ -1,0 +1,310 @@
+<!-- WebDAV 配置：管理员可编辑 / 普通用户只读状态 -->
+    {% if current_user.is_admin %}
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center user-select-none">
+        <div class="d-flex align-items-center gap-2 cursor-pointer flex-grow-1" data-bs-toggle="collapse" data-bs-target="#collapseWebdavConfig" aria-expanded="false" role="button">
+          <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置</h5>
+          <span class="badge bg-light text-muted border rounded-pill px-2 py-1 small">服务器配置</span>
+        </div>
+        <div class="d-flex align-items-center gap-2 colw-header-actions">
+          <button type="button" class="btn btn-sm btn-light border-0 rounded-circle text-muted p-1 module-chevron-btn" data-bs-toggle="collapse" data-bs-target="#collapseWebdavConfig" aria-expanded="false" title="切换折叠/展开">
+            <i class="fa-solid fa-chevron-down transition-transform module-chevron"></i>
+          </button>
+        </div>
+      </div>
+      <div class="collapse" id="collapseWebdavConfig">
+      <div class="card-body">
+        <form action="{{ url_for('admin_save_webdav_config') }}" method="POST" id="webdavConfigForm">
+  <div class="row g-4">
+    <div class="col-lg-7 col-12">
+      
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <!-- V9 新增：配置别称（普通用户引用时只看到别称，看不到地址/账号/密码） -->
+          <div class="mb-3">
+            <label class="form-label fw-bold">配置别称 <span class="badge bg-primary-subtle text-primary ms-1">推荐填写</span></label>
+            <input type="text" name="config_alias" id="cfg_config_alias" class="form-control rounded-3" value="{{ config_data.config_alias or '' }}" placeholder="例如：坚果云家庭备份盘" maxlength="100">
+            <div class="form-text small text-muted">普通用户「一键采用管理员配置」时仅显示该别称，服务器地址、账号、密码等敏感信息一律不可见</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">WebDAV 服务器地址 (URL)</label>
+            <input type="url" name="webdav_url" id="cfg_webdav_url" class="form-control rounded-3" value="{{ config_data.webdav_url or '' }}" placeholder="https://dav.jianguoyun.com/dav/" required>
+            <div class="form-text">支持坚果云、Nextcloud、群晖、Alist 等 WebDAV 完整路径</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">备份存储子目录</label>
+            <input type="text" name="backup_path" id="cfg_backup_path" class="form-control rounded-3" value="{{ config_data.backup_path or '/gift_backups/' }}" placeholder="/gift_backups/">
+            <div class="form-text small text-muted">网盘中存放备份文件的子目录，默认：/gift_backups/（坚果云根路径 /dav 必须指定子目录）</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">账号 / 用户名</label>
+            <input type="text" name="webdav_username" id="cfg_webdav_username" class="form-control rounded-3" value="{{ config_data.webdav_username or '' }}" placeholder="username@example.com" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">密码 / 应用专属授权码</label>
+            <div class="input-group">
+              <input type="password" name="webdav_password" id="cfg_webdav_password" class="form-control rounded-start-3 shadow-none" value="{{ config_data.get_webdav_password() or '' }}" placeholder="请输入密码或应用授权码" autocomplete="new-password" required>
+              <button class="btn btn-outline-secondary rounded-end-3" type="button" id="btnToggleWebdavPassword" onclick="toggleWebdavPasswordVisibility()" title="查看/隐藏密码">
+                <i class="fa-regular fa-eye" id="iconToggleWebdavPassword"></i>
+              </button>
+            </div>
+            <div class="form-text small text-muted">点击眼睛图标可切换明文显示/隐藏，方便核对输入</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">备份存储子目录</label>
+            <input type="text" name="backup_subdir" class="form-control rounded-3" value="{{ config_data.backup_subdir or 'gift_backups' }}" placeholder="gift_backups">
+            <div class="form-text small text-muted">备份文件在 WebDAV 服务器上的存储子目录名，默认 gift_backups</div>
+          </div>
+
+          <!-- 加密密码配置 -->
+          <hr class="my-3">
+          <h6 class="text-muted mb-2"><i class="fa-solid fa-lock me-1 text-warning"></i>自动备份加密密码（可选）
+            {% if has_encrypt_password %}
+            <span class="badge bg-success-subtle text-success ms-2"><i class="fa-solid fa-check-circle me-1"></i>已设置</span>
+            {% else %}
+            <span class="badge bg-secondary-subtle text-secondary ms-2"><i class="fa-solid fa-circle me-1"></i>未设置</span>
+            {% endif %}
+          </h6>
+          <div class="mb-2">
+            <label class="form-label small text-muted">为自动定时备份预设加密密码，留空则不加密</label>
+            <div class="input-group">
+              <!-- V8 修复：未勾选"清除"时回显已保存的加密密码（用户要求） -->
+              <input type="password" name="backup_encrypt_password" id="cfg_encrypt_pwd" class="form-control rounded-start-3"
+                value="{{ config_encrypt_pwd_plain or '' }}"
+                {% if has_encrypt_password %}placeholder="已设置，修改请直接输入新密码"{% else %}placeholder="预设加密密码（留空不加密）"{% endif %}
+                autocomplete="new-password">
+              <button class="btn btn-outline-secondary rounded-end-3" type="button" onclick="togglePasswordVisibility('cfg_encrypt_pwd', this)" title="查看/隐藏密码">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+            {% if not has_pyzipper %}
+            <div class="form-text small text-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>未安装 pyzipper 库，加密功能不可用。请运行 pip install pyzipper</div>
+            {% else %}
+            <div class="form-text small text-muted">使用 AES-256 加密，手动备份时可单独选择密码</div>
+            {% endif %}
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="backup_encrypt_password_clear" value="1" id="clearEncryptPwd" onchange="toggleClearEncryptPwd()" {% if not has_encrypt_password %}disabled{% endif %}>
+            <label class="form-check-label small text-muted" for="clearEncryptPwd">{% if has_encrypt_password %}勾选此项清除已保存的加密密码（勾选后无需填写新密码）{% else %}尚未设置加密密码，无可清除{% endif %}</label>
+          </div>
+          {% if current_user.is_admin %}
+          <!-- V10.2: 定时任务全局开关迁移至「定时任务授权」卡片，不再放在 WebDAV 配置表单中 -->
+          {% endif %}
+
+          <div class="d-flex gap-2 mt-2">
+            <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">
+              <i class="fa-solid fa-floppy-disk me-1"></i>保存配置
+            </button>
+            <button type="button" class="btn btn-outline-secondary rounded-pill px-4" id="btnTestWebdav">
+              <i class="fa-solid fa-plug me-1"></i>测试连接
+            </button>
+          </div>
+        
+    </div>
+    
+    <div class="col-lg-5 col-12">
+      <!-- 真实 WebDAV 网盘存储空间与快照配额看板（对标 mengya RFC 4331 探针） -->
+      <div class="p-4 bg-light-subtle rounded-4 border mb-4" id="webdavStorageQuotaCard">
+        <div class="d-flex align-items-center justify-content-between mb-3">
+          <h6 class="fw-bold mb-0 text-dark">
+            <i class="fa-solid fa-cloud text-primary me-2"></i>WebDAV 网盘存储配额
+          </h6>
+          <span id="quotaTypeBadge">
+          {% if config_data.webdav_url %}
+            {% if storage_quota and storage_quota.quota_supported %}
+            <span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2 py-1 small">
+              <i class="fa-solid fa-check me-1"></i>RFC 4331 标准配额
+            </span>
+            {% else %}
+            <span class="badge bg-info-subtle text-info border border-info-subtle rounded-pill px-2 py-1 small">
+              <i class="fa-solid fa-chart-pie me-1"></i>自适应容量看板
+            </span>
+            {% endif %}
+          {% else %}
+          <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle rounded-pill px-2 py-1 small">
+            未配置网盘
+          </span>
+          {% endif %}
+          </span>
+        </div>
+
+        {% if config_data.webdav_url %}
+          <div id="quotaDetailsSection">
+            <div class="mb-3">
+              <div class="d-flex justify-content-between small text-muted mb-1">
+                <span>网盘存储已用 / 总容量</span>
+                <span class="fw-semibold text-dark" id="quotaUsageText">{{ storage_quota.used_human if storage_quota else "0 B" }} / {{ storage_quota.total_human if storage_quota else "10.0 GB" }}</span>
+              </div>
+              <div class="progress rounded-pill shadow-none" style="height: 8px;">
+                <div class="progress-bar {% if storage_quota and storage_quota.used_percent > 85 %}bg-danger{% elif storage_quota and storage_quota.used_percent > 70 %}bg-warning{% else %}bg-primary{% endif %}"
+                     id="quotaProgressBar"
+                     role="progressbar" style="width: {{ storage_quota.used_percent if storage_quota else 0 }}%;"></div>
+              </div>
+              <div class="d-flex justify-content-between small text-muted mt-1">
+                <span>已用空间: <strong id="quotaPercentText">{{ storage_quota.used_percent if storage_quota else 0 }}%</strong></span>
+                <span>网盘可用余量: <strong id="quotaAvailableText">{{ storage_quota.available_human if storage_quota else "10.0 GB" }}</strong></span>
+              </div>
+            </div>
+
+            <div class="p-2 bg-white rounded-3 border mb-3 small text-muted d-flex align-items-center justify-content-between" id="quotaSourceNotice">
+              <span><i class="fa-solid fa-circle-info text-primary me-1"></i><span id="quotaNoticeText">{% if storage_quota and storage_quota.quota_supported %}网盘服务商实时配额同步{% else %}基于云端快照自适应容量看板{% endif %}</span></span>
+              <span class="badge bg-light text-secondary border" id="quotaSnapshotsTotal">快照占用: {{ storage_quota.used_human if storage_quota else "0 B" }}</span>
+            </div>
+          </div>
+
+          <div class="row g-2 text-center pt-1 border-top">
+            <div class="col-6">
+              <div class="p-2 bg-white rounded-3 border">
+                <div class="small text-muted mb-1">存储目标目录</div>
+                <div class="fw-bold text-dark small text-truncate" title="{{ config_data.backup_path or '/gift_backups/' }}">{{ config_data.backup_path or '/gift_backups/' }}</div>
+              </div>
+            </div>
+            <div class="col-6">
+              <div class="p-2 bg-white rounded-3 border">
+                <div class="small text-muted mb-1">备份加密状态</div>
+                <div class="fw-bold {% if config_data.backup_encrypt_password %}text-success{% else %}text-muted{% endif %} small">
+                  {% if config_data.backup_encrypt_password %}<i class="fa-solid fa-lock me-1"></i>已预设密钥{% else %}未预设密钥{% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        {% else %}
+        <div class="alert alert-warning border-0 rounded-3 mb-0 py-2 px-3 small">
+          <i class="fa-solid fa-triangle-exclamation text-warning me-1"></i>尚未配置 WebDAV 云端存储。请先在左侧填写网盘地址与凭据并保存。
+        </div>
+        {% endif %}
+
+        <div class="alert alert-info border-0 rounded-3 mt-3 mb-0 py-2 px-3 small">
+          <i class="fa-solid fa-shield-halved text-info me-1"></i>
+          支持 WebDAV RFC 4331 配额探针规范，云端快照采用流式分块传输与动态校验。
+        </div>
+      </div>
+      <!-- 快速接入指引与主流服务商支持 -->
+      <div class="p-3 bg-white rounded-4 border shadow-sm">
+        <h6 class="fw-bold small text-dark mb-2">
+          <i class="fa-solid fa-circle-nodes text-success me-1"></i>主流 WebDAV 接入指引
+        </h6>
+        <ul class="list-unstyled mb-0 small text-muted space-y-2">
+          <li class="mb-2"><strong>坚果云</strong>：<code>https://dav.jianguoyun.com/dav/</code>（账号为注册邮箱，密码为账户设置中生成的专属应用授权码）；</li>
+          <li class="mb-2"><strong>Nextcloud / ownCloud</strong>：<code>https://your-domain/remote.php/dav/files/user/</code>；</li>
+          <li class="mb-2"><strong>群晖 Synology NAS</strong>：<code>https://your-nas-ip:5006/home/</code>；</li>
+          <li class="mb-0"><strong>Alist 聚合存储</strong>：<code>http://your-alist-ip:5244/dav/</code>。</li>
+        </ul>
+      </div>
+    </div>
+
+  </div>
+</form>
+      </div>
+      </div>
+    </div>
+    {% else %}
+    <!-- 普通用户：可编辑自己的私有 WebDAV 配置 -->
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-white py-3 border-light d-flex justify-content-between align-items-center user-select-none">
+        <div class="d-flex align-items-center gap-2 cursor-pointer flex-grow-1" data-bs-toggle="collapse" data-bs-target="#collapseWebdavUserConfig" aria-expanded="false" role="button">
+          <h5 class="card-title fw-bold mb-0 text-dark"><i class="fa-solid fa-sliders text-primary me-2"></i>WebDAV 配置（个人）</h5>
+          <span class="badge bg-light text-muted border rounded-pill px-2 py-1 small">个人配置</span>
+        </div>
+        <div class="d-flex align-items-center gap-2 colw-header-actions">
+          <button type="button" class="btn btn-sm btn-light border-0 rounded-circle text-muted p-1 module-chevron-btn" data-bs-toggle="collapse" data-bs-target="#collapseWebdavUserConfig" aria-expanded="false" title="切换折叠/展开">
+            <i class="fa-solid fa-chevron-down transition-transform module-chevron"></i>
+          </button>
+        </div>
+      </div>
+      <div class="collapse" id="collapseWebdavUserConfig">
+      <div class="card-body">
+        {% if config_data.adopted_from_admin %}
+        <!-- V9: 已引用管理员配置 —— 只显示别称，不回显任何地址/账号/密码 -->
+        <div class="alert alert-success border-0 rounded-3 mb-3 py-2">
+          <i class="fa-solid fa-circle-check me-1"></i>
+          <span class="small fw-bold">当前正在使用管理员提供的 WebDAV 配置：「{{ admin_config_alias or '管理员配置' }}」</span>
+          <div class="small text-muted mt-1"><i class="fa-solid fa-shield-halved me-1"></i>出于安全考虑，服务器地址、账号与密码均不展示。您可直接执行备份/恢复操作。</div>
+        </div>
+        <div class="d-flex gap-2 mb-3">
+          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3" onclick="adoptAdminConfig(true)" title="管理员更新配置后，可一键拉取最新配置覆盖">
+            <i class="fa-solid fa-rotate me-1"></i>一键更新
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="confirmDetachAdminConfig()" title="停止使用管理员配置，改为自行填写">
+            <i class="fa-solid fa-link-slash me-1"></i>停用引用，自行配置
+          </button>
+        </div>
+        {% else %}
+        <!-- V9: 未引用 —— 可自行配置，或一键采用管理员配置（仅见别称） -->
+        <div class="alert alert-info border-0 rounded-3 mb-3 py-2">
+          <i class="fa-solid fa-circle-info me-1 text-info"></i>
+          <span class="small">请填写您自己的 WebDAV 服务器信息；或点击下方「一键采用管理员配置」，只需看到配置别称即可使用。</span>
+        </div>
+        <div class="d-flex gap-2 mb-3">
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3" onclick="adoptAdminConfig(false)">
+            <i class="fa-solid fa-copy me-1"></i>一键采用管理员配置
+          </button>
+        </div>
+        <form action="{{ url_for('admin_save_webdav_config') }}" method="POST" id="webdavConfigFormUser">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="mb-3">
+            <label class="form-label fw-bold">WebDAV 服务器地址 (URL)</label>
+            <input type="url" name="webdav_url" id="cfg_webdav_url_user" class="form-control rounded-3" value="{{ config_data.webdav_url or '' }}" placeholder="https://dav.jianguoyun.com/dav/">
+            <div class="form-text">支持坚果云、Nextcloud、群晖、Alist 等 WebDAV 完整路径</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">账号 / 用户名</label>
+            <input type="text" name="webdav_username" id="cfg_webdav_username_user" class="form-control rounded-3" value="{{ config_data.webdav_username or '' }}" placeholder="username@example.com">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">密码 / 应用专属授权码</label>
+            <div class="input-group">
+              <input type="password" name="webdav_password" id="cfg_webdav_password_user" class="form-control rounded-start-3" value="{{ config_data.get_webdav_password() or '' }}" placeholder="请输入密码或应用授权码" autocomplete="new-password">
+              <button class="btn btn-outline-secondary rounded-end-3" type="button" onclick="togglePasswordVisibility('cfg_webdav_password_user', this)" title="查看/隐藏密码"><i class="fa-regular fa-eye"></i></button>
+            </div>
+            <div class="form-text small text-muted">点击眼睛图标可切换明文显示/隐藏，方便核对输入</div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-bold">备份存储子目录</label>
+            <input type="text" name="backup_subdir" class="form-control rounded-3" value="{{ config_data.backup_subdir or 'gift_backups' }}" placeholder="gift_backups">
+            <div class="form-text small text-muted">备份文件在 WebDAV 服务器上的存储子目录名，默认 gift_backups</div>
+          </div>
+          <!-- V10.3: 普通用户加密密码配置区（与管理员对齐） -->
+          <hr class="my-3">
+          <h6 class="text-muted mb-2"><i class="fa-solid fa-lock me-1 text-warning"></i>自动备份加密密码（可选）
+            {% if has_encrypt_password %}
+            <span class="badge bg-success-subtle text-success ms-2"><i class="fa-solid fa-check-circle me-1"></i>已设置</span>
+            {% else %}
+            <span class="badge bg-secondary-subtle text-secondary ms-2"><i class="fa-solid fa-circle me-1"></i>未设置</span>
+            {% endif %}
+          </h6>
+          <div class="mb-2">
+            <div class="input-group">
+              <input type="password" name="backup_encrypt_password" id="cfg_encrypt_pwd_user" class="form-control rounded-start-3"
+                value="{{ config_encrypt_pwd_plain or '' }}"
+                {% if has_encrypt_password %}placeholder="已设置，修改请直接输入新密码"{% else %}placeholder="预设加密密码（留空不加密）"{% endif %}
+                autocomplete="new-password">
+              <button class="btn btn-outline-secondary rounded-end-3" type="button" onclick="togglePasswordVisibility('cfg_encrypt_pwd_user', this)" title="查看/隐藏密码">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+            {% if not has_pyzipper %}
+            <div class="form-text small text-danger"><i class="fa-solid fa-triangle-exclamation me-1"></i>未安装 pyzipper 库，加密功能不可用</div>
+            {% else %}
+            <div class="form-text small text-muted">使用 AES-256 加密，手动备份时可单独选择密码</div>
+            {% endif %}
+          </div>
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" name="backup_encrypt_password_clear" value="1" id="clearEncryptPwdUser" onchange="toggleClearEncryptPwdUser()" {% if not has_encrypt_password %}disabled{% endif %}>
+            <label class="form-check-label small text-muted" for="clearEncryptPwdUser">{% if has_encrypt_password %}勾选此项清除已保存的加密密码{% else %}尚未设置加密密码，无可清除{% endif %}</label>
+          </div>
+          <div class="d-flex gap-2 mt-2">
+            <button type="submit" class="btn btn-primary rounded-pill px-4 shadow-sm">
+              <i class="fa-solid fa-floppy-disk me-1"></i>保存我的配置
+            </button>
+            <button type="button" class="btn btn-outline-secondary rounded-pill px-4" id="btnTestWebdavUser">
+              <i class="fa-solid fa-plug me-1"></i>测试连接
+            </button>
+          </div>
+        </form>
+        {% endif %}
+      </div>
+      </div>
+    </div>
+    {% endif %}
+
+    
