@@ -4127,6 +4127,26 @@ else { window.addEventListener('load', function() { trySetupDiagramToggles(); })
 </body>
 </html>    <div class="card border-0 shadow-sm rounded-4 mb-4">
     <div class="card border-0 shadow-sm rounded-4 mb-4">
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-primary text-white fw-bold">
+        ADR-91：每日一言纯文本格式兼容、权限受控动态刷新与横幅排版防溢出加固（V10.11.61 落地）
+      </div>
+      <div class="card-body">
+        <h6 class="fw-bold text-dark">背景与痛点</h6>
+        <ul>
+          <li>纯文本接口测试因强转 JSON 报错；每日一言不可手动换一句；引导大横幅右上角“管理员预设”字样在缩放或多字城市下超出右边界。</li>
+        </ul>
+        <h6 class="fw-bold text-dark mt-3">架构决策与技术方案</h6>
+        <ul>
+          <li><strong>纯文本自适应</strong>：测试器兼容器容 JSON 与 text/plain 文本。</li>
+          <li><strong>权限门控刷新</strong>：仅管理员与 service_config 授权用户渲染刷新按钮并执行强刷。</li>
+          <li><strong>横幅防溢出</strong>：为天气卡与城市徽章注入弹性换行与 max-width 限宽保护。</li>
+        </ul>
+        <div class="mt-3 text-muted small">
+          <i class="fa-solid fa-circle-check text-success me-1"></i> 验证结论：单测与全端点渲染验证 PASS。
+        </div>
+      </div>
+    </div>
       <div class="card-header bg-primary text-white fw-bold">
         ADR-90：核心服务每日一言全平台自适应接入与双协议混排纳管（V10.11.60 落地）
       </div>

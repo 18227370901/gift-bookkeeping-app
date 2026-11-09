@@ -391,10 +391,12 @@ def test_endpoint(group, url, timeout=None, platform=''):
                    'Accept': 'application/json'} if group == 'holiday' else None
         resp = _http_get_dual(url, params=params, timeout=timeout, headers=headers)
         latency_ms = int((time.time() - start) * 1000)
+        data = None
         try:
             data = resp.json()
-        except ValueError:
-            return {'url': url, 'ok': False, 'message': '响应非有效 JSON（HTTP %s）' % resp.status_code, 'latency_ms': latency_ms}
+        except Exception:
+            pass
+
         if group == 'saying':
             from services.uapi_client import parse_saying_payload
             parsed = parse_saying_payload(resp.text, json_obj=data if isinstance(data, (dict, list)) else None)
@@ -404,6 +406,9 @@ def test_endpoint(group, url, timeout=None, platform=''):
                 src = (' —— ' + parsed['source']) if parsed.get('source') else ''
                 return {'url': url, 'ok': True, 'message': '解析成功：“%s”%s（HTTP %s）' % (disp, src, resp.status_code), 'latency_ms': latency_ms}
             return {'url': url, 'ok': False, 'message': 'HTTP %s 但未能从响应中提取出名句内容（建议检查响应格式）' % resp.status_code, 'latency_ms': latency_ms}
+
+        if data is None:
+            return {'url': url, 'ok': False, 'message': '响应非有效 JSON（HTTP %s）' % resp.status_code, 'latency_ms': latency_ms}
         if ok_fn(data):
             return {'url': url, 'ok': True, 'message': '连接正常（HTTP %s）' % resp.status_code, 'latency_ms': latency_ms}
         # Open-Meteo 风格错误：{"error": true, "reason": ...}

@@ -14,7 +14,7 @@
     </div>
     <div class="row g-3 align-items-center position-relative">
         <!-- 左栏：时钟、公历、农历与节日班休 -->
-        <div class="col-lg-4 col-md-5">
+        <div class="col-lg-4 col-md-6">
             <div class="hb-greet mb-1"><i class="fa-solid fa-sun me-2"></i><span id="hbGreet">你好</span>，{{ current_user.username }}</div>
             <div class="hb-clock" id="hbClock">--:--:--</div>
             <div class="hb-date mt-1" id="hbDate">--</div>
@@ -23,7 +23,7 @@
         </div>
 
         <!-- 中栏：高雅微晶卡片（黄历宜忌 + 本月往来微看板 + 快捷直达） -->
-        <div class="col-lg-5 col-md-7">
+        <div class="col-lg-5 col-md-6">
             <div class="hb-mid-card">
                 <!-- 黄历与宜忌条 -->
                 <div class="d-flex align-items-center justify-content-between mb-2 pb-1 border-bottom border-light border-opacity-25">
@@ -194,13 +194,21 @@
 .hb-badge.work { background: #6c757d; }
 /* V10.11.47 每日一言徽章：横幅内半透明白底长条样式 */
 .hb-saying {
-    display: inline-flex; align-items: center; gap: 4px;
+    display: inline-flex; align-items: center; gap: 6px;
     padding: 2px 10px; border-radius: 999px; font-size: 0.72rem;
     background: rgba(255, 255, 255, 0.18);
     border: 1px solid rgba(255, 255, 255, 0.28);
     max-width: 100%;
 }
 .hb-saying .hb-saying-text { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.hb-saying-refresh {
+    cursor: pointer; opacity: 0.75; transition: opacity 0.2s, transform 0.4s ease;
+    border: none; background: transparent; padding: 0; color: inherit; line-height: 1;
+    display: inline-flex; align-items: center;
+}
+.hb-saying-refresh:hover { opacity: 1; transform: rotate(180deg); }
+.hb-saying-refresh.is-spinning i { animation: hbSpin 0.7s linear infinite; }
+@keyframes hbSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* 中栏微晶玻璃卡片 */
 .hb-mid-card {
@@ -274,7 +282,7 @@
 }
 
 /* 右栏天气与骨架屏入场微动效 */
-.hb-weather { text-align: right; }
+.hb-weather { text-align: right; max-width: 100%; overflow: hidden; }
 .hb-weather-loading { font-size: 0.9rem; opacity: 0.85; }
 .hb-weather-skeleton { opacity: 0.95; }
 .hb-weather-tip {
@@ -315,8 +323,17 @@
     from { opacity: 0; transform: translateY(8px) scale(0.97); }
     to { opacity: 1; transform: translateY(0) scale(1); }
 }
-.hb-city { font-size: 0.9rem; opacity: 0.92; }
-.hb-src-badge { font-size: 0.7rem; padding: 1px 8px; border-radius: 999px; background: rgba(255, 255, 255, 0.22); margin-left: 6px; }
+.hb-city {
+    font-size: 0.9rem; opacity: 0.92;
+    display: flex; align-items: center; justify-content: flex-end;
+    flex-wrap: wrap; gap: 4px; max-width: 100%;
+}
+.hb-src-badge {
+    font-size: 0.68rem; padding: 1px 7px; border-radius: 999px;
+    background: rgba(255, 255, 255, 0.22); white-space: nowrap;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    flex-shrink: 0;
+}
 .hb-temp-line { display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; margin-top: 2px; }
 .hb-temp { font-size: 2.5rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.22); }
 .hb-temp-unit { font-size: 1.1rem; opacity: 0.9; }
@@ -520,27 +537,58 @@
     // 初始加载
     loadHomeData();
 
-    // ---- 每日一言（全平台多端点故障转移，服务端缓存 1 小时全站共享一句） ----
-    // 全部端点不可达或停用时静默降级（装饰位不显示），不影响横幅主体
-    fetch('/api/daily/saying', { credentials: 'same-origin' })
-        .then(function (r) { return r.json(); })
-        .then(function (j) {
-            var data = (j && j.code === 200 && j.data) ? j.data : null;
-            var text = (data && data.text) ? String(data.text || '').trim() : '';
-            if (!text) return;
-            var box = el('hbBadges');
-            if (!box) return;
-            var span = document.createElement('span');
-            span.className = 'hb-saying';
-            var tip = '每日一言';
-            if (data.source) { tip += ' · ' + data.source; }
-            else if (data.provider) { tip += ' · ' + data.provider; }
-            span.title = tip;
-            span.innerHTML = '<i class="fa-solid fa-feather-pointed"></i><span class="hb-saying-text"></span>';
-            span.querySelector('.hb-saying-text').textContent = text;
-            box.appendChild(span);
-        })
-        .catch(function () { /* 接口异常：装饰位静默不显示 */ });
+    // ---- 每日一言（多端点自适应，服务端缓存 1 小时；支持管理员/授权用户手动或登录刷新） ----
+    function loadDailySaying(force) {
+        var url = '/api/daily/saying' + (force ? '?refresh=1&_t=' + Date.now() : '');
+        var refreshBtn = document.querySelector('.hb-saying-refresh');
+        if (refreshBtn) { refreshBtn.classList.add('is-spinning'); }
+
+        fetch(url, { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (j) {
+                var data = (j && j.code === 200 && j.data) ? j.data : null;
+                var text = (data && data.text) ? String(data.text || '').trim() : '';
+                var box = el('hbBadges');
+                if (!box) return;
+                var existing = box.querySelector('.hb-saying');
+                if (!text) {
+                    if (existing) existing.remove();
+                    return;
+                }
+                var tip = '每日一言';
+                if (data.source) { tip += ' · ' + data.source; }
+                else if (data.provider) { tip += ' · ' + data.provider; }
+
+                if (!existing) {
+                    existing = document.createElement('span');
+                    existing.className = 'hb-saying';
+                    box.appendChild(existing);
+                }
+                existing.title = tip;
+
+                var btnHtml = '';
+                if (data.can_refresh) {
+                    btnHtml = '<button type="button" class="hb-saying-refresh ms-1" title="换一句（重新拉取最新名言）" aria-label="换一句"><i class="fa-solid fa-arrows-rotate"></i></button>';
+                }
+                existing.innerHTML = '<i class="fa-solid fa-feather-pointed"></i><span class="hb-saying-text"></span>' + btnHtml;
+                existing.querySelector('.hb-saying-text').textContent = text;
+
+                var newBtn = existing.querySelector('.hb-saying-refresh');
+                if (newBtn) {
+                    newBtn.addEventListener('click', function (e) {
+                        e.stopPropagation();
+                        loadDailySaying(true);
+                    });
+                }
+            })
+            .catch(function () { /* 接口异常：静默保持原样或隐藏 */ })
+            .finally(function () {
+                var btn = document.querySelector('.hb-saying-refresh');
+                if (btn) { btn.classList.remove('is-spinning'); }
+            });
+    }
+
+    loadDailySaying(false);
 
     // ---- V10.11.44 管理员统计时长切换（保存成功立即重拉刷新；全局配置，全站用户下次打开/刷新自动同步） ----
     var periodDd = el('hbPeriodDropdown');

@@ -6619,11 +6619,26 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     def api_daily_saying():
         """每日一言（多端点故障转移 + 进程级缓存 1 小时，全站共享一句）：
         登录页与首页横幅装饰位共用；GET 只读无副作用，免登录可访问（未登录页无 CSRF 上下文）；
-        全部端点停用或不可达时静默降级空数据（装饰位不显示）"""
+        - refresh=1 参数：强制绕过缓存拉取最新一言。仅管理员或被授权外部接口配置（service_config）的用户有权触发；未授权用户静默忽略并返回当前缓存内容；
+        - 返回结构扩展 can_refresh 布尔字段，前端据此决定是否渲染刷新按钮。"""
+        from flask_login import current_user
         from services import uapi_client
-        data = uapi_client.get_daily_saying()
+
+        force_refresh = request.args.get('refresh') in ('1', 'true', 'True')
+        # 鉴权：仅管理员或具备 service_config 权限的已登录用户可强制刷新
+        user_can_refresh = (
+            current_user.is_authenticated and (
+                getattr(current_user, 'is_admin', False) or
+                (hasattr(current_user, 'can_access_menu') and current_user.can_access_menu('service_config'))
+            )
+        )
+        should_force = force_refresh and user_can_refresh
+
+        data = uapi_client.get_daily_saying(force=should_force)
         if data and data.get('text'):
-            return jsonify({'code': 200, 'message': 'ok', 'data': data})
+            res = dict(data)
+            res['can_refresh'] = bool(user_can_refresh)
+            return jsonify({'code': 200, 'message': 'ok', 'data': res})
         return jsonify({'code': 200, 'message': 'ok', 'data': None})
 
     # 启动企业微信智能机器人长连接后台监听守护线程与亲友纪念日自动提醒后台调度器
