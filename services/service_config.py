@@ -67,6 +67,15 @@ DEFAULT_GROUPS = {
         'timeout': 8,
         'retries': 0,
     },
+    'saying': {
+        'label': '每日一言',
+        'defaults': [
+            {'url': 'https://v1.hitokoto.cn', 'enabled': True, 'platform': ''},
+            {'url': 'https://uapis.cn/api/v1/saying', 'enabled': True, 'platform': 'uapis'},
+        ],
+        'timeout': 5,
+        'retries': 1,
+    },
 }
 
 # 节假日地址占位符（管理员无需填写，保存时自动补全）
@@ -368,6 +377,10 @@ def test_endpoint(group, url, timeout=None, platform=''):
         url = target
         ok_fn = lambda d: isinstance(d, dict) and d.get('code') == 0
         fail_hint = '响应缺少 code==0 字段（非 timor.tech 兼容端点）'
+    elif group == 'saying':
+        params = {}
+        ok_fn = lambda d: True
+        fail_hint = '未能解析出一言名句文本'
     else:
         return {'url': url, 'ok': False, 'message': '未知分组: %s' % group, 'latency_ms': int((time.time() - start) * 1000)}
 
@@ -382,6 +395,15 @@ def test_endpoint(group, url, timeout=None, platform=''):
             data = resp.json()
         except ValueError:
             return {'url': url, 'ok': False, 'message': '响应非有效 JSON（HTTP %s）' % resp.status_code, 'latency_ms': latency_ms}
+        if group == 'saying':
+            from services.uapi_client import parse_saying_payload
+            parsed = parse_saying_payload(resp.text, json_obj=data if isinstance(data, (dict, list)) else None)
+            if parsed and parsed.get('text'):
+                txt = parsed['text']
+                disp = (txt[:24] + '...') if len(txt) > 24 else txt
+                src = (' —— ' + parsed['source']) if parsed.get('source') else ''
+                return {'url': url, 'ok': True, 'message': '解析成功：“%s”%s（HTTP %s）' % (disp, src, resp.status_code), 'latency_ms': latency_ms}
+            return {'url': url, 'ok': False, 'message': 'HTTP %s 但未能从响应中提取出名句内容（建议检查响应格式）' % resp.status_code, 'latency_ms': latency_ms}
         if ok_fn(data):
             return {'url': url, 'ok': True, 'message': '连接正常（HTTP %s）' % resp.status_code, 'latency_ms': latency_ms}
         # Open-Meteo 风格错误：{"error": true, "reason": ...}
@@ -436,6 +458,14 @@ def _test_platform_endpoint(group, url, timeout, platform, start):
             hm = day0.get('weekday_cn') or day0.get('date') or ''
             return _res(True, '平台万年历协议正常（%s，HTTP %s）' % (hm, status))
         return _res(False, '响应缺少 days/holidays 字段（非 UApiPro 万年历兼容端点）')
+    if group == 'saying':
+        from services.uapi_client import parse_saying_payload
+        parsed = parse_saying_payload('', json_obj=payload)
+        if parsed and parsed.get('text'):
+            txt = parsed['text']
+            disp = (txt[:24] + '...') if len(txt) > 24 else txt
+            return _res(True, '平台一言协议正常：“%s”（HTTP %s）' % (disp, status))
+        return _res(False, '平台响应未能提取出名句文本（非 UApiPro 一言兼容端点）')
     return _res(True, '平台接口调用成功（HTTP %s）' % status)
 
 

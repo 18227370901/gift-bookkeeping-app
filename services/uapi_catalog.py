@@ -1124,6 +1124,7 @@ _CORRECTED_APIS = [_apply_correction(a) for a in APIS]
 API_GROUP_BINDINGS = {
     'forecast': 'misc_weather',      # 天气·天气预报组 → uapis 查询天气
     'holiday': 'misc_holiday_calendar',  # 法定节假日组 → uapis 节假日与万年历
+    'saying': 'saying',                  # 每日一言组 → uapis 一言（可自由切换直连/平台）
 }
 
 # ===================== 索引与查询函数 =====================

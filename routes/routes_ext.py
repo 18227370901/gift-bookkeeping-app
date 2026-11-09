@@ -3313,7 +3313,7 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 # 平台端点仅限「天气预报/法定节假日」两组（协议适配器绑定范围）
                 platform = str(item.get('platform', '') or '').strip()
                 if platform and gname in ('wecom_ws', 'ai_search', 'geocoding', 'air_quality'):
-                    return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」组暂不支持平台端点（仅天气/节假日支持双协议混排）'}), 400
+                    return jsonify({'success': False, 'message': f'「{DEFAULT_GROUPS[gname]["label"]}」组暂不支持平台端点（仅天气/节假日/每日一言支持平台端点）'}), 400
                 if platform:
                     from services.service_config import get_platform as _gp
                     if not _gp(platform):
@@ -6617,9 +6617,9 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
 
     @app.route('/api/daily/saying', methods=['GET'])
     def api_daily_saying():
-        """每日一言（UApiPro 免费接口，服务端缓存 1 小时全站共享一句）：
+        """每日一言（多端点故障转移 + 进程级缓存 1 小时，全站共享一句）：
         登录页与首页横幅装饰位共用；GET 只读无副作用，免登录可访问（未登录页无 CSRF 上下文）；
-        平台不可达时静默降级空数据（装饰位不显示）"""
+        全部端点停用或不可达时静默降级空数据（装饰位不显示）"""
         from services import uapi_client
         data = uapi_client.get_daily_saying()
         if data and data.get('text'):

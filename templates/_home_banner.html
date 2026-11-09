@@ -520,23 +520,27 @@
     // 初始加载
     loadHomeData();
 
-    // ---- V10.11.47 每日一言（UApiPro 免费接口，服务端缓存 1 小时全站共享一句） ----
-    // 平台不可达时静默降级（装饰位不显示），不影响横幅主体
+    // ---- 每日一言（全平台多端点故障转移，服务端缓存 1 小时全站共享一句） ----
+    // 全部端点不可达或停用时静默降级（装饰位不显示），不影响横幅主体
     fetch('/api/daily/saying', { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (j) {
-            var text = (j && j.code === 200 && j.data && j.data.text) ? String(j.data.text || '').trim() : '';
+            var data = (j && j.code === 200 && j.data) ? j.data : null;
+            var text = (data && data.text) ? String(data.text || '').trim() : '';
             if (!text) return;
             var box = el('hbBadges');
             if (!box) return;
             var span = document.createElement('span');
             span.className = 'hb-saying';
-            span.title = '每日一言 · uapis.cn';
+            var tip = '每日一言';
+            if (data.source) { tip += ' · ' + data.source; }
+            else if (data.provider) { tip += ' · ' + data.provider; }
+            span.title = tip;
             span.innerHTML = '<i class="fa-solid fa-feather-pointed"></i><span class="hb-saying-text"></span>';
             span.querySelector('.hb-saying-text').textContent = text;
             box.appendChild(span);
         })
-        .catch(function () { /* 平台不可达：装饰位静默不显示 */ });
+        .catch(function () { /* 接口异常：装饰位静默不显示 */ });
 
     // ---- V10.11.44 管理员统计时长切换（保存成功立即重拉刷新；全局配置，全站用户下次打开/刷新自动同步） ----
     var periodDd = el('hbPeriodDropdown');

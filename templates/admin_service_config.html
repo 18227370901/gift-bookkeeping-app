@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}系统核心服务 - 外部接口配置 - 系统管理{% endblock %}
 
-{% set ICONS = {'geocoding':'fa-map-location-dot','forecast':'fa-cloud-sun','air_quality':'fa-wind','holiday':'fa-calendar-check','wecom_ws':'fa-comments','ai_search':'fa-magnifying-glass'} %}
+{% set ICONS = {'geocoding':'fa-map-location-dot','forecast':'fa-cloud-sun','air_quality':'fa-wind','holiday':'fa-calendar-check','wecom_ws':'fa-comments','ai_search':'fa-magnifying-glass','saying':'fa-feather-pointed'} %}
 {# V10.11.26 F4 各组停用后果说明（让管理员预见服务停用对业务的影响） #}
 {% set GROUP_HINTS = {
     'geocoding': '停用后：小地名无法在线解析（内置城市/区县坐标仍可用）；',
@@ -9,7 +9,8 @@
     'air_quality': '停用后：空气质量徽章不再显示（不影响天气主查询）；',
     'holiday': '停用后：万年历无班/休角标（公农历主体不受影响）；',
     'wecom_ws': '停用后：企微消息推送连接不可用；',
-    'ai_search': '停用后：AI 助手完全不做联网搜索。'
+    'ai_search': '停用后：AI 助手完全不做联网搜索。',
+    'saying': '停用后：登录页与首页横幅的一言装饰位将自动静默隐藏。'
 } %}
 
 {% block content %}
@@ -136,7 +137,7 @@
     </div>
 </div>
 
-{% set PLATFORM_GROUPS = ['forecast', 'holiday'] %}
+{% set PLATFORM_GROUPS = ['forecast', 'holiday', 'saying'] %}
 {# V10.11.47 平台支持组：仅「天气预报」「法定节假日」两组支持 UApiPro 平台端点双协议混排 #}
 
 {% for gname, gcfg in cfg.groups.items() %}
@@ -255,10 +256,13 @@
         {% endif %}
 
         {% if gname in PLATFORM_GROUPS %}
-        <div class="small text-primary mt-2"><i class="fa-solid fa-cloud me-1"></i>双协议混排：本组端点可绑定任意 <b>已注册 API 平台</b>（{{ '如 https://uapis.cn/api/v1/misc/weather' if gname == 'forecast' else '如 https://uapis.cn/api/v1/misc/holiday-calendar' }}）——端点行点「编辑」可选择绑定平台；平台端点调用时自动附加该平台 Key 池认证（按序轮换）并按 UApiPro 兼容协议解析，<b>组内端点顺序即协议优先级</b>（平台端点排首位时优先走平台通路，失败自动回落直连端点）。平台与 Key 管理请到 <a href="{{ url_for('admin_service_platform') }}">多平台接口广场</a> 页。</div>
+        <div class="small text-primary mt-2"><i class="fa-solid fa-cloud me-1"></i>双协议混排：本组端点可绑定任意 <b>已注册 API 平台</b>（{{ '如 https://uapis.cn/api/v1/misc/weather' if gname == 'forecast' else ('如 https://uapis.cn/api/v1/saying' if gname == 'saying' else '如 https://uapis.cn/api/v1/misc/holiday-calendar') }}）——端点行点「编辑」可选择绑定平台；平台端点调用时自动附加该平台 Key 池认证（按序轮换）并按 UApiPro 兼容协议解析，<b>组内端点顺序即协议优先级</b>（平台端点排首位时优先走平台通路，失败自动回落直连端点）。平台与 Key 管理请到 <a href="{{ url_for('admin_service_platform') }}">多平台接口广场</a> 页。</div>
         {% endif %}
         {% if gname == 'holiday' %}
         <div class="small text-success mt-2"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>地址末尾的 <b>{年份}</b> 变量由系统自动补全（如输入到 <code>.../year/</code> 即可），无需手工填写年份。</div>
+        {% endif %}
+        {% if gname == 'saying' %}
+        <div class="small text-success mt-2"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>全平台自适应解析：直连端点支持 <b>Hitokoto</b>（<code>https://v1.hitokoto.cn</code>）、<b>今日诗词</b>、各类开放 API、自定义 JSON 或纯文本（text/plain）源，系统自动嗅探并提取正文与出处。</div>
         {% endif %}
         {% if gname == 'ai_search' %}
         <div class="small text-muted mt-2"><i class="fa-solid fa-circle-info me-1"></i>默认端点 <code>https://duckduckgo.com</code> 使用官方搜索库；自定义地址需为 DuckDuckGo 兼容端点。</div>

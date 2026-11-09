@@ -783,21 +783,132 @@ def format_uapi_result(api_id, payload):
         return None
 
 
-# ===================== 业务便捷函数（带进程级缓存） =====================
+# ===================== 每日一言解析器与业务便捷函数 =====================
+
+def parse_saying_payload(raw_text, json_obj=None):
+    """通用一言/名句响应自适应解析引擎（兼容器容各类开放 API 与自建服务）：
+    - 兼容 Hitokoto (hitokoto, from, from_who)
+    - 兼容 UApiPro / 多数通用聚合 API (text)
+    - 兼容 今日诗词 / 韩小韩 (data.content / content, origin/author)
+    - 兼容 英文 Quotable / 句子 API (quote, author)
+    - 兼容 纯文本 text/plain
+    返回 {'text': str, 'source': str, 'provider': str}"""
+    import json
+    if json_obj is None and raw_text:
+        try:
+            json_obj = json.loads(raw_text)
+        except Exception:
+            pass
+
+    text = ''
+    source = ''
+
+    if isinstance(json_obj, dict):
+        inner = json_obj.get('data') or json_obj.get('result') or json_obj
+        if not isinstance(inner, dict):
+            if isinstance(inner, str):
+                text = inner.strip()
+            inner = json_obj
+
+        # 候选文本字段
+        candidates = ['hitokoto', 'text', 'content', 'saying', 'sentence', 'quote', 'msg', 'word']
+        for k in candidates:
+            val = inner.get(k)
+            if isinstance(val, str) and val.strip():
+                text = val.strip()
+                break
+
+        # 候选来源字段
+        src_candidates = ['from', 'origin', 'source', 'from_who', 'author', 'creator']
+        for sk in src_candidates:
+            sval = inner.get(sk)
+            if isinstance(sval, str) and sval.strip():
+                source = sval.strip()
+                break
+
+        # 若命中多项出处（如 Hitokoto 出处与作者），智能拼接
+        if inner.get('from_who') and inner.get('from') and inner.get('from_who') != inner.get('from'):
+            source = f"{inner['from_who']} · 《{inner['from']}》"
+    elif isinstance(json_obj, list) and json_obj and isinstance(json_obj[0], (str, dict)):
+        item = json_obj[0]
+        if isinstance(item, str):
+            text = item.strip()
+        elif isinstance(item, dict):
+            return parse_saying_payload('', json_obj=item)
+    elif isinstance(raw_text, str) and raw_text.strip():
+        t = raw_text.strip().strip('\"\'')
+        if 2 <= len(t) <= 300:
+            text = t
+
+    return {'text': text, 'source': source}
+
 
 def get_daily_saying(force=False):
-    """一言（免费接口）：登录页/首页装饰用。进程级缓存 1 小时（全站共享一句）。
-    返回 {'text': str} 或 None（失败静默降级，装饰位不显示）"""
+    """每日一言（多端点故障转移 + 进程级缓存 1 小时，全站共享）：
+    登录页与首页横幅装饰位共用。
+    - 优先读取 service_config.get_urls('saying') 启用的端点列表（支持直连端点与平台端点混排）
+    - 端点依次遍历重试，自适应解析各类响应格式
+    - 成功返回 {'text': str, 'source': str, 'provider': str}；失败回落历史缓存或静默降级 None"""
     if not force:
         cached = _cache_get('saying')
         if cached is not None:
             return cached
-    ok, payload, status, message = call_uapi('saying', timeout=(5, 8))
-    data = {'text': str((payload or {}).get('text') or '')} if ok and payload else None
-    if data and data['text']:
-        _cache_put('saying', data, _CACHE_TTLS['saying'])
-        return data
-    return _cache_get('saying')  # 拉取失败时用过期缓存兜底
+
+    from services import service_config
+    endpoints = [u for u in service_config.get_urls('saying') if u.get('enabled')]
+    timeout = service_config.get_timeout('saying')
+    retries = service_config.get_retries('saying')
+
+    # 若未配置或全部停用，返回 None 触发静默隐藏
+    if not endpoints:
+        return None
+
+    # 多轮重试 + 有序端点故障转移
+    for attempt in range(max(1, retries + 1)):
+        for ep in endpoints:
+            url = str(ep.get('url') or '').strip()
+            platform = str(ep.get('platform') or '').strip()
+            if not url:
+                continue
+
+            try:
+                if platform:
+                    # 走平台端点（带 Key 轮换与平台鉴权）
+                    ok, payload, status, msg = call_uapi(
+                        'saying', timeout=(5, max(timeout, 8)), full_url=url, platform_id=platform)
+                    if ok and payload:
+                        parsed = parse_saying_payload('', json_obj=payload)
+                        if parsed.get('text'):
+                            plat_obj = service_config.get_platform(platform)
+                            pname = (plat_obj or {}).get('name') or platform
+                            result = {
+                                'text': parsed['text'],
+                                'source': parsed.get('source') or '',
+                                'provider': pname
+                            }
+                            _cache_put('saying', result, _CACHE_TTLS['saying'])
+                            return result
+                else:
+                    # 走直连端点（无认证，双路径直连网络）
+                    resp = service_config._http_get_dual(url, timeout=timeout)
+                    if resp and resp.status_code == 200:
+                        parsed = parse_saying_payload(resp.text)
+                        if parsed.get('text'):
+                            # 提取域名作为 provider
+                            import urllib.parse
+                            domain = urllib.parse.urlparse(url).netloc or '外部接口'
+                            result = {
+                                'text': parsed['text'],
+                                'source': parsed.get('source') or '',
+                                'provider': domain
+                            }
+                            _cache_put('saying', result, _CACHE_TTLS['saying'])
+                            return result
+            except Exception:
+                continue
+
+    # 接口拉取失败时尝试用过期缓存兜底
+    return _cache_get('saying')
 
 
 def query_express(tracking_number, phone=None, force=False):

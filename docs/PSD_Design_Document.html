@@ -4126,6 +4126,26 @@ else { window.addEventListener('load', function() { trySetupDiagramToggles(); })
   </div>
 </body>
 </html>    <div class="card border-0 shadow-sm rounded-4 mb-4">
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-primary text-white fw-bold">
+        ADR-90：核心服务每日一言全平台自适应接入与双协议混排纳管（V10.11.60 落地）
+      </div>
+      <div class="card-body">
+        <h6 class="fw-bold text-dark">背景与痛点</h6>
+        <ul>
+          <li>首页引导大卡片与登录页的一言装饰此前硬编码绑定 UApiPro 单一平台，核心服务配置页缺失一言配置，且无法兼容第三方/自建一言源异构响应结构。</li>
+        </ul>
+        <h6 class="fw-bold text-dark mt-3">架构决策与技术方案</h6>
+        <ul>
+          <li><strong>核心服务第 7 组纳管</strong>：在 <code>service_config.py</code> 注册 <code>saying</code> 组，预置 Hitokoto 直连与 UApiPro 平台端点。</li>
+          <li><strong>自适应响应解析引擎</strong>：实现 <code>parse_saying_payload</code>，智能适配 <code>hitokoto/text/content/quote</code> 等字段及 <code>text/plain</code> 纯文本。</li>
+          <li><strong>PLATFORM_GROUPS 双协议混排</strong>：放行 API 平台绑定，支持带 Key 轮换鉴权与故障转移。</li>
+        </ul>
+        <div class="mt-3 text-muted small">
+          <i class="fa-solid fa-circle-check text-success me-1"></i> 验证结论：一键测试与接口 200 验证 PASS。
+        </div>
+      </div>
+    </div>
     <div class="card-header bg-primary text-white fw-bold">
       ADR-89：全局提示信息无 X 纯净居中与场景化语义升级（V10.11.59 落地）
     </div>

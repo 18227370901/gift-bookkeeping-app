@@ -64,21 +64,26 @@
 </div>
 
 <script>
-// V10.11.47 每日一言装饰：加载成功才显示（d-none 移除），失败静默隐藏
+// 每日一言装饰：加载成功才显示（d-none 移除），失败静默隐藏
 (function () {
     fetch('/api/daily/saying', { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (j) {
-            var text = (j && j.code === 200 && j.data && j.data.text) ? String(j.data.text || '').trim() : '';
+            var data = (j && j.code === 200 && j.data) ? j.data : null;
+            var text = (data && data.text) ? String(data.text || '').trim() : '';
             if (!text) return;
             var box = document.getElementById('loginSaying');
             var span = document.getElementById('loginSayingText');
             if (box && span) {
                 span.textContent = text;
+                var tip = '每日一言';
+                if (data.source) { tip += ' · ' + data.source; }
+                else if (data.provider) { tip += ' · ' + data.provider; }
+                box.title = tip;
                 box.classList.remove('d-none');
             }
         })
-        .catch(function () { /* 平台不可达：装饰位不显示 */ });
+        .catch(function () { /* 接口不可达：装饰位不显示 */ });
 })();
 
 function refreshCaptcha() {
