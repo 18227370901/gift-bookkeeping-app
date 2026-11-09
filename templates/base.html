@@ -106,10 +106,11 @@
             .btn-sm { font-size: 0.75rem; padding: 0.2rem 0.4rem; }
             h2, h3, h4 { font-size: 1.25rem; }
         }
-        /* V10.11.1 导航栏防换行优化：菜单项紧凑排列，文字不拆行 */
-        .navbar-nav .nav-link { white-space: nowrap; font-size: 0.875rem; padding-left: 0.6rem; padding-right: 0.6rem; }
+        /* 导航栏排版优化：流式自适应紧凑排布，杜绝溢出与左侧虚空 */
+        .navbar-nav .nav-link { white-space: nowrap; font-size: 0.84rem; padding-left: 0.45rem; padding-right: 0.45rem; }
         .navbar-nav .nav-item { flex-shrink: 0; }
-        @media (min-width: 992px) { .navbar-nav .nav-link { font-size: 0.9rem; } }
+        @media (min-width: 1200px) { .navbar-nav .nav-link { font-size: 0.875rem; padding-left: 0.55rem; padding-right: 0.55rem; } }
+        @media (min-width: 1400px) { .navbar-nav .nav-link { font-size: 0.9rem; padding-left: 0.65rem; padding-right: 0.65rem; } }
 
         /* ===== V10.11.7 表格列宽手动调整（table-resizer.js 配套样式） ===== */
         /* th 定位基准（分隔条绝对定位依赖） */
@@ -150,7 +151,7 @@
 </head>
 <body data-user-id="{{ current_user.id if current_user.is_authenticated else '0' }}">
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark sticky-top shadow-sm">
-        <div class="container">
+        <div class="container-fluid px-3 px-xl-4">
             <a class="navbar-brand" href="{{ url_for('index') }}">
                 <i class="fa-solid fa-book-bookmark me-2"></i>人情记账宝
             </a>

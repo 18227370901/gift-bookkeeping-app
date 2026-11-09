@@ -4128,6 +4128,25 @@ else { window.addEventListener('load', function() { trySetupDiagramToggles(); })
 </html>    <div class="card border-0 shadow-sm rounded-4 mb-4">
     <div class="card border-0 shadow-sm rounded-4 mb-4">
     <div class="card border-0 shadow-sm rounded-4 mb-4">
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-primary text-white fw-bold">
+        ADR-92：顶部全局导航流式宽屏重塑与大卡片长文本自适应折行体系（V10.11.62 落地）
+      </div>
+      <div class="card-body">
+        <h6 class="fw-bold text-dark">背景与痛点</h6>
+        <ul>
+          <li>顶部导航栏左侧露出黑色空白、右侧菜单被挤出视口；引导大横幅每日一言写死单行截断，中长文本无法显示完整。</li>
+        </ul>
+        <h6 class="fw-bold text-dark mt-3">架构决策与技术方案</h6>
+        <ul>
+          <li><strong>流式全宽导航</strong>：<code>container</code> 升级为 <code>container-fluid px-3 px-xl-4</code>，消除左空与右溢。</li>
+          <li><strong>多行自然换行</strong>：移除 <code>nowrap</code>，注入 <code>word-break: break-word</code> 与首行对齐微晶卡片样式。</li>
+        </ul>
+        <div class="mt-3 text-muted small">
+          <i class="fa-solid fa-circle-check text-success me-1"></i> 验证结论：导航全宽对齐与长名言折行测试 PASS。
+        </div>
+      </div>
+    </div>
       <div class="card-header bg-primary text-white fw-bold">
         ADR-91：每日一言纯文本格式兼容、权限受控动态刷新与横幅排版防溢出加固（V10.11.61 落地）
       </div>
