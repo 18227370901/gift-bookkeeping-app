@@ -4129,6 +4129,25 @@ else { window.addEventListener('load', function() { trySetupDiagramToggles(); })
     <div class="card border-0 shadow-sm rounded-4 mb-4">
     <div class="card border-0 shadow-sm rounded-4 mb-4">
     <div class="card border-0 shadow-sm rounded-4 mb-4">
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-primary text-white fw-bold">
+        ADR-93：登录页面每日一言剥离与首页引导大卡片专属化收敛（V10.11.63 落地）
+      </div>
+      <div class="card-body">
+        <h6 class="fw-bold text-dark">背景与痛点</h6>
+        <ul>
+          <li>历史版本在登录页底部冗余挂载了一言装饰，既干扰登录主视觉，又在未登录页产生额外的异步接口请求。</li>
+        </ul>
+        <h6 class="fw-bold text-dark mt-3">架构决策与技术方案</h6>
+        <ul>
+          <li><strong>登录页纯净化</strong>：清除 <code>login.html</code> 的一言节点与异步脚本。</li>
+          <li><strong>首页引导大卡片专属化</strong>：将每日一言的展示范围严格限定在系统首页背景横幅大卡片内。</li>
+        </ul>
+        <div class="mt-3 text-muted small">
+          <i class="fa-solid fa-circle-check text-success me-1"></i> 验证结论：登录页面纯净无外溢请求，测试 PASS。
+        </div>
+      </div>
+    </div>
       <div class="card-header bg-primary text-white fw-bold">
         ADR-92：顶部全局导航流式宽屏重塑与大卡片长文本自适应折行体系（V10.11.62 落地）
       </div>
