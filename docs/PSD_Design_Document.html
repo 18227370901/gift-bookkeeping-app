@@ -4127,6 +4127,49 @@ else { window.addEventListener('load', function() { trySetupDiagramToggles(); })
 
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-primary text-white fw-bold">
+        ADR-99：多平台接口广场全量参数类型体系、自由类型录入与请求样例一键提取（V10.11.67 落地）
+      </div>
+      <div class="card-body">
+        <h6 class="fw-bold text-dark">背景与痛点</h6>
+        <ul>
+          <li>多平台接口广场手动新增 API 时仅支持 6 种基础参数类型，缺少 <code>string</code>/<code>int</code>/<code>float</code>/<code>array</code>/<code>object</code> 等常用类型与自定义类型输入能力，且 <code>select</code> 无法录入可选项。</li>
+          <li>第三方接口请求样例（如 <code>https://wzapi.com/api/bzjp?xing=王&amp;ming=小虎&amp;...</code>）缺少一键拆解路径与参数定义的能力；同时 <code>POST</code>/<code>PUT</code>/<code>PATCH</code> 请求体强转字符串影响原生类型接口调试。</li>
+        </ul>
+        <h6 class="fw-bold text-dark mt-3">架构决策与技术方案</h6>
+        <ul>
+          <li><strong>18 种内置类型 + 自由类型输入</strong>：前端提供 <code>datalist</code> 组合输入控件，后端 <code>service_config.py</code> 放开安全标识符自定义类型校验，并支持 <code>select</code> 行内可选项与 <code>example</code> 自动回填 <code>test_params</code>。</li>
+          <li><strong>请求样例一键提取</strong>：支持完整 URL、相对路径与 <code>curl</code> 解析，自动剥离平台 <code>base_url</code> 前缀与提取路径/Query 参数（域名不一致仅提示不自动改写平台档案），智能推断类型与中文标签并默认勾选必填。</li>
+          <li><strong>OpenAPI 与原生请求体序列化</strong>：<code>uapi_openapi.py</code> 精确映射格式；<code>uapi_client.py</code> 与试验台按参数类型渲染控件并在 <code>POST</code>/<code>PUT</code>/<code>PATCH</code> 请求体中保留原生数值、布尔、数组与对象类型。</li>
+        </ul>
+        <div class="mt-3 text-muted small">
+          <i class="fa-solid fa-circle-check text-success me-1"></i> 验证结论：前后端语法编译、URL 提取单测、模板渲染与 API 持久化闭环校验 100% 通过。
+        </div>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-primary text-white fw-bold">
+        ADR-98：全系统六维深度性能加固与动静分离容灾架构（V10.11.66 落地）
+      </div>
+      <div class="card-body">
+        <h6 class="fw-bold text-dark">背景与痛点</h6>
+        <ul>
+          <li>随着账本数据量增加与弱网环境下频繁使用，SQLite 单表扫描开销加大；静态资源未开启浏览器强缓存引发首屏重复加载；复杂异常缺少事务安全兜底与表单连击保护。</li>
+        </ul>
+        <h6 class="fw-bold text-dark mt-3">架构决策与技术方案</h6>
+        <ul>
+          <li><strong>核心复合索引</strong>：在底层 SQLite 构建覆盖用户、软删除、时间维度的 6 组核心复合索引。</li>
+          <li><strong>动静分离强缓存</strong>：在 HTTP 响应层拆分动态路由与静态资源，第三方 vendor 资源赋予 30 天持久缓存。</li>
+          <li><strong>原子事务回滚与表单防抖</strong>：补全 404/500 事务回滚，注入无侵入全局表单防抖守卫，修复回收站父子删改孤岛问题。</li>
+        </ul>
+        <div class="mt-3 text-muted small">
+          <i class="fa-solid fa-circle-check text-success me-1"></i> 验证结论：查询加速明显，杜绝双击重复记账，保证长效稳定运行。
+        </div>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-primary text-white fw-bold">
         ADR-97：核心服务导入入参解包异常根除与端点归一化校验闭环（V10.11.65 演进）
       </div>
       <div class="card-body">

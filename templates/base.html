@@ -147,6 +147,12 @@
             table[data-resizable] .colw-resizer, .colw-reset-btn { display: none !important; }
         }
     </style>
+    <style>
+    /* 全局视觉一致性微调：圆角、细腻，不破坏既有业务 */
+    .card { border-radius: 10px !important; transition: box-shadow .2s ease, transform .15s ease; }
+    .card-header { border-top-left-radius: 9px !important; border-top-right-radius: 9px !important; }
+    .table-responsive { scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+    </style>
     {% block extra_css %}{% endblock %}
 </head>
 <body data-user-id="{{ current_user.id if current_user.is_authenticated else '0' }}">

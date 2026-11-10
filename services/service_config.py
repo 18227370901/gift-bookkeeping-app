@@ -571,7 +571,12 @@ def _normalize_key_pool(raw_keys):
 # 安全：path 仅允许站内相对路径（禁止协议、反斜杠、上跳），调用时二次校验 origin 防 SSRF。
 
 API_METHODS = ('GET', 'POST', 'PUT', 'DELETE', 'PATCH')
-API_PARAM_TYPES = ('text', 'number', 'bool', 'select', 'date', 'datetime')
+API_PARAM_TYPES = (
+    'string', 'text', 'int', 'long', 'float', 'number', 'bool', 'select',
+    'date', 'time', 'datetime', 'timestamp', 'array', 'object', 'json',
+    'email', 'url', 'password',
+)
+MAX_PARAM_TYPE_LEN = 30
 
 
 def _api_error(msg):
@@ -621,9 +626,9 @@ def _validate_api_entry(item):
             if pname in seen:
                 return _api_error('参数名重复：%s' % pname)
             seen.add(pname)
-            ptype = str(p.get('type') or 'text').strip()
-            if ptype not in API_PARAM_TYPES:
-                return _api_error('参数「%s」类型非法' % pname)
+            ptype = str(p.get('type') or 'string').strip()
+            if not ptype or len(ptype) > MAX_PARAM_TYPE_LEN or not _re.fullmatch(r'^[A-Za-z][A-Za-z0-9_.-]{0,29}$', ptype):
+                return _api_error('参数「%s」类型不合法（字母开头，最多30位字母/数字/下划线/点/连字符）' % pname)
     credits = item.get('credits')
     if credits not in (None, ''):
         try:
@@ -665,17 +670,25 @@ def _normalize_api_entry(item, source='manual'):
         pname = str(p.get('name') or '').strip()
         if not pname:
             continue
+        raw_opts = p.get('options')
+        if isinstance(raw_opts, str):
+            opts_list = [x.strip()[:60] for x in raw_opts.replace('，', ',').split(',') if x.strip()][:60]
+        else:
+            opts_list = [str(x).strip()[:60] for x in (raw_opts or []) if str(x).strip()][:60]
         params.append({
             'name': pname[:50],
             'label': str(p.get('label') or pname)[:60],
-            'type': str(p.get('type') or 'text').strip() or 'text',
+            'type': (str(p.get('type') or 'string').strip() or 'string')[:MAX_PARAM_TYPE_LEN],
             'required': bool(p.get('required')),
             'example': str(p.get('example') or '')[:200],
-            'options': [str(x)[:60] for x in (p.get('options') or [])][:60],
+            'options': opts_list,
             'convert': str(p.get('convert') or '').strip(),
         })
     test_params = item.get('test_params') if isinstance(item.get('test_params'), dict) else {}
-    test_params = {str(k)[:50]: str(v)[:200] for k, v in test_params.items() if v is not None}
+    test_params = {str(k)[:50]: str(v)[:200] for k, v in test_params.items() if v is not None and str(v) != ''}
+    for p in params:
+        if p['example'] and p['name'] not in test_params:
+            test_params[p['name']] = p['example']
     return {
         'id': str(item.get('id') or ('c' + _uuid.uuid4().hex[:10]))[:60],
         'name': name,

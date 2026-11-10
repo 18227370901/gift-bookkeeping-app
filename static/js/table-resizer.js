@@ -500,3 +500,5 @@
         resizeTimer = setTimeout(function () { TableResizer.rebind(); }, 200);
     });
 })();
+
+;document.addEventListener("submit", function(e) { var form = e.target; if (!form || form.tagName !== "FORM") return; var btn = form.querySelector("button[type=submit], input[type=submit]"); if (!btn || btn.disabled) return; if (form.getAttribute("data-no-guard") === "true") return; setTimeout(function() { try { btn.disabled = true; if (btn.tagName === "BUTTON") { btn.dataset.originalHtml = btn.innerHTML; btn.innerHTML = "<span class='spinner-border spinner-border-sm me-1' role='status'></span> 处理中..."; } } catch(err) {} }, 10); setTimeout(function() { try { if (btn && btn.disabled) { btn.disabled = false; if (btn.dataset.originalHtml !== undefined) { btn.innerHTML = btn.dataset.originalHtml; } } } catch(err) {} }, 8000); }, true);

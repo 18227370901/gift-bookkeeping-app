@@ -224,9 +224,18 @@ def check_session_timeout():
 
 @app.after_request
 def add_header(response):
-    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
+    # 针对静态资源启用浏览器长期强缓存与协商缓存，大幅缩短首屏白屏时间并节省下行带宽
+    if request.path.startswith('/static/'):
+        if '/vendor/' in request.path:
+            response.headers['Cache-Control'] = 'public, max-age=2592000, immutable'
+        else:
+            response.headers['Cache-Control'] = 'public, max-age=86400, must-revalidate'
+        response.headers.pop('Pragma', None)
+        response.headers.pop('Expires', None)
+    else:
+        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
     if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
         session.pop('_flashes', None)
     return response
@@ -281,6 +290,27 @@ def handle_403(e):
         return jsonify({'code': 403, 'success': False, 'message': msg}), 403
     flash(msg, 'danger')
     return redirect(url_for('login'))
+
+@app.errorhandler(404)
+def handle_404(e):
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.path.startswith('/api/'):
+        return jsonify({'code': 404, 'success': False, 'message': '请求的资源或接口不存在 (404)'}), 404
+    flash('您访问的页面不存在或已被移除', 'warning')
+    return redirect(url_for('index'))
+
+@app.errorhandler(500)
+def handle_500(e):
+    import traceback
+    app.logger.error(f'[Internal Server Error] {request.path}: {str(e)}\n{traceback.format_exc()}')
+    try:
+        from services.models import db
+        db.session.rollback()
+    except Exception:
+        pass
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or request.path.startswith('/api/'):
+        return jsonify({'code': 500, 'success': False, 'message': '服务器繁忙，请稍后重试'}), 500
+    flash('系统遇到偶发异常，已自动安全回滚，请重试', 'danger')
+    return redirect(url_for('index'))
 
 class CSRFTokenStr(str):
     def __call__(self):

@@ -114,9 +114,13 @@ def _http_request(method, url, params=None, json_body=None, timeout=None, header
         try:
             with requests.Session() as s:
                 s.trust_env = trust_env
-                if method.upper() == 'POST':
-                    return s.post(url, params=params, json=json_body,
-                                  timeout=timeout or DEFAULT_TIMEOUT, headers=headers)
+                m = method.upper()
+                if m in ('POST', 'PUT', 'PATCH'):
+                    return s.request(m, url, params=params, json=json_body,
+                                     timeout=timeout or DEFAULT_TIMEOUT, headers=headers)
+                if m == 'DELETE':
+                    return s.delete(url, params=params,
+                                    timeout=timeout or DEFAULT_TIMEOUT, headers=headers)
                 return s.get(url, params=params,
                              timeout=timeout or DEFAULT_TIMEOUT, headers=headers)
         except Exception as e:
@@ -429,17 +433,8 @@ def call_platform_api(platform_id, api_def, params=None, timeout=None, return_ke
         return result + (None,) if return_key else result
 
     method = str(api_def.get('method') or 'GET').upper()
-    clean = {}
-    for k, v in (params or {}).items():
-        if v is None:
-            continue
-        if isinstance(v, bool):
-            clean[k] = 'true' if v else 'false'
-        elif isinstance(v, str):
-            if v != '':
-                clean[k] = v
-        else:
-            clean[k] = str(v)
+    is_body_method = method in ('POST', 'PUT', 'PATCH')
+    clean = _prepare_platform_params(api_def, params, for_json_body=is_body_method)
 
     base_url = _platform_base_url(platform_id)
     url = _join_platform_url(base_url, api_def.get('path'), clean)
@@ -450,13 +445,80 @@ def call_platform_api(platform_id, api_def, params=None, timeout=None, return_ke
     if path_params:
         clean = {k: v for k, v in clean.items() if k not in path_params}
 
-    if method == 'POST':
+    if is_body_method:
         ok, payload, status, message, key_label = _request_with_key_rotation(
-            'POST', url, params=None, json_body=clean, timeout=timeout, platform_id=platform_id)
+            method, url, params=None, json_body=clean, timeout=timeout, platform_id=platform_id)
     else:
         ok, payload, status, message, key_label = _request_with_key_rotation(
-            'GET', url, params=clean, timeout=timeout, platform_id=platform_id)
+            method, url, params=clean, timeout=timeout, platform_id=platform_id)
     return (ok, payload, status, message, key_label) if return_key else (ok, payload, status, message)
+
+
+def _coerce_json_param(ptype, value):
+    import json as _json
+    t = str(ptype or '').strip().lower()
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, bool):
+        return value if t in ('bool', 'boolean') else ('true' if value else 'false')
+    sv = str(value).strip()
+    if t in ('int', 'integer', 'long', 'int64', 'int32', 'timestamp'):
+        try:
+            return int(sv)
+        except ValueError:
+            return sv
+    if t in ('float', 'double', 'decimal', 'number'):
+        try:
+            if t == 'number' and sv.lstrip('-').isdigit():
+                return int(sv)
+            return float(sv)
+        except ValueError:
+            return sv
+    if t in ('bool', 'boolean'):
+        low = sv.lower()
+        if low in ('true', '1', 'yes'):
+            return True
+        if low in ('false', '0', 'no'):
+            return False
+        return sv
+    if t in ('array', 'list'):
+        if sv.startswith('['):
+            try:
+                parsed = _json.loads(sv)
+                if isinstance(parsed, list):
+                    return parsed
+            except ValueError:
+                pass
+        return [x.strip() for x in sv.replace('，', ',').split(',') if x.strip()]
+    if t in ('object', 'json', 'dict', 'map'):
+        try:
+            parsed = _json.loads(sv)
+            if isinstance(parsed, (dict, list)):
+                return parsed
+        except ValueError:
+            pass
+    return str(value)
+
+
+def _prepare_platform_params(api_def, params, for_json_body=False):
+    type_map = {str(p.get('name') or ''): str(p.get('type') or '') for p in (api_def.get('params') or []) if isinstance(p, dict)}
+    clean = {}
+    for k, v in (params or {}).items():
+        if v is None:
+            continue
+        if isinstance(v, str) and v == '':
+            continue
+        if for_json_body:
+            clean[k] = _coerce_json_param(type_map.get(k, ''), v)
+        else:
+            if isinstance(v, bool):
+                clean[k] = 'true' if v else 'false'
+            elif isinstance(v, (dict, list)):
+                import json as _json
+                clean[k] = _json.dumps(v, ensure_ascii=False)
+            else:
+                clean[k] = str(v)
+    return clean
 
 
 def service_config_path_params(path):
@@ -478,11 +540,8 @@ def call_platform_api_raw(platform_id, api_def, params=None, timeout=None):
         empty.update({'status': 400, 'message': '未知 API 定义'})
         return empty
     method = str(api_def.get('method') or 'GET').upper()
-    clean = {}
-    for k, v in (params or {}).items():
-        if v is None or v == '':
-            continue
-        clean[k] = ('true' if v else 'false') if isinstance(v, bool) else str(v)
+    is_body_method = method in ('POST', 'PUT', 'PATCH')
+    clean = _prepare_platform_params(api_def, params, for_json_body=is_body_method)
     base_url = _platform_base_url(platform_id)
     url = _join_platform_url(base_url, api_def.get('path'), clean)
     if not _same_origin(url, base_url):
@@ -493,8 +552,8 @@ def call_platform_api_raw(platform_id, api_def, params=None, timeout=None):
         clean = {k: v for k, v in clean.items() if k not in path_params}
     out = dict(empty)
     try:
-        resp = _http_request(method, url, params=(clean if method == 'GET' else None),
-                             json_body=(clean if method == 'POST' else None),
+        resp = _http_request(method, url, params=(None if is_body_method else clean),
+                             json_body=(clean if is_body_method else None),
                              timeout=timeout or (5, 15),
                              headers=_platform_headers(platform_id))
         out['status'] = resp.status_code

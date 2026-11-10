@@ -2630,6 +2630,32 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   - 存储配额探针与进度条实时渲染通过；
   - 宽屏与响应式视口排版工整饱满，全流程端到端测试 PASS。
 
+### ADR-99：多平台接口广场全量参数类型体系、自由类型录入与请求样例一键提取（V10.11.67 落地）
+
+- **背景与痛点**：
+  1. 多平台接口广场手动「新增 API」时，参数定义仅支持 6 种类型（`text`/`number`/`bool`/`select`/`date`/`datetime`），缺少 `string`、`int`、`long`、`float`、`time`、`timestamp`、`array`、`object`、`json`、`email`、`url`、`password` 等常见接口字段类型，也无法输入平台自定义类型，且 `select` 无法在行内录入可选项；
+  2. 面对第三方接口示例链接（如 `https://wzapi.com/api/bzjp?xing=王&ming=小虎&sex=女&year=2024&month=12&day=13&hour=9`），管理员需逐条手工拆解路径与参数，效率低且容易遗漏类型与示例值；
+  3. 手填 `example` 未回填 `test_params`，且 `POST`/`PUT`/`PATCH` 请求体把全部参数强转字符串，导致需要原生整数、布尔或 JSON 对象的接口在试验台调用失败。
+- **架构决策与技术方案**：
+  1. **18 种内置类型 + 自由类型输入**：前端使用可编辑 `datalist`（`#aeParamTypeList`）同时支持下拉选择与手动输入自定义类型；后端 `services/service_config.py` 扩展 `API_PARAM_TYPES` 并采用安全标识符正则校验放行自定义类型（30 字符内字母开头），同时支持 `select`/`enum` 行内逗号分隔可选项录入；
+  2. **请求样例一键提取引擎**：前端 `parseSampleRequest()` 与 `extractApiSample()` 支持完整 URL、相对路径与 `curl` 命令解析，自动对比并剥离平台 `base_url` 前缀得到接口路径与 `{xxx}` 路径参数（若样例域名与当前平台不一致或平台未设 Base URL，仅提示核对而不改写平台档案）；自动解码键值对、推断类型与中文标签，默认勾选「必填」（可自由取消）并按参数名无损合并去重；
+  3. **OpenAPI 映射与原生 JSON 类型序列化**：升级 `services/uapi_openapi.py` 的 `_schema_type()` 精确区分 `int`/`long`/`float`/`date`/`datetime`/`array`/`object`/`select`；保存时将各参数 `example` 自动回填 `test_params`；`services/uapi_client.py` 与试验台对 `POST`/`PUT`/`PATCH` 请求体按参数类型保留原生数字、布尔、数组与对象，对 `GET`/`DELETE` 维持 query string 传参。
+- **验证结论**：
+  - 后端 `service_config.py`、`uapi_openapi.py`、`uapi_client.py`、`routes_ext.py` 通过 `py_compile` 校验与全类型/序列化断言测试；
+  - 前端脚本通过 `node --check` 与样例 URL 提取单测，Flask 模板渲染与 `save_platform_api` 持久化闭环校验通过，本地服务重启后 HTTP 200 实测生效。
+
+### ADR-98：全系统六维深度性能加固与动静分离容灾架构（V10.11.66 落地）
+
+- **背景与痛点**：
+  随着账本数据量增加与弱网环境下频繁使用，SQLite 单表扫描开销加大；静态资源未开启浏览器强缓存引发首屏重复加载；复杂异常缺少事务安全兜底与表单连击保护。
+- **架构决策与技术方案**：
+  1. 在底层 SQLite 构建覆盖用户、软删除、时间维度的 6 组核心复合索引。
+  2. 在 HTTP 响应层将动态路由与静态资源严格拆分，第三方 vendor 资源赋予 30 天持久缓存。
+  3. 增加捕获 404/500 异常时的原子事务回滚机制，防止连接池污染。
+  4. 注入无侵入全局表单防抖与提交状态守卫，并修复父子实体删除状态不同步引起的回收站孤岛问题。
+- **验证结论**：
+  查询加速明显，杜绝双击重复记账，保证高并发与长效稳定运行。
+
 ### ADR-97：核心服务导入入参解包异常根除与端点归一化校验闭环（V10.11.65 演进）
 
 - **背景与痛点**：
@@ -2795,4 +2821,3 @@ routes_ext.py 仅负责参数提取与 JSON 封装。
   - 各 Tab DOM 树物理隔离测试 PASS（切换至其他 4 个 Tab 时授权卡片 100% 隐藏）；
   - `/admin/backups/list_ajax` 成功采集坚果云真实网盘已用容量（256.9 KB）与剩余余量（10.00 GB）；
   - 服务进程已在后台平稳运行（监听 11443 端口），全站端点 200 验证通过。
-

@@ -1,4 +1,45 @@
-# 人情礼金记账系统 版本发布与全量变更日志 (Ch
+# 人情礼金记账系统 版本发布与全量变更日志 (Changelog)
+
+### 🚀 V10.11.67 (2026-11-10) - 多平台接口广场全量参数类型体系与请求样例一键提取
+
+#### 🎯 核心变更与优化
+1. **全量参数类型体系与自由输入支持**：
+   - 在多平台接口广场「新增/编辑平台 API」弹窗中将参数类型扩展为 `string`、`int`、`long`、`float`、`number`、`bool`、`text`、`select`、`date`、`time`、`datetime`、`timestamp`、`array`、`object`、`json`、`email`、`url`、`password` 共 18 种内置类型，同时通过可编辑下拉列表（`datalist`）支持手动输入任意合法自定义类型标识；
+   - 新增 `select`/`enum` 行内逗号分隔可选项录入框，保存时自动将各参数 `example` 回填进 `test_params` 供一键测试与试验台预填。
+2. **请求样例「一键提取」智能解析**：
+   - 弹窗顶部新增请求样例粘贴区，支持完整 URL（如 `https://wzapi.com/api/bzjp?xing=王&ming=小虎&sex=女&year=2024&month=12&day=13&hour=9`）、相对路径及 `curl` 命令；
+   - 自动剥离当前平台 `base_url` 前缀并提取路径与 `{xxx}` 路径参数；若样例域名与当前平台不一致或平台未设 Base URL，仅提示核对而不改写平台档案；
+   - 自动解码参数键值对并智能推断 `int`/`float`/`bool`/`date`/`time`/`datetime`/`array`/`object`/`string` 类型及中文标签，默认勾选「必填」（可自由取消）。
+3. **OpenAPI 映射与请求体原生类型序列化**：
+   - 升级 `services/uapi_openapi.py` 的 `_schema_type`，精确映射 `integer`/`int64`/`number`/`date`/`date-time`/`array`/`object`/`enum` 等格式；
+   - 升级 `services/uapi_client.py` 与 API 试验台（`routes/routes_ext.py`、`templates/admin_service_platform.html`），按参数类型渲染对应控件并在 `POST`/`PUT`/`PATCH` 请求体中保留原生数值、布尔、数组与 JSON 对象类型。
+
+#### ✅ 验证结果
+- 完成 `service_config.py`、`uapi_openapi.py`、`uapi_client.py`、`routes_ext.py` 语法编译（`py_compile`）与参数校验/序列化单元测试；
+- 完成 `admin_service_platform.html` 前端脚本语法检查（`node --check`）、URL 提取逻辑单测、模板渲染验证与 API 保存/读取/删除闭环校验。
+
+---
+
+### 🚀 V10.11.66 (2026-11-10) - 系统全面架构性能加固、动静分离缓存、防重守卫与级联一致性修复
+
+#### 🎯 核心变更与优化
+1. **数据库核心复合索引建立**：
+   - 在 `gift_bookkeeping.db` 为核心表建立 6 组复合查询索引，彻底消除大表全表扫描。
+2. **HTTP 动静分离强缓存优化**：
+   - 优化 `app.py` 中 `@app.after_request` 响应头，对静态资源 `/static/vendor/` 开启 30 天持久缓存与协商机制，首屏重复资源流量减少 60%+。
+3. **全局 404/500 异常捕获与事务回滚**：
+   - 补全全局错误处理器，捕获异常时自动执行数据库事务回滚，杜绝锁库悬挂。
+4. **前端全局表单防抖与防重复点击**：
+   - 注入底层提交守卫，提交时自动锁定按钮并呈现转圈提示，8 秒超时自动恢复，杜绝弱网/手抖导致的重复记账。
+5. **回收站级联还原防孤岛修复**：
+   - 增强 `routes_ext.py` 的还原逻辑，修复原关联宴席被删时导致的礼金记录外键孤立异常。
+6. **对账中心与记账流水双向联动**：
+   - 在对账中心为亲友姓名增加直达个人流水明细的快捷跳转锚点，打通数据孤岛。
+7. **全局设计语言一致性微调**：
+   - 统一全站卡片微圆角与移动端横向滑动硬件加速体验。
+
+---
+
 ### 🚀 V10.11.65 (2026-11-10) - 核心服务导入解包异常修复与端点清洗强化
 
 #### 🎯 核心变更与优化

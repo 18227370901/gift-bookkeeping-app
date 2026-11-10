@@ -998,6 +998,13 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             flash('您没有权限还原此数据！', 'danger')
             return redirect(url_for('recycle_bin_view'))
 
+        # 级联安全检查：若还原的礼金记录关联的宴席仍在回收站中，自动解除绑定防孤岛断链
+        if target_type == 'record' and getattr(item, 'banquet_id', None):
+            parent_banquet = db.session.get(Banquet, item.banquet_id)
+            if parent_banquet and parent_banquet.deleted_at is not None:
+                item.banquet_id = None
+                flash('提示：该礼金所属的原宴席仍在回收站中，已自动解除宴席绑定恢复为独立流水。', 'info')
+
         item.deleted_at = None
         db.session.commit()
         safe_log('还原回收站数据', f"还原了 [{target_type}] ID #{target_id}: [{title}]", user=current_user)
@@ -6559,15 +6566,22 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             return jsonify({'success': False, 'message': '文件上传型接口暂不支持试验台，请参考官方文档调用'}), 400
         if api.get('stream'):
             return jsonify({'success': False, 'message': '流式响应接口暂不支持试验台'}), 400
+        import json as _json
         params = {}
         for k, v in (data.get('params') or {}).items():
             if v is None:
                 continue
-            sv = str(v)
-            if len(sv) > 2000:
-                return jsonify({'success': False, 'message': f'参数 {k} 过长（最多 2000 字符）'}), 400
-            if sv != '':
-                params[k] = sv
+            if isinstance(v, (dict, list)):
+                sv = _json.dumps(v, ensure_ascii=False)
+                if len(sv) > 2000:
+                    return jsonify({'success': False, 'message': f'参数 {k} 过长（最多 2000 字符）'}), 400
+                params[k] = v
+            else:
+                sv = str(v)
+                if len(sv) > 2000:
+                    return jsonify({'success': False, 'message': f'参数 {k} 过长（最多 2000 字符）'}), 400
+                if sv != '':
+                    params[k] = sv
         if is_custom:
             result = uapi_client.call_platform_api_raw(platform_id, api, params=params, timeout=(5, 20))
         else:

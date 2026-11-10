@@ -94,14 +94,39 @@ def _deref(spec, node, depth=0):
 
 
 def _schema_type(schema):
-    t = (schema or {}).get('type')
+    schema = schema or {}
+    if schema.get('enum'):
+        return 'select'
+    t = schema.get('type')
     if isinstance(t, list):
-        t = t[0] if t else None
+        non_null = [x for x in t if x != 'null']
+        t = non_null[0] if non_null else (t[0] if t else None)
+    fmt = str(schema.get('format') or '').lower()
     if t == 'boolean':
         return 'bool'
-    if t in ('integer', 'number'):
-        return 'number'
-    return 'text'
+    if t == 'integer':
+        return 'long' if fmt == 'int64' else 'int'
+    if t == 'number':
+        return 'float'
+    if t == 'array':
+        return 'array'
+    if t == 'object':
+        return 'object'
+    if t == 'string':
+        if fmt == 'date':
+            return 'date'
+        if fmt == 'date-time':
+            return 'datetime'
+        if fmt == 'time':
+            return 'time'
+        if fmt == 'email':
+            return 'email'
+        if fmt in ('uri', 'url'):
+            return 'url'
+        if fmt == 'password':
+            return 'password'
+        return 'string'
+    return 'string'
 
 
 def _short_label(desc, name):

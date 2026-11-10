@@ -453,6 +453,17 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="关闭"></button>
             </div>
             <div class="modal-body">
+                <div class="border rounded-3 bg-light-subtle p-2 mb-2">
+                    <div class="d-flex align-items-center justify-content-between mb-1">
+                        <label class="form-label small fw-semibold text-primary mb-0"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>请求样例一键提取（可选）</label>
+                        <span class="small text-muted">支持完整 URL / 相对路径 / curl 命令</span>
+                    </div>
+                    <div class="input-group input-group-sm">
+                        <input type="text" class="form-control" id="aeSampleUrl" maxlength="2000" placeholder="粘贴如：https://wzapi.com/api/bzjp?xing=王&ming=小虎&sex=女&year=2024&month=12&day=13&hour=9">
+                        <button class="btn btn-primary" type="button" onclick="extractApiSample()"><i class="fa-solid fa-bolt me-1"></i>一键提取</button>
+                    </div>
+                    <div class="form-text small mb-0 d-none" id="aeSampleHint"></div>
+                </div>
                 <div class="row g-2">
                     <div class="col-12 col-md-6"><label class="form-label small text-muted mb-1">API 名称 <span class="text-danger">*</span></label>
                         <input type="text" class="form-control form-control-sm" id="aeName" maxlength="50" placeholder="如：查询天气"></div>
@@ -473,12 +484,35 @@
                         </select>
                         <div class="form-text small">复用系统内置的 30 个响应美化器（如 misc_weather），响应结构匹配时显示中文可读摘要。</div></div>
                     <div class="col-12">
-                        <div class="d-flex align-items-center mb-1">
-                            <label class="form-label small text-muted mb-0">参数定义</label>
-                            <button class="btn btn-outline-success btn-sm rounded-pill px-2 ms-auto" type="button" onclick="apiParamAddRow()"><i class="fa-solid fa-plus me-1"></i>添加参数</button>
+                        <div class="d-flex align-items-center flex-wrap gap-2 mb-1">
+                            <label class="form-label small text-muted mb-0">参数定义 <span class="text-muted">（类型支持下拉选择或直接输入自定义类型）</span></label>
+                            <div class="ms-auto d-flex gap-1">
+                                <button class="btn btn-outline-secondary btn-sm rounded-pill px-2" type="button" onclick="renderApiParamRows([])" title="清空当前全部参数行"><i class="fa-solid fa-broom me-1"></i>清空</button>
+                                <button class="btn btn-outline-success btn-sm rounded-pill px-2" type="button" onclick="apiParamAddRow({required:true})"><i class="fa-solid fa-plus me-1"></i>添加参数</button>
+                            </div>
                         </div>
-                        <div id="aeParamsBox" class="border rounded-3 p-2" style="max-height:220px;overflow-y:auto">
-                            <div class="small text-muted mb-1">定义参数名/类型后，API 试验台会自动渲染对应输入控件（支持文本/数字/布尔/下拉/日历）。</div>
+                        <datalist id="aeParamTypeList">
+                            <option value="string">string（字符串）</option>
+                            <option value="int">int（整数）</option>
+                            <option value="long">long（长整数）</option>
+                            <option value="float">float（小数/浮点数）</option>
+                            <option value="number">number（通用数字）</option>
+                            <option value="bool">bool（布尔 true/false）</option>
+                            <option value="text">text（多行文本）</option>
+                            <option value="select">select（下拉枚举）</option>
+                            <option value="date">date（日期 YYYY-MM-DD）</option>
+                            <option value="time">time（时间 HH:mm）</option>
+                            <option value="datetime">datetime（日期时间）</option>
+                            <option value="timestamp">timestamp（时间戳）</option>
+                            <option value="array">array（数组）</option>
+                            <option value="object">object（JSON 对象）</option>
+                            <option value="json">json（JSON 数据）</option>
+                            <option value="email">email（邮箱）</option>
+                            <option value="url">url（链接）</option>
+                            <option value="password">password（密码）</option>
+                        </datalist>
+                        <div id="aeParamsBox" class="border rounded-3 p-2" style="max-height:240px;overflow-y:auto">
+                            <div class="small text-muted mb-1 ae-empty-tip">定义参数名/类型后，API 试验台会自动渲染对应输入控件；支持内置类型与手动输入自定义类型。</div>
                         </div>
                     </div>
                 </div>
@@ -1286,34 +1320,243 @@
         // V10.11.52：下拉显示「键（中文说明）」——说明该格式化器把响应转成什么可读摘要
         fmtSel.innerHTML = '<option value="">（不格式化，展示原始 JSON）</option>' +
             UAPI_FORMATTERS.map(f => `<option value="${esc(f.key)}"${api && api.formatter === f.key ? ' selected' : ''}>${esc(f.key)}（${esc(f.label)}）</option>`).join('');
+        const sampleInput = document.getElementById('aeSampleUrl');
+        if (sampleInput) sampleInput.value = '';
+        const sampleHint = document.getElementById('aeSampleHint');
+        if (sampleHint) { sampleHint.textContent = ''; sampleHint.className = 'form-text small mb-0 d-none'; }
         renderApiParamRows(api ? (api.params || []) : []);
         bootstrap.Modal.getOrCreateInstance(document.getElementById('apiEditModal')).show();
+    }
+
+    const PARAM_LABEL_DICT = {
+        xing: '姓', ming: '名', name: '名称', sex: '性别', gender: '性别',
+        year: '年份', month: '月份', day: '日期/日', hour: '小时', minute: '分钟', second: '秒',
+        date: '日期', time: '时间', datetime: '日期时间', timestamp: '时间戳',
+        city: '城市', province: '省份', adcode: '行政区划代码', ip: 'IP地址',
+        phone: '手机号', mobile: '手机号', email: '邮箱', url: '链接', id: 'ID',
+        page: '页码', size: '每页数量', limit: '数量限制', offset: '偏移量',
+        keyword: '关键词', q: '查询词', query: '查询内容', type: '类型', format: '格式',
+        lang: '语言', code: '编码', token: '令牌', key: '密钥', status: '状态',
+    };
+
+    function inferParamType(val) {
+        const s = String(val == null ? '' : val).trim();
+        if (!s) return 'string';
+        if (/^(true|false)$/i.test(s)) return 'bool';
+        if (/^-?\d+$/.test(s)) {
+            const n = Number(s);
+            return (n > 2147483647 || n < -2147483648) ? 'long' : 'int';
+        }
+        if (/^-?\d+\.\d+$/.test(s)) return 'float';
+        if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return 'date';
+        if (/^\d{2}:\d{2}(:\d{2})?$/.test(s)) return 'time';
+        if (/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?/.test(s)) return 'datetime';
+        if (/^https?:\/\/\S+$/i.test(s)) return 'url';
+        if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s)) return 'email';
+        if ((s.startsWith('[') && s.endsWith(']')) || (s.startsWith('{') && s.endsWith('}'))) {
+            try {
+                const parsed = JSON.parse(s);
+                if (Array.isArray(parsed)) return 'array';
+                if (parsed && typeof parsed === 'object') return 'object';
+            } catch (e) {}
+        }
+        return 'string';
+    }
+
+    function inferParamLabel(name) {
+        const key = String(name || '').trim().toLowerCase();
+        return PARAM_LABEL_DICT[key] || name;
+    }
+
+    function parseSampleRequest(rawText) {
+        let raw = String(rawText || '').trim();
+        if (!raw) return { error: '请先粘贴请求样例 URL 或相对路径' };
+        let detectedMethod = '';
+        if (/^curl\s+/i.test(raw)) {
+            const mMatch = raw.match(/(?:-X|--request)\s+['"]?(GET|POST|PUT|DELETE|PATCH)['"]?/i);
+            if (mMatch) detectedMethod = mMatch[1].toUpperCase();
+            const uMatch = raw.match(/['"]?(https?:\/\/[^\s'"]+|\/[^\s'"]+)['"]?/i);
+            if (uMatch) raw = uMatch[1];
+        }
+        raw = raw.replace(/^['"]|['"]$/g, '').trim();
+        let urlObj = null;
+        let hasOrigin = false;
+        if (/^https?:\/\//i.test(raw)) {
+            try {
+                urlObj = new URL(raw);
+                hasOrigin = true;
+            } catch (e) {
+                return { error: '请求样例 URL 格式无法解析，请检查是否完整' };
+            }
+        } else if (raw.startsWith('/')) {
+            try {
+                urlObj = new URL('http://placeholder.local' + raw);
+            } catch (e) {
+                return { error: '接口路径格式无法解析' };
+            }
+        } else if (/^[A-Za-z0-9.-]+\.[A-Za-z]{2,}(\/|\?|$)/.test(raw)) {
+            try {
+                urlObj = new URL('https://' + raw);
+                hasOrigin = true;
+            } catch (e) {
+                return { error: '请求样例 URL 格式无法解析' };
+            }
+        } else {
+            return { error: '请输入以 http(s):// 或 / 开头的请求样例' };
+        }
+        const queryParams = [];
+        const seen = new Set();
+        urlObj.searchParams.forEach((v, k) => {
+            const pname = String(k || '').trim();
+            if (!pname || seen.has(pname)) return;
+            seen.add(pname);
+            queryParams.push({
+                name: pname,
+                label: inferParamLabel(pname),
+                type: inferParamType(v),
+                example: v,
+                required: true,
+            });
+        });
+        return {
+            origin: hasOrigin ? urlObj.origin : '',
+            pathname: urlObj.pathname || '/',
+            method: detectedMethod,
+            params: queryParams,
+        };
+    }
+
+    function extractApiSample() {
+        const raw = document.getElementById('aeSampleUrl').value;
+        const parsed = parseSampleRequest(raw);
+        const hintEl = document.getElementById('aeSampleHint');
+        if (parsed.error) {
+            hintEl.className = 'form-text small mb-0 text-danger';
+            hintEl.textContent = parsed.error;
+            showToast(parsed.error, false);
+            return;
+        }
+        const plat = PLATFORMS_DATA.find(x => x.id === apiEditCtx.pid);
+        const baseStr = (plat && plat.base_url) ? String(plat.base_url).trim() : '';
+        let path = parsed.pathname || '/';
+        const notes = [];
+        if (baseStr) {
+            try {
+                const baseObj = new URL(baseStr);
+                const bp = baseObj.pathname.replace(/\/+$/, '');
+                if (bp && bp !== '/' && (path === bp || path.startsWith(bp + '/'))) {
+                    path = path.slice(bp.length) || '/';
+                }
+                if (parsed.origin && parsed.origin.toLowerCase() !== baseObj.origin.toLowerCase()) {
+                    notes.push(`注意：样例域名（${parsed.origin}）与当前平台 Base URL（${baseObj.origin}）不一致，已仅提取路径与参数，未改写平台档案`);
+                }
+            } catch (e) {}
+        } else if (parsed.origin) {
+            notes.push(`注意：当前平台尚未配置 Base URL（样例域名为 ${parsed.origin}），请另行在平台编辑中确认 Base URL，本次未改写平台档案`);
+        }
+        if (!path.startsWith('/')) path = '/' + path;
+        document.getElementById('aePath').value = path;
+        if (parsed.method) document.getElementById('aeMethod').value = parsed.method;
+        const nameEl = document.getElementById('aeName');
+        if (!nameEl.value.trim()) {
+            const seg = path.split('/').filter(Boolean).pop() || '';
+            if (seg && !/^\{.*\}$/.test(seg)) nameEl.value = seg;
+        }
+
+        // 同时提取路径中的 {xxx} 占位符参数
+        const pathMatches = [...path.matchAll(/\{([A-Za-z_][A-Za-z0-9_.\-]*)\}/g)];
+        const extracted = [...parsed.params];
+        const existingExtractedNames = new Set(extracted.map(p => p.name));
+        pathMatches.forEach(m => {
+            const pname = m[1];
+            if (!existingExtractedNames.has(pname)) {
+                existingExtractedNames.add(pname);
+                extracted.unshift({
+                    name: pname,
+                    label: inferParamLabel(pname),
+                    type: 'string',
+                    example: '',
+                    required: true,
+                });
+            }
+        });
+
+        const curParams = collectApiParams();
+        let addedCount = 0;
+        let updatedCount = 0;
+        if (!curParams.length) {
+            renderApiParamRows(extracted);
+            addedCount = extracted.length;
+        } else {
+            const map = new Map(curParams.map(p => [p.name, p]));
+            extracted.forEach(np => {
+                if (map.has(np.name)) {
+                    const old = map.get(np.name);
+                    if (!old.example && np.example) { old.example = np.example; updatedCount++; }
+                    if ((!old.label || old.label === old.name) && np.label) old.label = np.label;
+                } else {
+                    curParams.push(np);
+                    addedCount++;
+                }
+            });
+            renderApiParamRows(curParams);
+        }
+
+        const summary = `已提取路径 ${path}，新增 ${addedCount} 个参数` + (updatedCount ? `、补全 ${updatedCount} 个示例` : '');
+        if (notes.length) {
+            hintEl.className = 'form-text small mb-0 text-warning-emphasis';
+            hintEl.textContent = summary + '；' + notes.join('；');
+        } else {
+            hintEl.className = 'form-text small mb-0 text-success';
+            hintEl.textContent = summary;
+        }
+        showToast(summary);
     }
 
     // 参数定义行动态渲染（新增/编辑共用）
     function renderApiParamRows(params) {
         const box = document.getElementById('aeParamsBox');
         box.querySelectorAll('.ae-param-row').forEach(r => r.remove());
-        (params || []).forEach(p => apiParamAddRow(p));
+        const list = params || [];
+        if (!list.length) {
+            if (!box.querySelector('.ae-empty-tip')) {
+                box.insertAdjacentHTML('beforeend', '<div class="small text-muted mb-1 ae-empty-tip">定义参数名/类型后，API 试验台会自动渲染对应输入控件；支持内置类型与手动输入自定义类型。</div>');
+            }
+            return;
+        }
+        list.forEach(p => apiParamAddRow(p));
+    }
+
+    function syncParamOptionsRow(typeInput) {
+        const row = typeInput.closest('.ae-param-row');
+        if (!row) return;
+        const wrap = row.querySelector('.ae-p-opts-wrap');
+        if (!wrap) return;
+        const t = (typeInput.value || '').trim().toLowerCase();
+        wrap.classList.toggle('d-none', t !== 'select' && t !== 'enum');
     }
 
     function apiParamAddRow(p) {
         p = p || {};
         const box = document.getElementById('aeParamsBox');
-        const empty = box.querySelector('.small.text-muted');
+        const empty = box.querySelector('.ae-empty-tip');
         if (empty) empty.remove();
+        const isRequired = (p.required === undefined) ? true : Boolean(p.required);
+        const ptype = p.type || 'string';
+        const optsVal = Array.isArray(p.options) ? p.options.join(', ') : (p.options || '');
+        const showOpts = (ptype.toLowerCase() === 'select' || ptype.toLowerCase() === 'enum');
         const row = document.createElement('div');
-        row.className = 'd-flex flex-wrap align-items-center gap-1 mb-1 ae-param-row';
+        row.className = 'd-flex flex-wrap align-items-center gap-1 mb-1 pb-1 border-bottom border-light-subtle ae-param-row';
         row.innerHTML = `
-            <input type="text" class="form-control form-control-sm ae-p-name" style="width:130px" placeholder="参数名（如 city）" value="${esc(p.name || '')}" maxlength="50">
-            <input type="text" class="form-control form-control-sm ae-p-label" style="width:130px" placeholder="显示标签（如 城市）" value="${esc(p.label || '')}" maxlength="60">
-            <select class="form-select form-select-sm ae-p-type" style="width:96px">
-                ${['text', 'number', 'bool', 'select', 'date', 'datetime'].map(t =>
-                    `<option value="${t}"${(p.type || 'text') === t ? ' selected' : ''}>${t}</option>`).join('')}
-            </select>
-            <input type="text" class="form-control form-control-sm ae-p-example" style="width:110px" placeholder="示例/预填值" value="${esc(p.example || '')}" maxlength="200">
-            <div class="form-check" title="必填"><input type="checkbox" class="form-check-input ae-p-required"${p.required ? ' checked' : ''}></div>
-            <button class="btn btn-outline-danger btn-sm rounded-pill px-2" type="button" title="移除该参数" onclick="this.closest('.ae-param-row').remove()"><i class="fa-solid fa-xmark"></i></button>`;
+            <input type="text" class="form-control form-control-sm ae-p-name" style="width:120px" placeholder="参数名（如 city）" value="${esc(p.name || '')}" maxlength="50">
+            <input type="text" class="form-control form-control-sm ae-p-label" style="width:120px" placeholder="显示标签（如 城市）" value="${esc(p.label || '')}" maxlength="60">
+            <input type="text" class="form-control form-control-sm ae-p-type" list="aeParamTypeList" style="width:125px" placeholder="选择或输入类型" value="${esc(ptype)}" maxlength="30" oninput="syncParamOptionsRow(this)" onchange="syncParamOptionsRow(this)">
+            <input type="text" class="form-control form-control-sm ae-p-example" style="width:125px" placeholder="示例/预填值" value="${esc(p.example || '')}" maxlength="200">
+            <div class="form-check ms-1" title="必填"><input type="checkbox" class="form-check-input ae-p-required" id="req_${Math.random().toString(36).slice(2, 8)}"${isRequired ? ' checked' : ''}><label class="form-check-label small text-muted">必填</label></div>
+            <button class="btn btn-outline-danger btn-sm rounded-pill px-2 ms-auto" type="button" title="移除该参数" onclick="this.closest('.ae-param-row').remove()"><i class="fa-solid fa-xmark"></i></button>
+            <div class="w-100 mt-1 ae-p-opts-wrap${showOpts ? '' : ' d-none'}">
+                <input type="text" class="form-control form-control-sm ae-p-options" placeholder="下拉可选项（逗号分隔，如：zh, en）" value="${esc(optsVal)}">
+            </div>`;
         box.appendChild(row);
     }
 
@@ -1322,11 +1565,15 @@
         document.querySelectorAll('#aeParamsBox .ae-param-row').forEach(r => {
             const name = r.querySelector('.ae-p-name').value.trim();
             if (!name) return;
+            const ptype = (r.querySelector('.ae-p-type').value || '').trim() || 'string';
+            const optsRaw = (r.querySelector('.ae-p-options') ? r.querySelector('.ae-p-options').value : '').trim();
+            const options = optsRaw ? optsRaw.replace(/，/g, ',').split(',').map(x => x.trim()).filter(Boolean) : [];
             out.push({
                 name,
                 label: r.querySelector('.ae-p-label').value.trim() || name,
-                type: r.querySelector('.ae-p-type').value,
+                type: ptype,
                 example: r.querySelector('.ae-p-example').value.trim(),
+                options,
                 required: r.querySelector('.ae-p-required').checked,
             });
         });
@@ -1701,31 +1948,43 @@
             (api.desc ? `<br><span class="text-muted">${esc(api.desc)}</span>` : '');
         box.innerHTML = '';
         (api.params || []).forEach(p => {
+            const pt = String(p.type || 'string').trim().toLowerCase();
+            const isArea = ['text', 'object', 'json', 'array'].includes(pt);
             const col = document.createElement('div');
-            col.className = 'col-6 col-md-3';
-            const prefillRaw = (api.test_params || {})[p.name];
-            const prefill = prefillRaw != null ? resolveSentry(String(prefillRaw)) : '';
+            col.className = isArea ? 'col-12 col-md-6' : 'col-6 col-md-3';
+            const prefillRaw = ((api.test_params || {})[p.name] !== undefined && (api.test_params || {})[p.name] !== '')
+                ? (api.test_params || {})[p.name]
+                : (p.example || '');
+            const prefill = (prefillRaw != null && prefillRaw !== '') ? resolveSentry(String(prefillRaw)) : '';
             let input;
-            if (p.type === 'select' && p.options && p.options.length) {
-                input = `<select class="form-select form-select-sm pg-param" data-pname="${esc(p.name)}" data-convert="${esc(p.convert || '')}">` +
+            if ((pt === 'select' || pt === 'enum') && p.options && p.options.length) {
+                input = `<select class="form-select form-select-sm pg-param" data-pname="${esc(p.name)}" data-ptype="${esc(pt)}" data-convert="${esc(p.convert || '')}">` +
                     `<option value="">（${p.required ? '必填' : '可选'}）</option>` +
                     p.options.map(o => `<option value="${esc(String(o))}"${prefill === String(o) ? ' selected' : ''}>${esc(String(o))}</option>`).join('') +
                     '</select>';
-            } else if (p.type === 'bool') {
-                input = `<select class="form-select form-select-sm pg-param" data-pname="${esc(p.name)}" data-convert="">` +
-                    `<option value="">不传</option><option value="true"${prefill === 'true' ? ' selected' : ''}>true</option>` +
-                    `<option value="false"${prefill === 'false' ? ' selected' : ''}>false</option></select>`;
-            } else if (p.type === 'date') {
-                // 日历选择器（V10.11.48：人类友好输入，替代手填日期串）
-                input = `<input type="date" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-convert="${esc(p.convert || '')}" value="${esc(prefill)}">`;
-            } else if (p.type === 'datetime') {
-                // 日期时间选择器（提交时按 convert 自动转毫秒/秒级时间戳）
-                input = `<input type="datetime-local" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-convert="${esc(p.convert || '')}" value="${esc(prefill)}">`;
+            } else if (pt === 'bool' || pt === 'boolean') {
+                input = `<select class="form-select form-select-sm pg-param" data-pname="${esc(p.name)}" data-ptype="${esc(pt)}" data-convert="">` +
+                    `<option value="">不传</option><option value="true"${prefill.toLowerCase() === 'true' ? ' selected' : ''}>true</option>` +
+                    `<option value="false"${prefill.toLowerCase() === 'false' ? ' selected' : ''}>false</option></select>`;
+            } else if (pt === 'date') {
+                input = `<input type="date" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-ptype="${esc(pt)}" data-convert="${esc(p.convert || '')}" value="${esc(prefill)}">`;
+            } else if (pt === 'time') {
+                input = `<input type="time" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-ptype="${esc(pt)}" data-convert="${esc(p.convert || '')}" value="${esc(prefill)}">`;
+            } else if (pt === 'datetime') {
+                input = `<input type="datetime-local" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-ptype="${esc(pt)}" data-convert="${esc(p.convert || '')}" value="${esc(prefill)}">`;
+            } else if (isArea) {
+                const ph = pt === 'array' ? 'JSON 数组或逗号分隔' : (pt === 'object' || pt === 'json' ? 'JSON 字符串，如 {"k":"v"}' : esc(p.label));
+                input = `<textarea rows="2" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-ptype="${esc(pt)}" data-convert="" placeholder="${ph}">${esc(prefill)}</textarea>`;
+            } else if (['int', 'integer', 'long', 'int64', 'int32', 'timestamp', 'float', 'double', 'decimal', 'number'].includes(pt)) {
+                const step = ['int', 'integer', 'long', 'int64', 'int32', 'timestamp'].includes(pt) ? '1' : 'any';
+                input = `<input type="number" step="${step}" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-ptype="${esc(pt)}" data-convert=""` +
+                    ` value="${esc(prefill)}" placeholder="${esc(p.label)}${p.required ? '（必填）' : ''}">`;
             } else {
-                input = `<input type="${p.type === 'number' ? 'number' : 'text'}" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-convert=""` +
-                    ` value="${esc(prefill != null ? String(prefill) : '')}" placeholder="${esc(p.label)}${p.required ? '（必填）' : ''}">`;
+                const inputType = ['email', 'url', 'password'].includes(pt) ? pt : 'text';
+                input = `<input type="${inputType}" class="form-control form-control-sm pg-param" data-pname="${esc(p.name)}" data-ptype="${esc(pt)}" data-convert=""` +
+                    ` value="${esc(prefill)}" placeholder="${esc(p.label)}${p.required ? '（必填）' : ''}">`;
             }
-            col.innerHTML = `<label class="form-label small text-muted mb-1 text-truncate" title="${esc(p.label)}">${esc(p.name)}${p.required ? ' <span class="text-danger">*</span>' : ''}</label>` + input;
+            col.innerHTML = `<label class="form-label small text-muted mb-1 text-truncate" title="${esc(p.label)} (${esc(p.type || 'string')})">${esc(p.name)} <span class="text-secondary" style="font-size:.7rem">[${esc(p.type || 'string')}]</span>${p.required ? ' <span class="text-danger">*</span>' : ''}</label>` + input;
             box.appendChild(col);
         });
         if (!(api.params || []).length) {
@@ -1744,6 +2003,12 @@
             const v = (el.value || '').trim();
             if (v === '') return;
             const pdef = (api.params || []).find(p => p.name === el.dataset.pname) || {};
+            const pt = String(pdef.type || '').trim().toLowerCase();
+            if ((pt === 'object' || pt === 'json') && v) {
+                try { JSON.parse(v); } catch (e) { convertErr = `参数 ${el.dataset.pname} 必须是合法 JSON 格式`; }
+            } else if ((pt === 'int' || pt === 'integer' || pt === 'long' || pt === 'int64' || pt === 'int32') && !/^-?\d+$/.test(v)) {
+                convertErr = `参数 ${el.dataset.pname} 必须为整数`;
+            }
             const final = convertParamValue(pdef, v);
             if ((pdef.convert === 'timestamp_ms' || pdef.convert === 'timestamp_s') && final === v && !/^\d+$/.test(v)) {
                 convertErr = `参数 ${el.dataset.pname} 的日期时间格式无法解析`;
@@ -1752,7 +2017,7 @@
         });
         if (convertErr) { showToast(convertErr, false); return; }
         for (const p of (api.params || [])) {
-            if (p.required && !params[p.name]) { showToast(`参数 ${p.name} 为必填项`, false); return; }
+            if (p.required && (params[p.name] === undefined || params[p.name] === '')) { showToast(`参数 ${p.name} 为必填项`, false); return; }
         }
         const resultBox = document.getElementById('pgResultBox');
         resultBox.innerHTML = '<span class="text-muted"><i class="fa-solid fa-spinner fa-spin me-1"></i>正在调用，请稍候...</span>';
