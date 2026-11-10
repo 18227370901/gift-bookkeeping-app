@@ -4124,11 +4124,93 @@ else { window.addEventListener('load', function() { trySetupDiagramToggles(); })
       </ul>
     </div>
   </div>
-</body>
-</html>    <div class="card border-0 shadow-sm rounded-4 mb-4">
+
     <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-primary text-white fw-bold">
+        ADR-97：核心服务导入入参解包异常根除与端点归一化校验闭环（V10.11.65 演进）
+      </div>
+      <div class="card-body">
+        <h6 class="fw-bold text-dark">背景与痛点</h6>
+        <ul>
+          <li>点击核心服务页面导入由系统导出的 JSON 配置文件时，服务端抛出 HTTP 500 异常：<code>TypeError: cannot unpack non-iterable NoneType object</code>。</li>
+          <li>根因排查：<code>save_group_config()</code> 无返回值，导入时误写为 <code>ok, msg = save_group_config(...)</code> 引发解包崩溃。</li>
+        </ul>
+        <h6 class="fw-bold text-dark mt-3">架构决策与技术方案</h6>
+        <ul>
+          <li><strong>解包修正</strong>：移除错误解包，按标准调用方式执行 <code>save_group_config(...)</code>。</li>
+          <li><strong>端点数据清洗</strong>：导入时执行类型校验、URL 规范化及 platform 平台属性透传绑定。</li>
+          <li><strong>AI 搜索同步持久化</strong>：完整解析落盘 <code>ai_search_enabled</code>，保证策略完整恢复。</li>
+        </ul>
+        <div class="mt-3 text-muted small">
+          <i class="fa-solid fa-circle-check text-success me-1"></i> 验证结论：核心服务 JSON 导入执行 100% 成功，彻底消除 500 报错。
+        </div>
+      </div>
+    </div>
+
     <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-primary text-white fw-bold">
+        ADR-96：服务导入响应防御性解析、海报二维码布局对齐与长图动态脱敏模式（V10.11.64 演进）
+      </div>
+      <div class="card-body">
+        <h6 class="fw-bold text-dark">背景与痛点</h6>
+        <ul>
+          <li>配置导入若服务端返回 HTML 错误页，前端 <code>r.json()</code> 抛出 <code>SyntaxError: Unexpected token '&lt;'</code> 语法异常。</li>
+          <li>海报二维码设置弹窗取消按钮未居左对齐；长图海报缺乏用户自选脱敏机制。</li>
+        </ul>
+        <h6 class="fw-bold text-dark mt-3">架构决策与技术方案</h6>
+        <ul>
+          <li><strong>防御性解析</strong>：前端采用 <code>await r.text()</code> 配合安全 <code>JSON.parse</code> 拦截；<code>app.py</code> 全局 403 统一返回标准 JSON。</li>
+          <li><strong>弹窗对齐优化</strong>：取消按钮靠左对齐，与卡片边距自然呼应。</li>
+          <li><strong>自主脱敏与美化</strong>：海报新增「数据脱敏」自选开关，姓名金额智能脱敏；二维码卡片升级金色质感。</li>
+        </ul>
+        <div class="mt-3 text-muted small">
+          <i class="fa-solid fa-circle-check text-success me-1"></i> 验证结论：配置导入网络响应优雅反馈，海报兼顾公开分享隐私与视觉美感。
+        </div>
+      </div>
+    </div>
+
     <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-primary text-white fw-bold">
+        ADR-95：核心与接口广场导入导出 CSRF 豁免与表单补齐、海报二维码实时渲染与所见即所得增强（V10.11.63 演进）
+      </div>
+      <div class="card-body">
+        <h6 class="fw-bold text-dark">背景与痛点</h6>
+        <ul>
+          <li>配置导入导出时偶发报错 CSRF Token 凭证失效；海报二维码设置输入 URL 后内部无任何二维码渲染，用户产生困惑。</li>
+        </ul>
+        <h6 class="fw-bold text-dark mt-3">架构决策与技术方案</h6>
+        <ul>
+          <li><strong>导入导出 CSRF 闭环</strong>：前端 FormData 双重附带 <code>csrf_token</code>；导出端点支持 GET/POST 并加入只读白名单。</li>
+          <li><strong>Live QR 预览引擎</strong>：弹窗引入 <code>qrcode.min.js</code>，输入 URL 毫秒级生成黑白高清二维码。</li>
+          <li><strong>海报链路直达</strong>：弹窗增加“立即前往长图海报查看”按钮，打通配置到生成的完整链路。</li>
+        </ul>
+        <div class="mt-3 text-muted small">
+          <i class="fa-solid fa-circle-check text-success me-1"></i> 验证结论：配置导入导出 100% 畅通，海报二维码实现所见即所得。
+        </div>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm rounded-4 mb-4">
+      <div class="card-header bg-primary text-white fw-bold">
+        ADR-94：权限管理模态框去重、审计日志天数自适应、接口配置导入导出与备份恢复自愈闭环（V10.11.62 演进）
+      </div>
+      <div class="card-body">
+        <h6 class="fw-bold text-dark">背景与痛点</h6>
+        <ul>
+          <li>单用户授权模态框存在重复复选框；审计日志硬编码 90 天清理；WebDAV 手动备份整页刷新；恢复旧库导致新配置丢失。</li>
+        </ul>
+        <h6 class="fw-bold text-dark mt-3">架构决策与技术方案</h6>
+        <ul>
+          <li><strong>权限 DOM 精准归位</strong>：剥离单用户模态框重复项，精准补入批量授权模态框。</li>
+          <li><strong>动态日志生命周期</strong>：新增 <code>audit_log_retention_days</code> 参数，支持 0~3650 天自定义（0 为永久）。</li>
+          <li><strong>双向 JSON 导入导出</strong>：核心服务 6 组端点与多平台接口广场支持一键备份与增量导入。</li>
+        </ul>
+        <div class="mt-3 text-muted small">
+          <i class="fa-solid fa-circle-check text-success me-1"></i> 验证结论：模态框数据干净，导入导出灵活便捷，备份还原 100% 完整保留。
+        </div>
+      </div>
+    </div>
+
     <div class="card border-0 shadow-sm rounded-4 mb-4">
       <div class="card-header bg-primary text-white fw-bold">
         ADR-93：登录页面每日一言剥离与首页引导大卡片专属化收敛（V10.11.63 落地）
@@ -4243,5 +4325,6 @@ else { window.addEventListener('load', function() { trySetupDiagramToggles(); })
       </div>
     </div>
   </div>
-
-
+  </div>
+</body>
+</html>

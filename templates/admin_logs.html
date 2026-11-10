@@ -6,7 +6,7 @@
 <div class="row mb-4 align-items-center">
     <div class="col">
         <h2 class="h4 text-danger mb-0"><i class="fa-solid fa-clipboard-list me-2"></i>系统操作审计日志</h2>
-        <small class="text-muted">记录全站用户的所有敏感操作与查询浏览记录（默认日志最大保存 3 个月，失效后自动清理）</small>
+        <small class="text-muted">记录全站用户的所有敏感操作与查询浏览记录（{% if audit_retention_days == 0 %}当前设置为永久保留日志{% else %}当前日志保留 {{ audit_retention_days }} 天，超出后自动清理{% endif %}）</small>
     </div>
     <div class="col-auto">
         <form id="clearLogsForm" action="{{ url_for('admin_clear_logs') }}" method="POST" class="d-inline" onsubmit="handleClearLogs(event)">
@@ -38,6 +38,24 @@
         <div class="d-flex gap-2 mb-2">
           <button type="button" class="btn btn-sm btn-outline-success" onclick="auditSelectAll(true)"><i class="fa-solid fa-check-double me-1"></i>全选</button>
           <button type="button" class="btn btn-sm btn-outline-secondary" onclick="auditSelectAll(false)"><i class="fa-solid fa-xmark me-1"></i>清空</button>
+        </div>
+        <div class="card bg-light border-0 p-3 mb-3 rounded-3">
+          <div class="row align-items-center g-2">
+            <div class="col-auto">
+              <label class="form-label fw-bold mb-0 text-dark small">
+                <i class="fa-solid fa-calendar-day text-primary me-1"></i>日志自动清理保留天数：
+              </label>
+            </div>
+            <div class="col-auto">
+              <div class="input-group input-group-sm" style="width: 160px;">
+                <input type="number" name="audit_retention_days" id="auditRetentionDays" class="form-control text-center fw-bold" value="{{ audit_retention_days }}" min="0" max="3650" placeholder="90">
+                <span class="input-group-text">天</span>
+              </div>
+            </div>
+            <div class="col-auto">
+              <span class="text-muted small">（默认 90 天 / 3 个月；输入 <code>0</code> 表示永久保留不自动清理；支持 0~3650 天）</span>
+            </div>
+          </div>
         </div>
         <div class="row g-2">
           {% for key, label in audit_modules_all %}

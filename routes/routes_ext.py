@@ -4197,20 +4197,25 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
     @app.route('/admin/backup/create', methods=['POST'])
     @login_required
     def admin_trigger_webdav_backup():
-        """手动触发创建 WebDAV 备份（支持加密）"""
+        """手动触发立即 WebDAV 备份（支持加密，支持 AJAX 异步无刷新请求）"""
+        is_ajax = request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', '')
         if not current_user.is_admin and not current_user.can_use_backup():
+            if is_ajax:
+                return jsonify({'success': False, 'message': '权限不足'}), 403
             flash('权限不足', 'danger')
             return redirect(url_for('admin_backups'))
 
-        # V3: 按用户获取配置
+        # 获取配置
         config = BackupConfig.get_config(None if current_user.is_admin else current_user.id)
         if not config.server_url or not config.username:
-            flash('请先完善 WebDAV 配置！', 'warning')
+            msg = '请先配置 WebDAV 服务器地址与凭据！'
+            if is_ajax:
+                return jsonify({'success': False, 'message': msg}), 400
+            flash(msg, 'warning')
             return redirect(url_for('admin_backups'))
 
         db_path = app.config.get('SQLALCHEMY_DATABASE_URI', '').replace('sqlite:///', '')
 
-        # V10.10.17: PG 模式用 JSON 导出替代文件复制
         if _is_pg_mode():
             tmp_dir = _tempfile.mkdtemp(prefix='gift_pg_backup_')
             _scoped_db_path = os.path.join(tmp_dir, 'pg_backup.sql')
@@ -4220,28 +4225,31 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             else:
                 _pg_export_database(_scoped_db_path)
         else:
-            # V7 修复：普通用户备份时生成仅含本人数据的临时库，防止越权获取他人数据
             _scoped_db_path = db_path
             _is_temp_db = False
             if not current_user.is_admin:
                 try:
                     _scoped_db_path, _is_temp_db = build_user_scoped_backup_db(db_path, current_user)
                 except Exception as se:
-                    flash(f'生成用户备份数据失败: {str(se)}', 'danger')
+                    msg = f'构建用户作用域备份失败: {str(se)}'
+                    if is_ajax:
+                        return jsonify({'success': False, 'message': msg}), 500
+                    flash(msg, 'danger')
                     return redirect(url_for('admin_backups'))
 
-        # 是否加密：手动操作时用户可选择是否加密及密码
         encrypt_password = None
-        use_encrypt = request.form.get('use_encrypt', '') == 'on'
+        use_encrypt = request.form.get('use_encrypt', '') in ('on', '1', 'true')
         manual_pwd = request.form.get('manual_encrypt_password', '').strip()
         if use_encrypt:
             if manual_pwd:
                 encrypt_password = manual_pwd
             else:
-                # 使用管理员预设的加密密码
                 encrypt_password = config.backup_encrypt_password
             if not encrypt_password:
-                flash('已选择加密备份，但未提供加密密码！请输入密码或在配置中预设。', 'warning')
+                msg = '已勾选加密备份，但未提供加密密码！请输入密码或在配置中预设。'
+                if is_ajax:
+                    return jsonify({'success': False, 'message': msg}), 400
+                flash(msg, 'warning')
                 return redirect(url_for('admin_backups'))
 
         _cur_db_type = get_current_db_type()
@@ -4251,37 +4259,38 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
             task_type='db_backup',
             is_encrypted=bool(encrypt_password)
         )
-        # 使用 upload_encrypted_backup 但指定 remote_filename
         if encrypt_password:
             success, msg = upload_encrypted_backup(config, local_file_path=_scoped_db_path, encrypt_password=encrypt_password, remote_filename=remote_filename)
         else:
             success, msg = upload_backup_webdav(config, local_file_path=_scoped_db_path, remote_filename=remote_filename)
-        # V7: 清理临时库
         if _is_temp_db:
             try:
                 shutil.rmtree(os.path.dirname(_scoped_db_path), ignore_errors=True)
             except Exception:
                 pass
+
         if success:
             config.last_backup_time = datetime.now()
             config.last_status = '备份成功'
             db.session.commit()
-            safe_log('创建WebDAV备份', f"文件名: {msg}")
+            safe_log('触发WebDAV备份', f"文件名: {msg}")
             try:
                 trigger_webhook_event(
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'system',
-                f'WebDAV备份成功',
-                f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件：{msg}',
-                page_key='admin_backups', user_name=current_user.username,
-                operator_id=current_user.id
+                    f'WebDAV备份成功',
+                    f'操作人：{current_user.username} | 页面：WebDAV备份 | 文件名：{msg}',
+                    page_key='admin_backups', user_name=current_user.username,
+                    operator_id=current_user.id
                 )
             except Exception:
                 pass
-            flash(f'备份成功上传至 WebDAV: {msg}', 'success')
+            succ_msg = f'备份成功并上传至 WebDAV: {msg}'
+            if is_ajax:
+                return jsonify({'success': True, 'message': succ_msg, 'filename': msg})
+            flash(succ_msg, 'success')
         else:
             config.last_status = f'失败: {msg}'
             db.session.commit()
-            # V10.9: 备份失败也推送通知
             try:
                 trigger_webhook_event(
                     WebhookConfig.query.filter_by(is_enabled=True).all(), 'security',
@@ -4292,7 +4301,11 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                 )
             except Exception:
                 pass
-            flash(f'备份失败: {msg}', 'danger')
+            fail_msg = f'备份失败: {msg}'
+            if is_ajax:
+                return jsonify({'success': False, 'message': fail_msg}), 500
+            flash(fail_msg, 'danger')
+
         return redirect(url_for('admin_backups'))
 
     @app.route('/admin/backup/download_local')
@@ -6567,6 +6580,180 @@ def register_routes_ext(app, log_operation=None, get_accessible_records_query=No
                         'api_id': api_id, 'result': result, 'formatted': formatted})
 
     # ==================== V10.11.47 实用工具页（快递跟踪 / 手机归属地） ====================
+
+
+    # ==================== V10.11.53 核心服务与接口广场配置 导入/导出 ====================
+
+    @app.route('/admin/service-config/export', methods=['GET', 'POST'])
+    @login_required
+    def admin_service_config_export():
+        """导出核心服务 6 组端点配置 JSON 文件（仅管理员）"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from services.service_config import get_all_config
+        cfg_data = get_all_config()
+        export_payload = {
+            'app': 'gift_bookkeeping_app',
+            'type': 'service_config_core',
+            'version': '1.0',
+            'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'data': cfg_data
+        }
+        resp = Response(
+            _backup_json.dumps(export_payload, ensure_ascii=False, indent=2),
+            mimetype='application/json',
+            headers={'Content-Disposition': f'attachment; filename=core_service_config_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'}
+        )
+        return resp
+
+    @app.route('/admin/service-config/import', methods=['POST'])
+    @login_required
+    def admin_service_config_import():
+        """从 JSON 文件导入核心服务配置（仅管理员）"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from services.service_config import DEFAULT_GROUPS, save_group_config, normalize_holiday_url
+        from services.models import SystemSetting
+        file = request.files.get('file')
+        if not file:
+            return jsonify({'success': False, 'message': '请选择要导入的 JSON 配置文件'}), 400
+        try:
+            content = file.read().decode('utf-8')
+            payload = _backup_json.loads(content)
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'文件解析失败: {e}'}), 400
+
+        data = payload.get('data') if isinstance(payload, dict) and 'data' in payload else payload
+        if not isinstance(data, dict):
+            return jsonify({'success': False, 'message': '无效的配置数据格式'}), 400
+
+        groups = data.get('groups') or {}
+        imported_groups = 0
+        for gname in DEFAULT_GROUPS:
+            gdata = groups.get(gname)
+            if not isinstance(gdata, dict):
+                continue
+            urls = gdata.get('urls')
+            timeout = gdata.get('timeout')
+            retries = gdata.get('retries')
+            if isinstance(urls, list) and urls:
+                cleaned = []
+                for item in urls:
+                    if not isinstance(item, dict):
+                        continue
+                    u = str(item.get('url') or '').strip()
+                    if not u:
+                        continue
+                    if gname == 'holiday':
+                        u = normalize_holiday_url(u)
+                    ep = {'url': u, 'enabled': bool(item.get('enabled', True))}
+                    if item.get('platform'):
+                        ep['platform'] = str(item['platform']).strip()
+                    cleaned.append(ep)
+                if cleaned:
+                    save_group_config(gname, cleaned, timeout=timeout, retries=retries)
+                    imported_groups += 1
+
+        if 'ai_search_enabled' in data:
+            val = '1' if data['ai_search_enabled'] else '0'
+            SystemSetting.set_val('ai_search_enabled', val)
+
+        safe_log('修改系统配置', f'管理员从文件导入核心服务配置: 恢复 {imported_groups} 个服务组', user=current_user)
+        return jsonify({'success': True, 'message': f'成功导入 {imported_groups} 个服务组配置！'})
+
+    @app.route('/admin/service-config/platform/export', methods=['GET', 'POST'])
+    @login_required
+    def admin_service_platform_export():
+        """导出多平台接口广场（平台注册表 + Key 池 + 自定义 API 目录）JSON 文件（仅管理员）
+        支持参数 include_keys=1 控制是否包含明文密钥"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from services.service_config import get_platforms
+        include_keys = request.args.get('include_keys') == '1'
+        platforms = get_platforms()
+        export_platforms = []
+        for p in platforms:
+            p_copy = dict(p)
+            if not include_keys:
+                # 脱敏 Key 池
+                p_copy['keys'] = [
+                    (k[:3] + '***' + k[-3:]) if len(k) > 6 else '***'
+                    for k in (p.get('keys') or [])
+                ]
+            export_platforms.append(p_copy)
+
+        export_payload = {
+            'app': 'gift_bookkeeping_app',
+            'type': 'service_platforms',
+            'version': '1.0',
+            'include_keys': include_keys,
+            'exported_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'data': export_platforms
+        }
+        resp = Response(
+            _backup_json.dumps(export_payload, ensure_ascii=False, indent=2),
+            mimetype='application/json',
+            headers={'Content-Disposition': f'attachment; filename=api_platforms_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json'}
+        )
+        return resp
+
+    @app.route('/admin/service-config/platform/import', methods=['POST'])
+    @login_required
+    def admin_service_platform_import():
+        """从 JSON 文件导入多平台接口广场配置（仅管理员）"""
+        if not getattr(current_user, 'is_admin', False):
+            return jsonify({'success': False, 'message': '权限不足'}), 403
+        from services.service_config import get_platforms, PLATFORMS_KEY, DEFAULT_PLATFORMS
+        from services.models import SystemSetting
+        file = request.files.get('file')
+        if not file:
+            return jsonify({'success': False, 'message': '请选择要导入的 JSON 配置文件'}), 400
+        try:
+            content = file.read().decode('utf-8')
+            payload = _backup_json.loads(content)
+        except Exception as e:
+            return jsonify({'success': False, 'message': f'文件解析失败: {e}'}), 400
+
+        data = payload.get('data') if isinstance(payload, dict) and 'data' in payload else payload
+        if not isinstance(data, list):
+            return jsonify({'success': False, 'message': '无效的平台列表格式（必须为 JSON 列表）'}), 400
+
+        # 合并平台列表：根据 platform id 合并或追加
+        current_platforms = {p['id']: p for p in get_platforms()}
+        imported_count = 0
+        for item in data:
+            if not isinstance(item, dict) or not item.get('id'):
+                continue
+            pid = str(item['id']).strip()
+            # 过滤包含脱敏星号的假 Key
+            item_keys = [k for k in (item.get('keys') or []) if '***' not in str(k)]
+            if pid in current_platforms:
+                # 更新已有平台（保留未导入的原有真实 Key，追加新 Key）
+                existing = current_platforms[pid]
+                existing['name'] = item.get('name') or existing.get('name')
+                existing['base_url'] = item.get('base_url') or existing.get('base_url')
+                existing['auth_type'] = item.get('auth_type') or existing.get('auth_type')
+                existing['auth_header'] = item.get('auth_header') or existing.get('auth_header')
+                existing['auth_param'] = item.get('auth_param') or existing.get('auth_param')
+                existing['enabled'] = item.get('enabled', existing.get('enabled', True))
+                # 合并 keys
+                all_keys = list(dict.fromkeys((existing.get('keys') or []) + item_keys))
+                existing['keys'] = all_keys
+                # 合并 custom_apis
+                exist_apis = {a['id']: a for a in (existing.get('custom_apis') or []) if a.get('id')}
+                for a in (item.get('custom_apis') or []):
+                    if isinstance(a, dict) and a.get('id'):
+                        exist_apis[a['id']] = a
+                existing['custom_apis'] = list(exist_apis.values())
+            else:
+                # 新增自定义平台
+                item['keys'] = item_keys
+                current_platforms[pid] = item
+            imported_count += 1
+
+        SystemSetting.set_val(PLATFORMS_KEY, _backup_json.dumps(list(current_platforms.values()), ensure_ascii=False))
+        safe_log('修改系统配置', f'管理员导入多平台接口广场配置: 处理 {imported_count} 个平台', user=current_user)
+        return jsonify({'success': True, 'message': f'成功导入并合并 {imported_count} 个平台配置！'})
 
     @app.route('/tools')
     @login_required

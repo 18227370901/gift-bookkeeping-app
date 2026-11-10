@@ -641,21 +641,26 @@ def _restore_to_sqlite(source_file_path, user, is_full_restore, db_path=None):
             # 2. 暂存当前活跃操作人账户（防踢出保护）与 WebDAV 配置（防冲刷保护）
             preserved_admin = None
             preserved_webdav = None
+            preserved_settings = {}
             try:
                 cur_conn = sqlite3.connect(db_path)
                 cur_conn.row_factory = sqlite3.Row
                 c_cur = cur_conn.cursor()
-                # 提取当前操作人信息
                 if user and hasattr(user, "username"):
                     c_cur.execute("SELECT * FROM users WHERE username = ?", (user.username,))
                     r_admin = c_cur.fetchone()
                     if r_admin:
                         preserved_admin = dict(r_admin)
-                # 提取系统当前最新的一份 WebDAV 配置
                 c_cur.execute("SELECT * FROM backup_configs ORDER BY id DESC LIMIT 1")
                 r_webdav = c_cur.fetchone()
                 if r_webdav:
                     preserved_webdav = dict(r_webdav)
+                # 备份关键系统配置（外部接口端点、多平台注册表与Key池、审计日志配置等）
+                c_cur.execute("SELECT key, value FROM system_settings")
+                for r in c_cur.fetchall():
+                    k, v = r['key'], r['value']
+                    if k.startswith('api_') or k.startswith('service_') or k in ('api_platforms', 'audit_log_modules', 'audit_log_retention_days', 'default_user_permissions'):
+                        preserved_settings[k] = v
                 cur_conn.close()
             except Exception:
                 pass
@@ -707,6 +712,16 @@ def _restore_to_sqlite(source_file_path, user, is_full_restore, db_path=None):
                         w_vals = tuple(preserved_webdav[c] for c in w_cols)
                         heal_cur.execute(f'INSERT INTO "backup_configs" ({w_col_str}) VALUES ({w_ph_str})', w_vals)
                         print("[Restore Healing] 已为恢复后的数据库自愈保留 WebDAV 配置")
+                
+                if preserved_settings:
+                    # 检查新库中的 system_settings，若新库缺失端点或 API 平台注册表，自动补齐保留项
+                    heal_cur.execute("SELECT key, value FROM system_settings")
+                    restored_keys = {r[0]: r[1] for r in heal_cur.fetchall()}
+                    for sk, sv in preserved_settings.items():
+                        if sk not in restored_keys or not restored_keys[sk]:
+                            heal_cur.execute('INSERT OR REPLACE INTO "system_settings" ("key", "value") VALUES (?, ?)', (sk, sv))
+                            print(f"[Restore Healing] 成功补全关键系统配置项: {sk}")
+                
                 heal_conn.commit()
                 heal_conn.close()
             except Exception as _he:

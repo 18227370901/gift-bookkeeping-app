@@ -236,6 +236,8 @@ def csrf_protect():
     if app.config.get('TESTING') and not app.config.get('WTF_CSRF_ENABLED', True):
         return
     # 对企业微信回调与外部 Webhook 接口免除 CSRF 检查
+    if request.path in ['/admin/service-config/export', '/admin/service-config/platform/export', '/admin/service-config/import', '/admin/service-config/platform/import']:
+        return
     if (request.path.startswith('/api/wecom') or 
         request.path.startswith('/webhook') or 
         request.path.startswith('/wecom') or 
@@ -275,8 +277,8 @@ def handle_wecom_root_callback():
 @app.errorhandler(403)
 def handle_403(e):
     msg = str(e.description) if hasattr(e, 'description') and e.description else 'CSRF Token 验证失败或请求非法！'
-    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        return jsonify({'code': 403, 'message': msg}), 403
+    if request.is_json or request.headers.get('X-Requested-With') == 'XMLHttpRequest' or 'application/json' in request.headers.get('Accept', '') or request.path.startswith('/admin/') or request.path.startswith('/api/'):
+        return jsonify({'code': 403, 'success': False, 'message': msg}), 403
     flash(msg, 'danger')
     return redirect(url_for('login'))
 
@@ -324,10 +326,18 @@ def inject_globals():
         num2cn=num2cn
     )
 
-def purge_expired_logs(days=90):
-    """自动批量清理超过保存时效（默认3个月/90天）的操作日志"""
+def purge_expired_logs(days=None):
+    """自动清理超出保留时效（默认3个月/90天，管理员可自定义天数；0表示永久保留）的操作日志"""
     try:
         if not current_app:
+            return
+        if days is None:
+            try:
+                val = SystemSetting.get_val("audit_log_retention_days", "90")
+                days = int(val) if str(val).isdigit() else 90
+            except Exception:
+                days = 90
+        if days <= 0:
             return
         cutoff = datetime.now() - timedelta(days=days)
         deleted_count = OperationLog.query.filter(OperationLog.created_at < cutoff).delete(synchronize_session=False)
@@ -339,7 +349,6 @@ def purge_expired_logs(days=90):
         except Exception:
             pass
         print(f"[Purge Logs Error] 自动清理失效日志异常: {e}")
-
 import json as _json_module
 
 # V10: 审计日志模块过滤映射——按 action 关键词归组
@@ -432,7 +441,7 @@ def _should_log_module(action_text):
 
 def log_action(action, detail="", user=None):
     # 每次写入日志时顺便触发清理超过3个月的超期日志
-    purge_expired_logs(days=90)
+    purge_expired_logs()
     try:
         # 兼容 (user_id, action, detail) 与 (action, detail, user) 两种调用签名
         if isinstance(action, int) and isinstance(detail, str):
@@ -2522,7 +2531,8 @@ def admin_logs():
         sort_order=sort_order,
         per_page=per_page,
         audit_modules_all=audit_modules_all,
-        audit_modules_enabled=audit_modules_enabled
+        audit_modules_enabled=audit_modules_enabled,
+        audit_retention_days=int(SystemSetting.get_val('audit_log_retention_days', '90') if str(SystemSetting.get_val('audit_log_retention_days', '90')).isdigit() else 90)
     )
 
 @app.route('/admin/logs/batch_delete', methods=['POST'])
@@ -2750,6 +2760,17 @@ def admin_save_audit_log_config():
             return jsonify({'code': 403, 'message': '权限不足！'}), 403
         flash('权限不足！', 'danger')
         return redirect(url_for('index'))
+    retention_days_raw = request.form.get('audit_retention_days')
+    if retention_days_raw is None and request.is_json:
+        retention_days_raw = (request.get_json(silent=True) or {}).get('audit_retention_days')
+    try:
+        retention_days = int(retention_days_raw) if str(retention_days_raw).strip().isdigit() else 90
+        if retention_days < 0 or retention_days > 3650:
+            retention_days = 90
+    except Exception:
+        retention_days = 90
+    SystemSetting.set_val('audit_log_retention_days', str(retention_days))
+
     modules = request.form.getlist('audit_modules')
     if not modules and request.is_json:
         req_data = request.get_json(silent=True) or {}

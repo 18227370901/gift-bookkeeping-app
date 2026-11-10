@@ -869,28 +869,6 @@
                               <div class="small text-muted"><i class="fa-solid fa-eye me-1"></i>只读浏览端点、平台与 API 目录（写操作仅管理员）</div>
                             </div>
 
-                <!-- V10.11.50 实用工具：批量勾选授权（默认不勾选——与全局默认权限模板 default=False 一致） -->
-                <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
-                  <div class="form-check mb-0 d-flex align-items-center">
-                    <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="tools" id="batch_menu_tools">
-                    <label class="form-check-label fw-semibold small text-dark" for="batch_menu_tools">
-                      <i class="fa-solid fa-toolbox text-success me-1"></i>实用工具
-                    </label>
-                  </div>
-                  <div class="small text-muted"><i class="fa-solid fa-truck-fast me-1"></i>快递物流跟踪 · <i class="fa-solid fa-phone me-1"></i>手机号归属地查询</div>
-                </div>
-
-                <!-- V10.11.51 外部接口配置：批量只读授权（默认不勾选） -->
-                <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
-                  <div class="form-check mb-0 d-flex align-items-center">
-                    <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="service_config" id="batch_menu_service_config">
-                    <label class="form-check-label fw-semibold small text-dark" for="batch_menu_service_config">
-                      <i class="fa-solid fa-server text-warning me-1"></i>外部接口配置 <span class="badge bg-warning-subtle text-warning border border-warning-subtle rounded-pill px-1 small" style="font-size: 10px;">只读浏览</span>
-                    </label>
-                  </div>
-                  <div class="small text-muted"><i class="fa-solid fa-eye me-1"></i>只读浏览端点、平台与 API 目录（写操作仅管理员）</div>
-                </div>
-
                <!-- 9. Webhook通知 -->
                             <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
                               <div class="form-check mb-0 d-flex align-items-center">
@@ -2423,6 +2401,28 @@ function handleBatchUserPermissions(e, formEl) {
                   </select>
                 </div>
               </div>
+
+                <!-- V10.11.50 实用工具：批量勾选授权（默认不勾选——与全局默认权限模板 default=False 一致） -->
+                <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
+                  <div class="form-check mb-0 d-flex align-items-center">
+                    <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="tools" id="batch_menu_tools">
+                    <label class="form-check-label fw-semibold small text-dark" for="batch_menu_tools">
+                      <i class="fa-solid fa-toolbox text-success me-1"></i>实用工具
+                    </label>
+                  </div>
+                  <div class="small text-muted"><i class="fa-solid fa-truck-fast me-1"></i>快递物流跟踪 · <i class="fa-solid fa-phone me-1"></i>手机号归属地查询</div>
+                </div>
+
+                <!-- V10.11.51 外部接口配置：批量只读授权（默认不勾选） -->
+                <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">
+                  <div class="form-check mb-0 d-flex align-items-center">
+                    <input class="form-check-input me-2" type="checkbox" name="allowed_menus" value="service_config" id="batch_menu_service_config">
+                    <label class="form-check-label fw-semibold small text-dark" for="batch_menu_service_config">
+                      <i class="fa-solid fa-server text-warning me-1"></i>外部接口配置 <span class="badge bg-warning-subtle text-warning border border-warning-subtle rounded-pill px-1 small" style="font-size: 10px;">只读浏览</span>
+                    </label>
+                  </div>
+                  <div class="small text-muted"><i class="fa-solid fa-eye me-1"></i>只读浏览端点、平台与 API 目录（写操作仅管理员）</div>
+                </div>
 
               <!-- 9. Webhook通知 -->
               <div class="list-group-item d-flex align-items-center justify-content-between py-2 px-3">

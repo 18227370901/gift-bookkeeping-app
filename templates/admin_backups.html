@@ -745,6 +745,12 @@ function showExecutionLogs(taskId) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
+  try {
+    const savedTab = sessionStorage.getItem('gift_backup_active_tab');
+    if (savedTab && ['webdav', 'manual', 'remote', 'restore', 'tasks'].includes(savedTab)) {
+      switchBackupTab(savedTab);
+    }
+  } catch(e) {}
   // 默认处于折叠状态，懒加载：仅在用户手动展开「WebDAV 云端备份与恢复」时拉取列表
 });
 

@@ -603,27 +603,119 @@
     {% if current_user.is_authenticated and current_user.is_admin %}
     <!-- V10.11.1 海报二维码设置 Modal -->
     <div class="modal fade" id="posterQrSettingModal" tabindex="-1">
-        <div class="modal-dialog">
-            <div class="modal-content">
-                <div class="modal-header bg-primary text-white">
-                    <h5 class="modal-title"><i class="fa-solid fa-image me-2"></i>海报二维码设置</h5>
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content shadow-lg border-0 rounded-4">
+                <div class="modal-header bg-primary text-white py-3">
+                    <h5 class="modal-title fw-bold mb-0"><i class="fa-solid fa-qrcode me-2"></i>海报二维码配置与实时预览</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
+                <div class="modal-body p-4">
                     <div class="mb-3">
-                        <label class="form-label fw-bold">二维码指向 URL（注册页面地址）</label>
-                        <input type="url" class="form-control" id="posterQrUrlInput" placeholder="例如：https://your-domain.com/register">
-                        <div class="form-text small text-muted">设置后，长图海报底部二维码将指向此地址。留空则默认使用当前站点注册页面。</div>
+                        <label class="form-label fw-bold small text-dark">
+                            <i class="fa-solid fa-link text-primary me-1"></i>二维码指定跳转目标 URL：
+                        </label>
+                        <div class="input-group">
+                            <input type="url" class="form-control" id="posterQrUrlInput" placeholder="例如：https://your-domain.com/register" oninput="renderModalQrPreview(this.value)">
+                            <button class="btn btn-outline-secondary" type="button" onclick="resetModalQrToDefault()" title="恢复默认注册链接">
+                                <i class="fa-solid fa-rotate-left me-1"></i>默认
+                            </button>
+                        </div>
+                        <div class="form-text small text-muted mt-2">
+                            <i class="fa-solid fa-circle-info me-1"></i>输入后<b>下方将实时生成并展示高清二维码预览</b>。保存后，生成年度长图海报底部二维码将与此内容实时保持一致。
+                        </div>
+                    </div>
+
+                    <!-- 实时生成的二维码预览卡片 -->
+                    <div class="card bg-light border-0 rounded-3 p-3 text-center my-3">
+                        <div class="fw-bold small text-muted mb-2"><i class="fa-solid fa-eye me-1"></i>实时生成的二维码预览：</div>
+                        <div class="d-flex justify-content-center align-items-center my-2">
+                            <div class="p-2 bg-white rounded-3 shadow-sm border d-inline-block">
+                                <canvas id="modalQrPreviewCanvas" width="160" height="160" style="display:block;"></canvas>
+                            </div>
+                        </div>
+                        <div id="modalQrUrlDisplay" class="small text-truncate text-primary fw-medium px-2" style="max-width: 100%; font-size: 11px;"></div>
+                    </div>
+
+                    <div class="d-flex justify-content-between align-items-center pt-2 border-top">
+                        <a href="{{ url_for('poster_view') }}" target="_blank" class="btn btn-outline-success btn-sm rounded-pill px-3">
+                            <i class="fa-solid fa-image me-1"></i>立即前往长图海报查看
+                        </a>
+                        <span class="small text-muted"><i class="fa-solid fa-mobile-screen me-1"></i>支持手机扫码直达</span>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
-                    <button type="button" class="btn btn-primary" onclick="savePosterQrUrl()"><i class="fa-solid fa-check me-1"></i>保存</button>
+                <div class="modal-footer bg-light py-2 px-4 border-0 rounded-bottom-4 d-flex justify-content-between">
+                    <button type="button" class="btn btn-outline-secondary rounded-pill px-3" data-bs-dismiss="modal">
+                        <i class="fa-solid fa-xmark me-1"></i>取消
+                    </button>
+                    <button type="button" class="btn btn-primary rounded-pill px-4 shadow-sm fw-bold" onclick="savePosterQrUrl()">
+                        <i class="fa-solid fa-floppy-disk me-1"></i>保存设置
+                    </button>
                 </div>
             </div>
         </div>
     </div>
+    <!-- 引入专用 QRCode 生成引擎 -->
+    <script src="{{ url_for('static', filename='vendor/qrcode/1.0.0/qrcode.min.js') }}"></script>
     <script>
+    function renderModalQrPreview(text) {
+        text = (text || '').trim();
+        var canvas = document.getElementById('modalQrPreviewCanvas');
+        var display = document.getElementById('modalQrUrlDisplay');
+        if (!canvas) return;
+        var ctx = canvas.getContext('2d');
+        if (display) display.textContent = text || '（未输入目标地址，请输入上方链接）';
+
+        if (!text) {
+            ctx.fillStyle = '#f8f9fa';
+            ctx.fillRect(0, 0, 160, 160);
+            ctx.fillStyle = '#999';
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('请输入有效网址生成', 80, 85);
+            return;
+        }
+
+        try {
+            if (typeof qrcode === 'function') {
+                var qr = qrcode(0, 'M');
+                qr.addData(text);
+                qr.make();
+                var count = qr.getModuleCount();
+                var cellSize = 160 / count;
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, 160, 160);
+                ctx.fillStyle = '#000000';
+                for (var r = 0; r < count; r++) {
+                    for (var c = 0; c < count; c++) {
+                        if (qr.isDark(r, c)) {
+                            ctx.fillRect(c * cellSize, r * cellSize, cellSize, cellSize);
+                        }
+                    }
+                }
+            } else {
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, 160, 160);
+                ctx.fillStyle = '#8B0000';
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('二维码组件载入中...', 80, 85);
+            }
+        } catch (err) {
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, 160, 160);
+            ctx.fillStyle = '#dc3545';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('生成异常: ' + (err.message || err), 80, 85);
+        }
+    }
+
+    function resetModalQrToDefault() {
+        var defaultUrl = window.location.origin + '/register';
+        document.getElementById('posterQrUrlInput').value = defaultUrl;
+        renderModalQrPreview(defaultUrl);
+    }
+
     function savePosterQrUrl() {
         var url = document.getElementById('posterQrUrlInput').value.trim();
         var csrfToken = document.querySelector('meta[name="csrf-token"]') ? document.querySelector('meta[name="csrf-token"]').getAttribute('content') : '{{ csrf_token }}';
@@ -634,17 +726,47 @@
         })
         .then(function(res) { return res.json(); })
         .then(function(data) {
-            if (data.code === 200) { alert('保存成功'); bootstrap.Modal.getInstance(document.getElementById('posterQrSettingModal')).hide(); }
-            else { alert(data.message || '保存失败'); }
+            if (data.code === 200) {
+                if (typeof showAppToast === 'function') {
+                    showAppToast('海报二维码跳转地址保存成功！', 'success');
+                } else {
+                    alert('保存成功！');
+                }
+                var m = bootstrap.Modal.getInstance(document.getElementById('posterQrSettingModal'));
+                if (m) m.hide();
+            } else {
+                if (typeof showAppToast === 'function') {
+                    showAppToast(data.message || '保存失败', 'danger');
+                } else {
+                    alert(data.message || '保存失败');
+                }
+            }
+        })
+        .catch(function(err) {
+            if (typeof showAppToast === 'function') {
+                showAppToast('网络请求异常: ' + err, 'danger');
+            } else {
+                alert('网络异常: ' + err);
+            }
         });
     }
+
     document.addEventListener('DOMContentLoaded', function() {
         var qrModal = document.getElementById('posterQrSettingModal');
         if (qrModal) {
             qrModal.addEventListener('shown.bs.modal', function() {
                 fetch('/api/admin/poster-qr-url', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function(res) { return res.json(); })
-                .then(function(data) { if (data.code === 200) document.getElementById('posterQrUrlInput').value = data.qr_url || ''; });
+                .then(function(data) {
+                    var val = (data && data.code === 200 && data.qr_url) ? data.qr_url : (window.location.origin + '/register');
+                    document.getElementById('posterQrUrlInput').value = val;
+                    renderModalQrPreview(val);
+                })
+                .catch(function() {
+                    var fallback = window.location.origin + '/register';
+                    document.getElementById('posterQrUrlInput').value = fallback;
+                    renderModalQrPreview(fallback);
+                });
             });
         }
     });

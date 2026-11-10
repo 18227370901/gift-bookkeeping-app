@@ -11,7 +11,7 @@
       </div>
     </div>
 
-    <form action="{{ url_for('admin_trigger_webdav_backup') }}" method="POST" id="manualBackupForm">
+    <form action="{{ url_for('admin_trigger_webdav_backup') }}" method="POST" id="manualBackupForm" onsubmit="handleManualBackupSubmit(event)">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="backup_type" id="manual_backup_type" value="full_backup">
 
@@ -60,26 +60,26 @@
 
       <!-- 加密选项 -->
       <div class="p-3 rounded-4 bg-light border mb-4">
-        <div class="form-check form-switch mb-2">
-          <input class="form-check-input" type="checkbox" name="use_encrypt" id="useEncrypt" onchange="toggleEncryptSection()">
+                <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" name="use_encrypt" id="useEncrypt" onchange="toggleEncryptSection()" {% if has_encrypt_password %}checked{% endif %}>
           <label class="form-check-label fw-bold small text-dark" for="useEncrypt">
             <i class="fa-solid fa-lock text-warning me-1"></i>启用 AES-256 高强度加密
           </label>
-          <span class="text-muted small ms-2">（勾选后可自定义输入密码，未输入时使用管理员预设密码）</span>
+          <span class="text-muted small ms-2">{% if has_encrypt_password %}<span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill px-2">已同步 WebDAV 预置密码</span>{% else %}（勾选后自定义加密密码，未填写时使用管理员预设密码）{% endif %}</span>
         </div>
-        <div id="encryptSection" style="display:none;" class="pt-2">
+        <div id="encryptSection" style="{% if not has_encrypt_password %}display:none;{% endif %}" class="pt-2">
           <div class="row g-2">
             <div class="col-md-7">
               <div class="input-group input-group-sm">
                 <span class="input-group-text bg-white"><i class="fa-solid fa-key text-muted"></i></span>
-                <input type="password" name="manual_encrypt_password" id="manualEncryptPwd" class="form-control" placeholder="请输入 AES-256 加密密码" autocomplete="new-password">
-                <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('manualEncryptPwd', this)" title="切换显隐">
+                <input type="password" name="manual_encrypt_password" id="manualEncryptPwd" class="form-control" value="{{ config_encrypt_pwd_plain or '' }}" placeholder="请输入 AES-256 加密密码" autocomplete="new-password">
+                <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('manualEncryptPwd', this)" title="切换明文">
                   <i class="fa-regular fa-eye"></i>
                 </button>
               </div>
             </div>
             <div class="col-md-5 d-flex align-items-center">
-              <span class="text-muted small" style="font-size: 11px;">解密时需提供此密码。</span>
+              <span class="text-muted small" style="font-size: 11px;">恢复时需提供此密码。</span>
             </div>
           </div>
         </div>
@@ -156,3 +156,55 @@
 
   
 </div>
+<script>
+function handleManualBackupSubmit(e) {
+  e.preventDefault();
+  const form = document.getElementById('manualBackupForm');
+  const submitBtn = form.querySelector('button[type="submit"]');
+  const origHtml = submitBtn.innerHTML;
+  submitBtn.disabled = true;
+  submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>正在生成并上传云端备份...';
+
+  const formData = new FormData(form);
+
+  fetch(form.action, {
+    method: 'POST',
+    body: formData,
+    headers: {
+      'X-Requested-With': 'XMLHttpRequest',
+      'Accept': 'application/json'
+    }
+  })
+  .then(res => res.json())
+  .then(data => {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = origHtml;
+    if (data.success) {
+      if (typeof showAppToast === 'function') {
+        showAppToast(data.message || '备份成功并上传至 WebDAV！', 'success');
+      } else {
+        alert(data.message || '备份成功！');
+      }
+      // 成功后自动静默刷新 WebDAV 云端备份列表（无需刷新页面）
+      if (typeof loadWebdavBackups === 'function') {
+        loadWebdavBackups();
+      }
+    } else {
+      if (typeof showAppToast === 'function') {
+        showAppToast(data.message || '备份失败', 'danger');
+      } else {
+        alert(data.message || '备份失败');
+      }
+    }
+  })
+  .catch(err => {
+    submitBtn.disabled = false;
+    submitBtn.innerHTML = origHtml;
+    if (typeof showAppToast === 'function') {
+      showAppToast('网络请求异常: ' + err, 'danger');
+    } else {
+      alert('网络请求异常: ' + err);
+    }
+  });
+}
+</script>
